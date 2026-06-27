@@ -9,6 +9,19 @@ import VerificationCodeModal from '../../components/VerificationCodeModal'
 import UserThemeSettings from '../../components/UserThemeSettings'
 import AccountSecurityPanel from '../../components/AccountSecurityPanel'
 import {
+  AlertCircle,
+  BookOpen,
+  Camera,
+  CheckCircle2,
+  FilePenLine,
+  LogOut,
+  Mail,
+  Phone,
+  ShieldCheck,
+  Trash2,
+  UserRound
+} from 'lucide-react'
+import {
   hasRealLoginEmail,
   isEmailFormat,
   shouldForceAccountSetup
@@ -861,17 +874,17 @@ export default function EditProfile() {
     <div
       className={`overflow-hidden rounded-3xl border bg-white shadow-sm ${needsAccountSetup
         ? 'border-amber-200'
-        : 'border-purple-200'
+        : 'border-blue-200'
         }`}
     >
-      <div className={`h-1.5 ${needsAccountSetup ? 'bg-amber-400' : 'bg-purple-500'}`} />
+      <div className={`h-1.5 ${needsAccountSetup ? 'bg-amber-400' : 'bg-blue-500'}`} />
       <div className="p-4 sm:p-5">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2.5">
             <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
-              needsAccountSetup ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'
+              needsAccountSetup ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
             }`}>
-              <span className="text-base">🔐</span>
+              <ShieldCheck className="h-4 w-4" />
             </div>
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">Akses Akun</p>
@@ -900,7 +913,7 @@ export default function EditProfile() {
                   setAccountForm((prev) => ({ ...prev, email: e.target.value }))
                 }
                 placeholder="nama@email.com"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
               {!isEmailFormat(accountForm.email) && accountForm.email && (
                 <p className="text-xs text-red-600">Format email tidak valid</p>
@@ -916,7 +929,7 @@ export default function EditProfile() {
                     setAccountForm((prev) => ({ ...prev, password: e.target.value }))
                   }
                   placeholder="Minimal 6 karakter"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 />
               </div>
             )}
@@ -930,7 +943,7 @@ export default function EditProfile() {
                     setAccountForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
                   }
                   placeholder="Ulangi password"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 />
               </div>
             )}
@@ -948,7 +961,7 @@ export default function EditProfile() {
               type="button"
               onClick={handleCompleteAccount}
               disabled={accountSaving}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {accountSaving
                 ? 'Menyimpan...'
@@ -965,7 +978,7 @@ export default function EditProfile() {
           </p>
         )}
 
-        <div className="mt-4 rounded-2xl border border-purple-100 bg-white px-3 py-3">
+        <div className="mt-4 rounded-2xl border border-blue-100 bg-white px-3 py-3">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-sm font-bold text-slate-700">
@@ -1022,14 +1035,14 @@ export default function EditProfile() {
   // ==================== RENDER ====================
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50/30 p-4 sm:p-6">
-      <div className="max-w-full mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-50 p-4 sm:p-6">
+      <div className="mx-auto max-w-7xl space-y-6">
         {/* HEADER */}
         <div className="page-title-card">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex flex-col justify-between gap-6 md:flex-row md:items-center">
             <div className="flex items-center gap-5">
-              <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
-                <span className="text-2xl text-white">👤</span>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm">
+                <UserRound className="h-6 w-6" />
               </div>
               <div>
                 <h1 className="page-title-heading">
@@ -1040,42 +1053,49 @@ export default function EditProfile() {
             </div>
 
             <div className="flex flex-col gap-3">
-              <div className="bg-gradient-to-r from-purple-500 to-purple-600 rounded-2xl px-5 py-3 shadow-lg">
-                <p className="text-white text-center font-medium">
-                  <span className="block text-xs opacity-90 mb-1">Status Akun</span>
-                  <span className="block text-lg">{profile?.status === 'active' ? '🟢 Aktif' : '🔴 Nonaktif'}</span>
-                </p>
+              <div className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${profile?.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                  <CheckCircle2 className="h-4 w-4" />
+                </div>
+                <div>
+                  <span className="block text-xs font-medium text-slate-500">Status Akun</span>
+                  <span className={`block text-sm font-semibold ${profile?.status === 'active' ? 'text-emerald-700' : 'text-rose-700'}`}>
+                    {profile?.status === 'active' ? 'Aktif' : 'Nonaktif'}
+                  </span>
+                </div>
               </div>
 
             </div>
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-4 gap-6">
+        <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
           {/* SIDEBAR */}
-          <div className="lg:col-span-1 space-y-6">
+          <div className="space-y-6">
             {/* PHOTO CARD */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className="h-20 border-b border-slate-100 bg-slate-100" />
+              <div className="-mt-16 p-6 pt-0">
               <div className="flex flex-col items-center gap-5">
                 <div className="relative group">
-                  <div className="relative w-32 h-32">
+                  <div className="relative h-32 w-32">
                     {preview && !imgBroken ? (
                       <img
                         src={preview}
                         alt="Foto Profil"
-                        className="w-32 h-32 rounded-2xl object-cover border-4 border-white shadow-xl"
+                        className="h-32 w-32 rounded-3xl border-4 border-white object-cover shadow-sm"
                         onError={() => setImgBroken(true)}
                       />
                     ) : (
-                      <div className="w-32 h-32 rounded-2xl bg-gradient-to-br from-blue-100 to-blue-200 border-4 border-white shadow-xl flex items-center justify-center">
-                        <span className="text-4xl text-blue-500">👤</span>
+                      <div className="flex h-32 w-32 items-center justify-center rounded-3xl border-4 border-white bg-slate-100 text-4xl font-bold text-slate-500 shadow-sm">
+                        {(form.nama || profile?.nama || 'S').charAt(0).toUpperCase()}
                       </div>
                     )}
 
                     {(uploadingPhoto || progressText) && (
-                      <div className="absolute inset-0 bg-black/50 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+                      <div className="absolute inset-0 flex items-center justify-center rounded-3xl bg-slate-900/50 backdrop-blur-sm">
                         <div className="text-center">
-                          <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                          <div className="mx-auto mb-2 h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
                           <p className="text-white text-xs font-medium">{progressText}</p>
                         </div>
                       </div>
@@ -1086,27 +1106,22 @@ export default function EditProfile() {
                     <label
                       htmlFor="photo-input"
                       className={`${uploadingPhoto
-                        ? 'bg-slate-400 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 cursor-pointer shadow-sm'
-                        } text-white p-3 rounded-2xl transition-all duration-300 transform hover:scale-105`}
+                        ? 'cursor-not-allowed bg-slate-400'
+                        : 'cursor-pointer bg-slate-900 shadow-sm hover:bg-slate-800'
+                        } rounded-2xl p-3 text-white transition-all duration-200`}
                       title="Ubah Foto"
                     >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
+                      <Camera className="h-5 w-5" />
                     </label>
 
                     {(photoPath || photoURL) && (
                       <button
                         onClick={handleDeletePhoto}
-                        className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white p-3 rounded-2xl transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-500/25"
+                        className="rounded-2xl bg-white p-3 text-rose-600 shadow-sm ring-1 ring-rose-200 transition-all duration-200 hover:bg-rose-50"
                         title="Hapus Foto"
                         disabled={uploadingPhoto}
                       >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
+                        <Trash2 className="h-5 w-5" />
                       </button>
                     )}
                   </div>
@@ -1123,38 +1138,39 @@ export default function EditProfile() {
                 </div>
 
                 <div className="text-center">
-                  <h2 className="font-bold text-xl text-slate-800 mb-2 line-clamp-2 break-words">
+                  <h2 className="mb-2 line-clamp-2 break-words text-xl font-bold text-slate-900">
                     {form.nama || profile?.nama || 'Siswa'}
                   </h2>
-                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-full text-xs font-medium shadow-md mb-2">
-                    <span>🏫</span>
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                    <BookOpen className="h-3.5 w-3.5" />
                     <span>{getDisplayKelas(profile?.kelas) || 'Kelas belum ditentukan'}</span>
                   </div>
                   <p className="text-slate-600 text-sm line-clamp-1 break-all">{email || 'Email tidak tersedia'}</p>
                 </div>
 
               </div>
+              </div>
             </div>
 
             <UserThemeSettings />
 
             {/* VERIFICATION */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-5">
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="space-y-4">
                 <div
-                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium w-full justify-center ${emailVerified
-                    ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg shadow-green-500/25'
-                    : 'bg-gradient-to-r from-yellow-500 to-yellow-600 text-white shadow-lg shadow-yellow-500/25'
+                  className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${emailVerified
+                    ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border border-amber-200 bg-amber-50 text-amber-700'
                     }`}
                 >
                   {emailVerified ? (
                     <>
-                      <span className="text-base">✅</span>
+                      <CheckCircle2 className="h-4 w-4" />
                       <span>Email Terverifikasi</span>
                     </>
                   ) : (
                     <>
-                      <span className="text-base">⚠️</span>
+                      <Mail className="h-4 w-4" />
                       <span>Email Belum Terverifikasi</span>
                     </>
                   )}
@@ -1163,9 +1179,9 @@ export default function EditProfile() {
             </div>
 
             {/* SCHOOL INFO */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-5">
-              <h4 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
-                <span className="text-blue-500">🏫</span>
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h4 className="mb-4 flex items-center gap-2 font-semibold text-slate-800">
+                <BookOpen className="h-4 w-4 text-emerald-600" />
                 <span>Informasi Sekolah</span>
               </h4>
               <div className="space-y-3 text-sm">
@@ -1197,9 +1213,9 @@ export default function EditProfile() {
             </div>
 
             {/* CONTACT */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-5">
-              <h4 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
-                <span className="text-blue-500">📱</span>
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h4 className="mb-4 flex items-center gap-2 font-semibold text-slate-800">
+                <Phone className="h-4 w-4 text-emerald-600" />
                 <span>Kontak</span>
               </h4>
               <div className="space-y-3 text-sm">
@@ -1217,27 +1233,25 @@ export default function EditProfile() {
             {/* LOGOUT */}
             <button
               onClick={logout}
-              className="w-full px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium rounded-2xl transition-all duration-300 shadow-lg shadow-red-500/25 transform hover:scale-105 flex items-center justify-center gap-2 text-sm"
+              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
+              <LogOut className="h-4 w-4" />
               <span className="font-semibold">Keluar</span>
             </button>
           </div>
 
           {/* MAIN FORM */}
-          <div className="lg:col-span-3">
+          <div>
             <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-              <div className="border-b border-slate-100 bg-gradient-to-r from-purple-50 via-white to-white p-5 sm:p-6">
+              <div className="border-b border-slate-100 bg-white p-5 sm:p-6">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-600 text-white shadow-lg shadow-purple-200">
-                      <span className="text-lg">📝</span>
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                      <FilePenLine className="h-5 w-5" />
                     </div>
                     <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-purple-600">Profil Siswa</p>
-                      <h3 className="text-2xl font-bold text-slate-900">Informasi Pribadi</h3>
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Profil Siswa</p>
+                      <h3 className="text-xl font-bold text-slate-900 sm:text-2xl">Informasi Pribadi</h3>
                     </div>
                   </div>
 
@@ -1255,13 +1269,12 @@ export default function EditProfile() {
               <div className="grid gap-5 p-5 sm:p-6 md:grid-cols-2">
                 {/* NAMA */}
                 <div>
-                  <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
-                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                     Nama Lengkap
                   </label>
                   <input
                     type="text"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 cursor-not-allowed"
+                    className="w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700"
                     value={form.nama}
                     readOnly
                     disabled
@@ -1270,8 +1283,7 @@ export default function EditProfile() {
 
                 {/* KELAS */}
                 <div>
-                  <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
-                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                     Kelas
                   </label>
                   <input
@@ -1284,12 +1296,11 @@ export default function EditProfile() {
 
                 {/* JK */}
                 <div>
-                  <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
-                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                     Jenis Kelamin <span className="text-red-500">*</span>
                   </label>
                   <select
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 transition-all duration-300 hover:border-purple-300 focus:border-purple-500 focus:outline-none focus:ring-3 focus:ring-purple-500/20"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
                     value={form.jk}
                     onChange={(e) => handleFieldChange('jk', e.target.value)}
                   >
@@ -1301,12 +1312,11 @@ export default function EditProfile() {
 
                 {/* AGAMA */}
                 <div>
-                  <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
-                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                     Agama
                   </label>
                   <select
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 transition-all duration-300 hover:border-purple-300 focus:border-purple-500 focus:outline-none focus:ring-3 focus:ring-purple-500/20"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
                     value={form.agama}
                     onChange={(e) => handleFieldChange('agama', e.target.value)}
                   >
@@ -1320,13 +1330,12 @@ export default function EditProfile() {
 
                 {/* NIS */}
                 <div>
-                  <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
-                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                     NIS
                   </label>
                   <input
                     type="text"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 placeholder-slate-400 transition-all duration-300 hover:border-purple-300 focus:border-purple-500 focus:outline-none focus:ring-3 focus:ring-purple-500/20"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 placeholder-slate-400 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
                     value={form.nis}
                     onChange={(e) => handleFieldChange('nis', e.target.value)}
                     placeholder="16 digit (opsional)"
@@ -1336,15 +1345,14 @@ export default function EditProfile() {
 
                 {/* USIA */}
                 <div>
-                  <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
-                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                     Usia
                   </label>
                   <input
                     type="number"
                     min="10"
                     max="30"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 placeholder-slate-400 transition-all duration-300 hover:border-purple-300 focus:border-purple-500 focus:outline-none focus:ring-3 focus:ring-purple-500/20"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 placeholder-slate-400 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
                     value={form.usia}
                     onChange={(e) => handleFieldChange('usia', e.target.value)}
                     placeholder="10-30 tahun (opsional)"
@@ -1353,8 +1361,7 @@ export default function EditProfile() {
 
                 {/* EMAIL */}
                 <div>
-                  <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
-                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                     Email
                   </label>
                   <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-600 break-all">
@@ -1364,8 +1371,7 @@ export default function EditProfile() {
 
                 {/* HP SISWA */}
                 <div>
-                  <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
-                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                     Nomor HP Siswa
                   </label>
                   <div className="relative">
@@ -1374,7 +1380,7 @@ export default function EditProfile() {
                     </div>
                     <input
                       type="tel"
-                      className={`w-full px-4 py-3 pl-12 border rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 ${noHpSiswaError ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-blue-300'
+                      className={`w-full rounded-xl border bg-white px-4 py-3 pl-12 transition-all duration-200 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100 ${noHpSiswaError ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-slate-300'
                         }`}
                       value={form.no_hp_siswa}
                       onChange={(e) => handleFieldChange('no_hp_siswa', e.target.value)}
@@ -1384,7 +1390,7 @@ export default function EditProfile() {
                   </div>
                   {noHpSiswaError && (
                     <p className="mt-2 text-xs text-red-600 flex items-center gap-1.5">
-                      <span>⚠️</span>
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                       <span>{noHpSiswaError}</span>
                     </p>
                   )}
@@ -1392,8 +1398,7 @@ export default function EditProfile() {
 
                 {/* HP WALI */}
                 <div>
-                  <label className="flex text-sm font-semibold text-slate-700 mb-2 items-center gap-2">
-                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                     Nomor HP Orang Tua/Wali
                   </label>
                   <div className="relative">
@@ -1402,7 +1407,7 @@ export default function EditProfile() {
                     </div>
                     <input
                       type="tel"
-                      className={`w-full px-4 py-3 pl-12 border rounded-xl focus:outline-none focus:ring-3 focus:ring-blue-500/20 focus:border-blue-500 bg-white transition-all duration-300 ${noHpWaliError ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-blue-300'
+                      className={`w-full rounded-xl border bg-white px-4 py-3 pl-12 transition-all duration-200 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100 ${noHpWaliError ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-slate-300'
                         }`}
                       value={form.no_hp_wali}
                       onChange={(e) => handleFieldChange('no_hp_wali', e.target.value)}
@@ -1412,14 +1417,14 @@ export default function EditProfile() {
                   </div>
                   {noHpWaliError && (
                     <p className="mt-2 text-xs text-red-600 flex items-center gap-1.5">
-                      <span>⚠️</span>
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                       <span>{noHpWaliError}</span>
                     </p>
                   )}
                 </div>
               </div>
 
-              <div className="mt-8 pt-6 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="mt-8 flex flex-col gap-4 border-t border-slate-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-4">
                   <div className="text-xs text-slate-500">
                     <span className="text-red-500">*</span> Field wajib
@@ -1435,7 +1440,7 @@ export default function EditProfile() {
                   <button
                     onClick={handleResetForm}
                     disabled={!isFormDirty || saving}
-                    className="px-6 py-3 border border-slate-300 text-slate-700 rounded-xl hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 font-medium text-sm"
+                    className="rounded-xl border border-slate-300 px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Reset
                   </button>
@@ -1449,7 +1454,7 @@ export default function EditProfile() {
                       !!noHpSiswaError ||
                       !!noHpWaliError
                     }
-                    className="px-8 py-3 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 disabled:from-purple-400 disabled:to-purple-500 text-white font-semibold rounded-xl transition-all duration-300 shadow-sm transform hover:scale-105 disabled:transform-none disabled:cursor-not-allowed flex items-center gap-2 text-sm"
+                    className="flex items-center gap-2 rounded-xl bg-slate-900 px-8 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                   >
                     {saving ? (
                       <>
@@ -1458,9 +1463,7 @@ export default function EditProfile() {
                       </>
                     ) : (
                       <>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
+                        <CheckCircle2 className="h-4 w-4" />
                         <span>Simpan Perubahan</span>
                       </>
                     )}
@@ -1471,7 +1474,7 @@ export default function EditProfile() {
           </div>
         </div>
         {securityAccountCard}
-        <AccountSecurityPanel tone="purple" />
+        <AccountSecurityPanel tone="blue" />
         <VerificationCodeModal
           isOpen={accountVerifyOpen}
           onClose={() => {

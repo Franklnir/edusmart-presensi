@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
   CalendarDays,
+  Camera,
   CheckCircle2,
   Cloud,
   Database,
@@ -11,6 +12,8 @@ import {
   FolderOpen,
   HardDrive,
   Link2,
+  LogOut,
+  Mail,
   RefreshCw,
   Search,
   Server,
@@ -2887,40 +2890,59 @@ export default function APengaturan() {
             <div className="space-y-6">
               {activeSettingsMenu === 'admin' && (
               <>
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center space-x-2">
-                  <span>👨‍💼</span>
-                  <span>Profil Admin</span>
-                </h2>
-
-                <div className="flex items-center space-x-4 mb-4">
-                  {finalAvatarUrl ? (
-                    <div className="relative">
-                      <img
-                        src={finalAvatarUrl}
-                        alt="Foto Profil"
-                        className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 transition-all duration-200 hover:border-blue-500"
-                      />
-                      {uploadingAvatar && (
-                        <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center">
-                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
-                        </div>
-                      )}
+              <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-100 bg-slate-100 p-5">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                      <UserCog className="h-5 w-5" />
                     </div>
-                  ) : (
-                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-lg font-bold text-white">
-                      {displayName.charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{displayName}</h3>
-                    <div className="text-sm text-blue-600 font-medium bg-blue-50 px-2 py-1 rounded-full inline-block">
-                      {roleLabel}
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900">Profil Admin</h2>
+                      <p className="text-xs text-slate-500">Akun sekolah dan akses login</p>
                     </div>
                   </div>
                 </div>
 
+                <div className="p-6">
+                  <div className="mb-5 flex items-start gap-4">
+                    {finalAvatarUrl ? (
+                      <div className="relative shrink-0">
+                        <img
+                          src={finalAvatarUrl}
+                          alt="Foto Profil"
+                          className="h-20 w-20 rounded-3xl border-4 border-white object-cover shadow-sm ring-1 ring-slate-200"
+                        />
+                        {uploadingAvatar && (
+                          <div className="absolute inset-0 flex items-center justify-center rounded-3xl bg-slate-900/50">
+                            <div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-3xl border-4 border-white bg-slate-100 text-2xl font-bold text-slate-500 shadow-sm ring-1 ring-slate-200">
+                        {displayName.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1 pt-1">
+                      <h3 className="truncate text-base font-bold text-slate-900">{displayName}</h3>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                          {roleLabel}
+                        </span>
+                        <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${emailVerified ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                          {emailVerified ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Mail className="h-3.5 w-3.5" />}
+                          {emailVerified ? 'Email terverifikasi' : 'Email belum verifikasi'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
                 <div className="space-y-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700">
+                      <Camera className="h-3.5 w-3.5" />
+                      Foto Profil
+                    </div>
                   <FileDropzone
                     label={uploadingAvatar ? 'Mengupload...' : 'Ubah Foto Profil'}
                     onFileSelected={handleAdminPhotoChange}
@@ -2928,12 +2950,16 @@ export default function APengaturan() {
                     disabled={uploadingAvatar}
                     className="text-sm"
                   />
+                  </div>
 
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                     <div className="mb-2 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-700">Login Google</span>
+                      <span className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                        <Link2 className="h-3.5 w-3.5" />
+                        Login Google
+                      </span>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${googleLinked
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${googleLinked
                             ? 'bg-emerald-100 text-emerald-700'
                             : 'bg-slate-200 text-slate-700'
                           }`}
@@ -2949,7 +2975,7 @@ export default function APengaturan() {
                         busy={linkingGoogle}
                         width={260}
                         className="w-full"
-                        buttonClassName="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
+                        buttonClassName="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
                         noteClassName="mt-2 text-[11px] text-slate-500"
                         iconClassName="inline-flex h-4 w-4 items-center justify-center"
                         label="Tautkan Google"
@@ -2963,7 +2989,7 @@ export default function APengaturan() {
                         type="button"
                         onClick={handleUnlinkGoogleAccount}
                         disabled={unlinkingGoogle || linkingGoogle}
-                        className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
+                        className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         {unlinkingGoogle ? 'Melepas...' : 'Lepas Tautan Google'}
                       </button>
@@ -2977,11 +3003,14 @@ export default function APengaturan() {
                   </div>
 
                   {/* Email Verification Section */}
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                     <div className="mb-2 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-700">Verifikasi Email</span>
+                      <span className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                        <Mail className="h-3.5 w-3.5" />
+                        Verifikasi Email
+                      </span>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${emailVerified
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${emailVerified
                             ? 'bg-emerald-100 text-emerald-700'
                             : 'bg-amber-100 text-amber-700'
                           }`}
@@ -2993,11 +3022,12 @@ export default function APengaturan() {
 
                   <button
                     onClick={logout}
-                    className="w-full bg-gray-100 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium text-sm flex items-center justify-center space-x-2"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
-                    <span>🚪</span>
+                    <LogOut className="h-4 w-4" />
                     <span>Logout</span>
                   </button>
+                </div>
                 </div>
               </div>
                 <AccountSecurityPanel tone="blue" />

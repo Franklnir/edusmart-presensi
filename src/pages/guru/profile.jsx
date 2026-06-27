@@ -9,6 +9,16 @@ import VerificationCodeModal from '../../components/VerificationCodeModal'
 import UserThemeSettings from '../../components/UserThemeSettings'
 import AccountSecurityPanel from '../../components/AccountSecurityPanel'
 import {
+  Camera,
+  CheckCircle2,
+  FilePenLine,
+  IdCard,
+  LogOut,
+  Mail,
+  ShieldCheck,
+  UserRound
+} from 'lucide-react'
+import {
   hasRealLoginEmail,
   isEmailFormat,
   shouldForceAccountSetup
@@ -698,7 +708,7 @@ export default function ProfileGuru() {
             <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
               needsAccountSetup ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
             }`}>
-              <span className="text-base">🔐</span>
+              <ShieldCheck className="h-4 w-4" />
             </div>
             <div>
               <p className={`text-[11px] font-bold uppercase tracking-[0.16em] ${
@@ -852,67 +862,71 @@ export default function ProfileGuru() {
   ) : null
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 sm:p-6">
-      <div className="max-w-full mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-50 p-4 sm:p-6">
+      <div className="mx-auto max-w-7xl space-y-6">
         <div className="page-title-card">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
             <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
-                <span className="text-2xl text-white">👨‍🏫</span>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm">
+                <UserRound className="h-6 w-6" />
               </div>
               <div>
                 <h1 className="page-title-heading">Profil Guru</h1>
                 <p className="page-title-description">Kelola identitas akun, keamanan login, dan data pribadi Anda.</p>
               </div>
             </div>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
-              <div className="text-xs text-slate-500">Status Email</div>
-              <div className={`font-semibold ${emailVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
+            <div className="inline-flex w-fit items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+              <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${emailVerified ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                {emailVerified ? <CheckCircle2 className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
+              </div>
+              <div>
+                <div className="text-xs font-medium text-slate-500">Status Email</div>
+                <div className={`text-sm font-semibold ${emailVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
                 {emailVerified ? 'Terverifikasi' : 'Belum Terverifikasi'}
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-4 gap-6">
+        <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
           {/* ========== SIDEBAR PROFIL ========== */}
-          <div className="lg:col-span-1 space-y-6">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
+          <div className="space-y-6">
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className="h-20 border-b border-slate-100 bg-slate-100" />
+              <div className="-mt-14 p-6 pt-0">
               <div className="flex flex-col items-center">
                 <div className="relative mb-4">
-                  <div className="relative w-28 h-28">
+                  <div className="relative h-28 w-28">
                     {previewUrl ? (
                       <img
                         src={previewUrl}
                         alt="Foto Profil"
-                        className="w-28 h-28 rounded-2xl object-cover border-4 border-white shadow-lg"
+                        className="h-28 w-28 rounded-3xl border-4 border-white object-cover shadow-sm"
                         onError={() => setPreviewUrl('')}
                       />
                     ) : (
-                      <div className="w-28 h-28 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border-4 border-white shadow-lg flex items-center justify-center">
-                        <span className="text-3xl text-blue-400">👤</span>
+                      <div className="flex h-28 w-28 items-center justify-center rounded-3xl border-4 border-white bg-slate-100 text-3xl font-bold text-slate-500 shadow-sm">
+                        {(form.nama || profile?.nama || 'G').charAt(0).toUpperCase()}
                       </div>
                     )}
 
                     {uploadingPhoto && (
-                      <div className="absolute inset-0 bg-black/40 rounded-2xl flex items-center justify-center">
-                        <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <div className="absolute inset-0 flex items-center justify-center rounded-3xl bg-slate-900/45">
+                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
                       </div>
                     )}
                   </div>
 
                   <label
                     htmlFor="photo-input"
-                    className={`absolute -bottom-2 -right-2 ${uploadingPhoto
-                      ? 'bg-gray-400 cursor-not-allowed'
-                      : 'bg-blue-600 hover:bg-blue-700 cursor-pointer shadow-lg'
-                      } text-white p-2.5 rounded-full transition-all duration-200 border-4 border-white`}
+                    className={`absolute -bottom-2 -right-2 rounded-2xl border-4 border-white p-2.5 text-white transition-all duration-200 ${uploadingPhoto
+                      ? 'cursor-not-allowed bg-slate-400'
+                      : 'cursor-pointer bg-slate-900 shadow-sm hover:bg-slate-800'
+                      }`}
                     title="Ubah Foto"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
+                    <Camera className="h-4 w-4" />
                   </label>
 
                   <input
@@ -926,27 +940,27 @@ export default function ProfileGuru() {
                   />
                 </div>
 
-                <div className="text-center mb-6 w-full">
-                  <h2 className="font-bold text-lg text-gray-900 mb-1 break-words">
+                <div className="mb-6 w-full text-center">
+                  <h2 className="mb-1 break-words text-lg font-bold text-slate-900">
                     {form.nama || profile?.nama || 'Guru'}
                   </h2>
-                  <p className="text-gray-500 text-xs truncate">{email || 'Email tidak tersedia'}</p>
+                  <p className="truncate text-xs text-slate-500">{email || 'Email tidak tersedia'}</p>
                 </div>
 
                 <div className="w-full mb-4">
                   <div
-                    className={`flex items-center justify-center px-3 py-2 rounded-xl text-sm font-medium ${emailVerified
+                    className={`flex items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold ${emailVerified
                       ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                       : 'bg-amber-50 text-amber-700 border border-amber-200'
                       }`}
                   >
                     {emailVerified ? (
                       <>
-                        <span className="mr-2">✅</span>Email Terverifikasi
+                        <CheckCircle2 className="mr-2 h-4 w-4" />Email Terverifikasi
                       </>
                     ) : (
                       <>
-                        <span className="mr-2">⚠️</span>Belum Terverifikasi
+                        <Mail className="mr-2 h-4 w-4" />Belum Terverifikasi
                       </>
                     )}
                   </div>
@@ -954,13 +968,12 @@ export default function ProfileGuru() {
 
                 <button
                   onClick={logout}
-                  className="w-full px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-700 font-medium rounded-xl transition-all duration-200 border border-gray-300 shadow-sm flex items-center justify-center gap-2"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                  </svg>
+                  <LogOut className="h-4 w-4" />
                   Keluar
                 </button>
+              </div>
               </div>
             </div>
 
@@ -968,17 +981,17 @@ export default function ProfileGuru() {
           </div>
 
           {/* ========== FORM EDIT PROFIL ========== */}
-          <div className="lg:col-span-3 space-y-6">
+          <div className="space-y-6">
             <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-              <div className="border-b border-slate-100 bg-gradient-to-r from-blue-50 via-white to-white p-5 sm:p-6">
+              <div className="border-b border-slate-100 bg-white p-5 sm:p-6">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-200">
-                      <span className="text-lg">📝</span>
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                      <FilePenLine className="h-5 w-5" />
                     </div>
                     <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Profil Guru</p>
-                      <h3 className="text-2xl font-bold text-gray-900">Informasi Pribadi</h3>
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Profil Guru</p>
+                      <h3 className="text-xl font-bold text-slate-900 sm:text-2xl">Informasi Pribadi</h3>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -992,8 +1005,11 @@ export default function ProfileGuru() {
               <div className="p-5 sm:p-6">
                 <div className="mb-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   {identityRows.map((item) => (
-                    <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{item.label}</div>
+                    <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+                      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                        <IdCard className="h-3.5 w-3.5" />
+                        {item.label}
+                      </div>
                       <div className="mt-1 break-words text-sm font-semibold text-slate-900">{item.value}</div>
                     </div>
                   ))}
@@ -1001,12 +1017,12 @@ export default function ProfileGuru() {
 
               <div className="grid gap-5 md:grid-cols-2">
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">
+                  <label className="block text-sm font-semibold text-slate-800">
                     Nama Lengkap <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 placeholder-gray-400 transition-all duration-200 hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 placeholder-slate-400 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
                     value={form.nama}
                     onChange={(e) => handleFieldChange('nama', e.target.value)}
                     placeholder="Masukkan nama lengkap"
@@ -1014,10 +1030,10 @@ export default function ProfileGuru() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">NIP/NUPTK</label>
+                  <label className="block text-sm font-semibold text-slate-800">NIP/NUPTK</label>
                   <input
                     type="text"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 placeholder-gray-400 transition-all duration-200 hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 placeholder-slate-400 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
                     value={form.nis}
                     onChange={(e) => handleFieldChange('nis', e.target.value)}
                     placeholder="Masukkan NIP/NUPTK"
@@ -1025,11 +1041,11 @@ export default function ProfileGuru() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">
+                  <label className="block text-sm font-semibold text-slate-800">
                     Jenis Kelamin <span className="text-red-500">*</span>
                   </label>
                   <select
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all duration-200 hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
                     value={form.jk}
                     onChange={(e) => handleFieldChange('jk', e.target.value)}
                   >
@@ -1040,9 +1056,9 @@ export default function ProfileGuru() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">Agama</label>
+                  <label className="block text-sm font-semibold text-slate-800">Agama</label>
                   <select
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all duration-200 hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
                     value={form.agama}
                     onChange={(e) => handleFieldChange('agama', e.target.value)}
                   >
@@ -1055,10 +1071,10 @@ export default function ProfileGuru() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">Nomor Telepon/HP</label>
+                  <label className="block text-sm font-semibold text-slate-800">Nomor Telepon/HP</label>
                   <input
                     type="tel"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 placeholder-gray-400 transition-all duration-200 hover:border-blue-300 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 placeholder-slate-400 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
                     value={form.telp}
                     onChange={(e) => handleFieldChange('telp', e.target.value)}
                     placeholder="08xxxxxxxxxx"
@@ -1066,30 +1082,30 @@ export default function ProfileGuru() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">Email</label>
+                  <label className="block text-sm font-semibold text-slate-800">Email</label>
                   <input
                     type="text"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-gray-700"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-slate-700"
                     value={email || '-'}
                     readOnly
                   />
                 </div>
 
                 <div className="md:col-span-2 space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">Tanggal Lahir</label>
+                  <label className="block text-sm font-semibold text-slate-800">Tanggal Lahir</label>
                   <input
                     type="date"
-                    className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all duration-200"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
                     value={form.tanggal_lahir}
                     onChange={(e) => handleFieldChange('tanggal_lahir', e.target.value)}
                   />
                 </div>
 
                 <div className="md:col-span-2 space-y-2">
-                  <label className="block text-sm font-semibold text-gray-900">Alamat Lengkap</label>
+                  <label className="block text-sm font-semibold text-slate-800">Alamat Lengkap</label>
                   <textarea
                     rows={4}
-                    className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-all duration-200 resize-none placeholder-gray-400"
+                    className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3.5 placeholder-slate-400 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
                     value={form.alamat}
                     onChange={(e) => handleFieldChange('alamat', e.target.value)}
                     placeholder="Masukkan alamat lengkap tempat tinggal"
@@ -1097,22 +1113,20 @@ export default function ProfileGuru() {
                 </div>
               </div>
 
-              <div className="flex justify-end mt-10 pt-8 border-t border-gray-200">
+              <div className="mt-10 flex justify-end border-t border-slate-200 pt-8">
                 <button
                   onClick={handleSaveProfile}
                   disabled={saving || !form.nama.trim() || !form.jk}
-                  className="px-8 py-3.5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 text-white font-semibold rounded-xl transition-all duration-200 shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 disabled:shadow-none flex items-center gap-3"
+                  className="flex items-center gap-3 rounded-xl bg-slate-900 px-8 py-3.5 font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                 >
                   {saving ? (
                     <>
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
                       Menyimpan...
                     </>
                   ) : (
                     <>
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
+                      <CheckCircle2 className="h-5 w-5" />
                       Simpan Perubahan
                     </>
                   )}
