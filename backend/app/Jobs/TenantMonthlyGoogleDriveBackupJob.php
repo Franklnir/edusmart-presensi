@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Services\Backup\BackupNotificationService;
 use App\Services\Backup\TenantBackupService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -42,7 +43,7 @@ class TenantMonthlyGoogleDriveBackupJob implements ShouldQueue
         ];
     }
 
-    public function handle(TenantBackupService $tenantBackupService): void
+    public function handle(TenantBackupService $tenantBackupService, BackupNotificationService $backupNotificationService): void
     {
         $tenantBackupService->putMonthlyBackupJobStatus($this->tenantId, $this->jobId, [
             'status' => 'running',
@@ -74,6 +75,7 @@ class TenantMonthlyGoogleDriveBackupJob implements ShouldQueue
                 'finished_at' => now('Asia/Jakarta')->toIso8601String(),
             ]);
             $tenantBackupService->releaseMonthlyBackupActiveJob($this->tenantId, $this->monthKey, $this->auto, $this->jobId);
+            $backupNotificationService->backupSucceeded($this->tenantId, is_array($result) ? $result : [], $this->auto);
         } catch (Throwable $e) {
             $message = trim((string) $e->getMessage()) ?: 'Backup gagal diproses.';
 
@@ -104,12 +106,24 @@ class TenantMonthlyGoogleDriveBackupJob implements ShouldQueue
                 'monthly_status' => $tenantBackupService->monthlyStatus($this->tenantId, true),
             ]);
             $tenantBackupService->releaseMonthlyBackupActiveJob($this->tenantId, $this->monthKey, $this->auto, $this->jobId);
+            if ($status === 'needs_attention') {
+                $backupNotificationService->googleDriveNeedsAttention($this->tenantId, [
+                    'last_error' => $message,
+                    'requires_reconnect' => true,
+                ]);
+            } else {
+                $backupNotificationService->backupFailed($this->tenantId, $message, [
+                    'month' => (string) ($this->monthKey ?? '-'),
+                    'auto' => $this->auto,
+                ]);
+            }
         }
     }
 
     public function failed(Throwable $e): void
     {
         $tenantBackupService = app(TenantBackupService::class);
+        $backupNotificationService = app(BackupNotificationService::class);
         $message = trim((string) $e->getMessage()) ?: 'Backup gagal diproses.';
         $status = $tenantBackupService->backupFailureStatus($message);
         if ($status === 'needs_attention') {
@@ -125,5 +139,16 @@ class TenantMonthlyGoogleDriveBackupJob implements ShouldQueue
             'failed_at' => now('Asia/Jakarta')->toIso8601String(),
         ]);
         $tenantBackupService->releaseMonthlyBackupActiveJob($this->tenantId, $this->monthKey, $this->auto, $this->jobId);
+        if ($status === 'needs_attention') {
+            $backupNotificationService->googleDriveNeedsAttention($this->tenantId, [
+                'last_error' => $message,
+                'requires_reconnect' => true,
+            ]);
+        } else {
+            $backupNotificationService->backupFailed($this->tenantId, $message, [
+                'month' => (string) ($this->monthKey ?? '-'),
+                'auto' => $this->auto,
+            ]);
+        }
     }
 }

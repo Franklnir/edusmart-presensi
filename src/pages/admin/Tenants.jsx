@@ -30,6 +30,12 @@ import PasswordInput from '../../components/PasswordInput'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import { validatePassword } from '../../utils/passwordPolicy'
 import { buildRestoreStatusToast } from '../../utils/restoreStatus'
+import {
+  BACKUP_DAY_LEGEND,
+  backupDayStatusLabel,
+  backupDayStatusStyle,
+  backupMonthVisual
+} from '../../utils/backupStatus'
 import rfidArduinoTemplateSource from '../../../docs/esp8266-rfid-mosquitto-tenant.ino?raw'
 
 const ADMIN_SUBDOMAIN = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin26')
@@ -351,6 +357,32 @@ const buildBackupFileName = (tenant = {}, mode = 'full') => {
     .replace(/^-+|-+$/g, '')
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   return `backup-${slug || 'tenant'}-${modeSafe || 'full'}-${stamp}.xlsx`
+}
+
+const formatBackupDateOnly = (value) => {
+  const [year, month, day] = String(value || '').split('-')
+  if (!year || !month || !day) return String(value || '-')
+  return `${day}/${month}/${year}`
+}
+
+const backupDayNumber = (day) => {
+  const raw = day?.day_label || day?.day || ''
+  const numeric = Number(raw)
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return String(numeric).padStart(2, '0')
+  }
+  return String(raw || '').slice(0, 2)
+}
+
+const backupDayTitle = (day) => {
+  const status = day?.status || 'empty'
+  const parts = [
+    `${formatBackupDateOnly(day?.date)}: ${day?.status_label || backupDayStatusLabel(status)}`
+  ]
+  const latestDataAt = day?.latest_data_at ? formatDateTime(day.latest_data_at) : ''
+  if (latestDataAt) parts.push(`Data terakhir: ${latestDataAt}`)
+  if (Number(day?.row_count || 0) > 0) parts.push(`${Number(day.row_count)} aktivitas data`)
+  return parts.join(' | ')
 }
 
 const summarizeBackupPayload = (payload) => {
@@ -1207,7 +1239,7 @@ const Tenants = () => {
       }
 
       if (lastStatus?.status === 'finished') return lastStatus
-      if (lastStatus?.status === 'failed' || lastStatus?.status === 'missing') {
+      if (['failed', 'missing', 'needs_attention'].includes(lastStatus?.status)) {
         throw new Error(lastStatus?.message || 'Backup bulanan tenant gagal diproses')
       }
     }
@@ -2395,16 +2427,24 @@ const Tenants = () => {
                         </button>
                       </div>
 
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
+                      <div className="rounded-2xl border border-slate-200 bg-white p-3">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-start gap-2">
-                            <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                            <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
                             <div>
-                              <p className="text-xs font-black uppercase tracking-wide text-amber-800">Backup Bulanan</p>
-                              <p className="mt-0.5 text-[11px] leading-relaxed text-amber-800">
-                                Auto backup lengkap akhir bulan {backupMonthlyStatus?.schedule?.runs_at_label || '23:15 WIB bertahap'}. Kuning berarti bulan itu sudah tersimpan.
+                              <p className="text-xs font-black uppercase tracking-wide text-slate-700">Backup Bulanan</p>
+                              <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600">
+                                Auto backup lengkap akhir bulan {backupMonthlyStatus?.schedule?.runs_at_label || '21:30 WIB bertahap'}. Hijau berarti tersimpan, biru berarti ada data baru.
                                 {backupMonthlyStatus?.schedule?.server_time_label ? ` Waktu server: ${backupMonthlyStatus.schedule.server_time_label}.` : ''}
                               </p>
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {BACKUP_DAY_LEGEND.map((item) => (
+                                  <span key={item.status} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">
+                                    <span className={`h-2 w-2 rounded-[2px] ${backupDayStatusStyle(item.status)}`} />
+                                    {item.label}
+                                  </span>
+                                ))}
+                              </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -2421,7 +2461,7 @@ const Tenants = () => {
                               type="button"
                               onClick={() => loadTenantBackupMonthlyStatus({ refresh: true })}
                               disabled={backupMonthlyLoading || backupMonthlyAutoSaving || Boolean(backupMonthlySavingKey)}
-                              className="inline-flex h-8 items-center justify-center gap-1 rounded-lg bg-white px-2 text-[11px] font-bold text-amber-800 ring-1 ring-amber-200 disabled:opacity-60"
+                              className="inline-flex h-8 items-center justify-center gap-1 rounded-lg bg-white px-2 text-[11px] font-bold text-slate-700 ring-1 ring-slate-200 disabled:opacity-60"
                             >
                               <RefreshCw className={`h-3.5 w-3.5 ${backupMonthlyLoading ? 'animate-spin' : ''}`} />
                               Refresh
@@ -2442,43 +2482,68 @@ const Tenants = () => {
                             </div>
                           </div>
                         ) : null}
-                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <div className="mt-3 grid gap-2 lg:grid-cols-2 xl:grid-cols-3">
                           {backupMonthlyMonths.length ? backupMonthlyMonths.map((month) => {
                             const backedUp = Boolean(month?.is_backed_up)
                             const needsUpdate = month?.status === 'needs_update' || Boolean(month?.has_new_data)
                             const isFuture = month?.status === 'future'
                             const canBackup = Boolean(month?.can_backup)
                             const file = month?.drive_file || null
-                            const cardClass = needsUpdate
-                              ? 'border-blue-300 bg-blue-50 text-blue-950'
-                              : backedUp
-                                ? 'border-amber-300 bg-amber-100 text-amber-950'
-                                : 'border-slate-200 bg-white text-slate-700'
+                            const visual = backupMonthVisual(month)
                             return (
                               <div
                                 key={month.key}
-                                className={`rounded-xl border px-3 py-2 ${cardClass}`}
+                                className={`rounded-xl border px-3 py-2 ${visual.cardClass}`}
                               >
-                                <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
                                     <p className="truncate text-xs font-black">{month.short_label || month.label}</p>
                                     <p className="truncate text-[10px] font-semibold opacity-70">
-                                      {isFuture ? 'Belum berjalan' : (needsUpdate ? 'Ada data baru' : (backedUp ? file?.size_label || 'Tersimpan' : 'Belum backup'))}
+                                      {visual.helperText}
                                     </p>
                                   </div>
+                                  <span className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-black ${visual.badgeClass}`}>
+                                    {visual.badgeText}
+                                  </span>
+                                </div>
+                                {Array.isArray(month.days) && month.days.length > 0 ? (
+                                  <div className="mt-2 grid grid-cols-7 gap-1">
+                                    {month.days.map((day) => {
+                                      const title = backupDayTitle(day)
+                                      return (
+                                        <span
+                                          key={day.date}
+                                          className={`flex aspect-square items-center justify-center rounded-[4px] text-[8px] font-semibold leading-none tabular-nums ${backupDayStatusStyle(day?.status || 'empty')}`}
+                                          title={title}
+                                          aria-label={title}
+                                        >
+                                          {backupDayNumber(day)}
+                                        </span>
+                                      )
+                                    })}
+                                  </div>
+                                ) : null}
+                                <div className="mt-2 flex items-center justify-between gap-2 border-t border-black/5 pt-2">
+                                  {file?.drive_web_view_link && !canBackup ? (
+                                    <a
+                                      href={file.drive_web_view_link}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="truncate text-[10px] font-black underline"
+                                    >
+                                      Buka file
+                                    </a>
+                                  ) : (
+                                    <span className="truncate text-[10px] font-semibold opacity-60">
+                                      {isFuture ? 'Menunggu tanggal berjalan' : (backedUp ? 'Drive siap' : 'Siap diproses')}
+                                    </span>
+                                  )}
                                   {!canBackup ? (
-                                    file?.drive_web_view_link ? (
-                                      <a
-                                        href={file.drive_web_view_link}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="shrink-0 rounded-lg bg-amber-200 px-2 py-1 text-[10px] font-black text-amber-900"
-                                      >
-                                        Buka
-                                      </a>
-                                    ) : (
-                                      <span className="shrink-0 rounded-lg bg-amber-200 px-2 py-1 text-[10px] font-black text-amber-900">{isFuture ? 'Nanti' : 'Sudah'}</span>
-                                    )
+                                    <span className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-black ${
+                                      isFuture ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-800'
+                                    }`}>
+                                      {isFuture ? 'Nanti' : 'Selesai'}
+                                    </span>
                                   ) : (
                                     <button
                                       type="button"
@@ -2493,7 +2558,7 @@ const Tenants = () => {
                               </div>
                             )
                           }) : (
-                            <div className="col-span-full rounded-xl border border-dashed border-amber-200 bg-white/70 px-3 py-4 text-center text-xs text-amber-800">
+                            <div className="col-span-full rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-500">
                               {backupMonthlyLoading ? 'Memuat jadwal...' : 'Jadwal bulanan belum dimuat.'}
                             </div>
                           )}

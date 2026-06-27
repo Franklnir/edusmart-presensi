@@ -268,6 +268,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::get('/google-drive/files', [GoogleDriveController::class, 'files']);
     Route::post('/google-drive/connect-url', [GoogleDriveController::class, 'connectUrl']);
     Route::post('/google-drive/sync', [GoogleDriveController::class, 'sync']);
+    Route::post('/google-drive/recover', [GoogleDriveController::class, 'recover']);
     Route::post('/google-drive/disconnect', [GoogleDriveController::class, 'disconnect']);
     Route::get('/storage-manager', [StorageManagementController::class, 'adminSummary']);
     Route::post('/storage-manager/object-storage/sync', [StorageManagementController::class, 'adminObjectStorageSync']);

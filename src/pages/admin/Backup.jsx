@@ -1,10 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Building2, CalendarClock, Cloud, Database, ExternalLink, RefreshCw, ShieldCheck, UploadCloud } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import { buildRestoreStatusToast } from '../../utils/restoreStatus'
+import {
+  BACKUP_DAY_LEGEND,
+  backupDayStatusLabel,
+  backupDayStatusStyle,
+  backupMonthVisual
+} from '../../utils/backupStatus'
 import {
   SEMESTER_GANJIL,
   SEMESTER_GENAP,
@@ -74,20 +80,6 @@ const DRIVE_STATUS_DEFAULT = {
     limit_label: 'Tidak terbatas',
     percent: null
   }
-}
-
-const BACKUP_DAY_STATUS_STYLES = {
-  backed_up: 'bg-emerald-500 text-white shadow-sm',
-  new_data: 'bg-blue-500 text-white shadow-sm',
-  empty: 'bg-slate-200 text-slate-500',
-  future: 'border border-dashed border-slate-300 bg-slate-50 text-slate-400'
-}
-
-const BACKUP_DAY_STATUS_LABELS = {
-  backed_up: 'Sudah masuk backup',
-  new_data: 'Ada data baru',
-  empty: 'Belum ada data backup',
-  future: 'Tanggal belum berjalan'
 }
 
 const toNumber = (value, fallback = 0) => {
@@ -195,7 +187,7 @@ const backupDayNumber = (day) => {
 const backupDayTitle = (day) => {
   const status = day?.status || 'empty'
   const parts = [
-    `${formatDateOnly(day?.date)}: ${day?.status_label || BACKUP_DAY_STATUS_LABELS[status] || status}`
+    `${formatDateOnly(day?.date)}: ${day?.status_label || backupDayStatusLabel(status)}`
   ]
   const latestDataAt = formatDateTime(day?.latest_data_at)
   if (latestDataAt) parts.push(`Data terakhir: ${latestDataAt}`)
@@ -538,6 +530,7 @@ export default function BackupAdmin() {
   const [driveLoading, setDriveLoading] = useState(false)
   const [driveConnecting, setDriveConnecting] = useState(false)
   const [driveSyncing, setDriveSyncing] = useState(false)
+  const [driveRecovering, setDriveRecovering] = useState(false)
   const [driveSaving, setDriveSaving] = useState(false)
   const [lastDriveBackup, setLastDriveBackup] = useState(null)
   const [monthlyStatus, setMonthlyStatus] = useState(null)
@@ -545,6 +538,7 @@ export default function BackupAdmin() {
   const [monthlySavingKey, setMonthlySavingKey] = useState('')
   const [monthlyAutoSaving, setMonthlyAutoSaving] = useState(false)
   const [monthlyProgress, setMonthlyProgress] = useState(null)
+  const driveRecoverAttemptRef = useRef('')
 
   const resolvedMonths = useMemo(() => {
     if (periodType === 'all') return null
@@ -652,6 +646,35 @@ export default function BackupAdmin() {
     }
   }
 
+  const handleRecoverGoogleDrive = async ({ silent = false } = {}) => {
+    if (isSuperAdmin || driveRecovering || !driveProviderReady) return null
+
+    setDriveRecovering(true)
+    try {
+      const { data, error } = await supabase.admin.recoverGoogleDrive()
+      if (error) throw error
+
+      const statusPayload = data?.status_payload || data
+      setDriveStatus(statusPayload || DRIVE_STATUS_DEFAULT)
+      await loadMonthlyStatus({ silent: true, refresh: true })
+
+      if (!silent) {
+        const connected = (data?.status || statusPayload?.status) === 'connected'
+        pushToast(
+          connected ? 'success' : 'warning',
+          data?.message || (connected ? 'Google Drive berhasil dipulihkan' : 'Google Drive masih perlu perhatian')
+        )
+      }
+
+      return data || statusPayload
+    } catch (err) {
+      if (!silent) pushToast('error', err?.message || 'Gagal memulihkan Google Drive')
+      return null
+    } finally {
+      setDriveRecovering(false)
+    }
+  }
+
   const loadMonthlyStatus = async ({ silent = false, refresh = false } = {}) => {
     setMonthlyLoading(true)
     try {
@@ -705,7 +728,7 @@ export default function BackupAdmin() {
       }
 
       if (lastStatus?.status === 'finished') return lastStatus
-      if (lastStatus?.status === 'failed' || lastStatus?.status === 'missing') {
+      if (['failed', 'missing', 'needs_attention'].includes(lastStatus?.status)) {
         throw new Error(lastStatus?.message || 'Backup bulanan gagal diproses')
       }
     }
@@ -1061,6 +1084,16 @@ export default function BackupAdmin() {
     [selectedTenantId, superTenants]
   )
 
+  useEffect(() => {
+    if (isSuperAdmin || !driveProviderReady || driveStatus?.status !== 'needs_attention') return
+    const marker = `${driveStatus?.status || ''}:${driveStatus?.last_error || ''}`
+    if (driveRecovering || driveRecoverAttemptRef.current === marker) return
+
+    driveRecoverAttemptRef.current = marker
+    handleRecoverGoogleDrive({ silent: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driveStatus?.status, driveStatus?.last_error, driveProviderReady, isSuperAdmin])
+
   const formatPreview = useMemo(() => {
     if (!payload) {
       return { text: '', html: '' }
@@ -1236,6 +1269,8 @@ export default function BackupAdmin() {
                     <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
                       driveReady
                         ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : driveStatus?.status === 'needs_attention'
+                          ? 'border border-rose-200 bg-rose-50 text-rose-700'
                         : 'border border-amber-200 bg-amber-50 text-amber-700'
                     }`}>
                       {driveStatus?.status_label || 'Belum tersambung'}
@@ -1260,12 +1295,23 @@ export default function BackupAdmin() {
                 <button
                   type="button"
                   onClick={handleSyncGoogleDrive}
-                  disabled={driveSyncing || driveLoading || !driveProviderReady}
+                  disabled={driveSyncing || driveLoading || driveRecovering || !driveProviderReady}
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
                 >
                   <RefreshCw className={`h-4 w-4 ${driveSyncing ? 'animate-spin' : ''}`} />
                   Sinkronkan
                 </button>
+                {!isSuperAdmin && driveStatus?.status === 'needs_attention' ? (
+                  <button
+                    type="button"
+                    onClick={() => handleRecoverGoogleDrive()}
+                    disabled={driveRecovering || driveLoading || !driveProviderReady}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 shadow-sm hover:bg-emerald-100 disabled:opacity-60"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${driveRecovering ? 'animate-spin' : ''}`} />
+                    {driveRecovering ? 'Memulihkan...' : 'Pulihkan'}
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -1321,28 +1367,37 @@ export default function BackupAdmin() {
               </div>
             ) : driveStatus?.last_error ? (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {driveRecovering ? 'Sistem sedang mencoba memulihkan koneksi Drive otomatis. ' : ''}
                 Catatan Drive: {driveStatus.last_error}
               </div>
             ) : null}
           </div>
 
-          <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div className="flex items-start gap-3">
-                <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
+                <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
                   <CalendarClock className="h-5 w-5" />
                 </div>
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-sm font-bold text-slate-900">Jadwal Backup Bulanan Google Drive</h3>
-                    <span className="rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800">
-                      {monthlyStatus?.schedule?.runs_at_label || 'Otomatis 23:15 WIB, bertahap'}
+                    <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
+                      {monthlyStatus?.schedule?.runs_at_label || 'Otomatis 21:30 WIB, bertahap'}
                     </span>
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                    Sistem membuat backup lengkap setiap akhir bulan pada periode aktif. Bulan berwarna kuning berarti backup sudah tersimpan di Google Drive.
+                    Sistem membuat backup lengkap setiap akhir bulan pada periode aktif. Hijau berarti sudah tersimpan, biru berarti ada data baru, dan hijau muda berarti hari itu sudah dicek tanpa aktivitas.
                     {monthlyStatus?.schedule?.server_time_label ? ` Waktu server: ${monthlyStatus.schedule.server_time_label}.` : ''}
                   </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {BACKUP_DAY_LEGEND.map((item) => (
+                      <span key={item.status} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-600">
+                        <span className={`h-2.5 w-2.5 rounded-[3px] ${backupDayStatusStyle(item.status)}`} />
+                        {item.label}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -1359,7 +1414,7 @@ export default function BackupAdmin() {
                   type="button"
                   onClick={() => loadMonthlyStatus({ refresh: true })}
                   disabled={monthlyLoading || monthlyAutoSaving || Boolean(monthlySavingKey)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-50 disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
                 >
                   <RefreshCw className={`h-4 w-4 ${monthlyLoading ? 'animate-spin' : ''}`} />
                   Refresh Jadwal
@@ -1374,21 +1429,11 @@ export default function BackupAdmin() {
                 const isFuture = month?.status === 'future'
                 const canBackup = Boolean(month?.can_backup)
                 const file = month?.drive_file || null
-                const cardClass = needsUpdate
-                  ? 'border-blue-300 bg-blue-50 text-blue-950'
-                  : backedUp
-                    ? 'border-amber-300 bg-amber-100/80 text-amber-950'
-                    : 'border-slate-200 bg-white text-slate-800'
-                const badgeClass = needsUpdate
-                  ? 'bg-blue-100 text-blue-800'
-                  : backedUp
-                    ? 'bg-amber-200 text-amber-900'
-                    : 'bg-slate-100 text-slate-500'
-                const badgeText = isFuture ? 'Belum jalan' : (needsUpdate ? 'Data baru' : (backedUp ? 'Sudah' : 'Belum'))
+                const visual = backupMonthVisual(month)
                 return (
                   <div
                     key={month.key}
-                    className={`rounded-xl border p-3 flex flex-col justify-between ${cardClass}`}
+                    className={`rounded-xl border p-3 flex flex-col justify-between ${visual.cardClass}`}
                   >
                     <div>
                       <div className="flex items-start justify-between gap-2">
@@ -1396,8 +1441,8 @@ export default function BackupAdmin() {
                           <p className="text-sm font-black">{month.short_label || month.label}</p>
                           <p className="mt-0.5 text-[11px] font-semibold opacity-70">{month.start_date} - {month.end_date}</p>
                         </div>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${badgeClass}`}>
-                          {badgeText}
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${visual.badgeClass}`}>
+                          {visual.badgeText}
                         </span>
                       </div>
                       
@@ -1407,7 +1452,7 @@ export default function BackupAdmin() {
                           <div className="grid grid-cols-7 gap-1">
                             {month.days.map((day) => {
                               const status = day?.status || 'empty'
-                              const dayStyle = BACKUP_DAY_STATUS_STYLES[status] || BACKUP_DAY_STATUS_STYLES.empty
+                              const dayStyle = backupDayStatusStyle(status)
                               const title = backupDayTitle(day)
                               return (
                                 <div
@@ -1455,7 +1500,9 @@ export default function BackupAdmin() {
                       <button
                         type="button"
                         disabled
-                        className="mt-2 inline-flex h-8 w-full items-center justify-center rounded-lg bg-amber-200 px-2 text-[11px] font-black text-amber-900 opacity-80"
+                        className={`mt-2 inline-flex h-8 w-full items-center justify-center rounded-lg px-2 text-[11px] font-black opacity-80 ${
+                          isFuture ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-800'
+                        }`}
                       >
                         {isFuture ? 'Belum berjalan' : 'Sudah dibackup'}
                       </button>
