@@ -400,46 +400,6 @@ export default function AHome() {
     }
   }, [mergeSiswaOptions, pushToast, siswaList, studentOptionsLoaded, studentOptionsLoading])
 
-  const loadGuruDanSiswa = useCallback(async () => {
-    try {
-      // Load guru dari profiles
-      const { data: guruData, error: guruError } = await supabase
-        .from('profiles')
-        .select('id, nama, email, role')
-        .in('role', ['guru', 'teacher'])
-        .order('nama')
-
-      if (!guruError && guruData) {
-        const formattedGuru = guruData.map((guru) => ({
-          id: guru.id,
-          name: `${guru.nama || 'Tanpa Nama'}${guru.email ? ` (${guru.email})` : ''
-            }`
-        }))
-        setGuruList(formattedGuru)
-      }
-
-      // Load siswa dari profiles
-      const { data: siswaData, error: siswaError } = await supabase
-        .from('profiles')
-        .select('id, nama, email, kelas, role, angkatan')
-        .eq('role', 'siswa')
-        .order('kelas')
-        .order('nama')
-
-      if (!siswaError && siswaData) {
-        const formattedSiswa = siswaData.map((siswa) => ({
-          uid: siswa.id,
-          nama: siswa.nama || siswa.email || 'Tanpa Nama',
-          kelas: siswa.kelas || '',
-          email: siswa.email,
-          angkatan: siswa.angkatan || ''
-        }))
-        setSiswaList(formattedSiswa)
-      }
-    } catch (error) {
-      pushToast('error', 'Gagal memuat data guru dan siswa')
-    }
-  }, [pushToast])
 
   // Map cepat: uid → {nama, kelas}
   const siswaMap = useMemo(() => {

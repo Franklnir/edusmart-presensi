@@ -2709,7 +2709,7 @@ const auth = {
         method: 'GET',
         cacheTtlMs: 0,
         staleKey: `quiz.dashboard.${JSON.stringify(params || {})}`,
-        timeoutMs: 15000
+        timeoutMs: 60000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
@@ -2719,7 +2719,7 @@ const auth = {
         method: 'GET',
         cacheTtlMs: 0,
         staleKey: `quiz.detail.${id}`,
-        timeoutMs: 15000
+        timeoutMs: 60000
       })
       return { data: res.raw?.data ?? res.data, error: res.error ? { ...res.error, ...(res.raw || {}) } : null }
     },
@@ -2785,7 +2785,7 @@ const reports = {
       method: 'GET',
       cacheTtlMs: 30 * 1000,
       staleKey: `reports.teacher-summary.${params?.type || 'default'}`,
-      timeoutMs: 20000
+      timeoutMs: 90000
     })
     return { data: res.raw?.data ?? res.data, error: res.error }
   },
@@ -2794,7 +2794,7 @@ const reports = {
       method: 'GET',
       cacheTtlMs: 30 * 1000,
       staleKey: 'reports.attendance-summary',
-      timeoutMs: 20000
+      timeoutMs: 90000
     })
     return { data: res.raw?.data ?? res.data, error: res.error }
   },
@@ -2803,7 +2803,7 @@ const reports = {
       method: 'GET',
       cacheTtlMs: 30 * 1000,
       staleKey: 'reports.task-summary',
-      timeoutMs: 20000
+      timeoutMs: 90000
     })
     return { data: res.raw?.data ?? res.data, error: res.error }
   },
@@ -2812,7 +2812,7 @@ const reports = {
       method: 'GET',
       cacheTtlMs: 30 * 1000,
       staleKey: 'reports.quiz-summary',
-      timeoutMs: 20000
+      timeoutMs: 90000
     })
     return { data: res.raw?.data ?? res.data, error: res.error }
   },
@@ -2821,7 +2821,7 @@ const reports = {
       method: 'GET',
       cacheTtlMs: 30 * 1000,
       staleKey: 'reports.homeroom-summary',
-      timeoutMs: 25000
+      timeoutMs: 120000
     })
     return { data: res.raw?.data ?? res.data, error: res.error }
   }

@@ -156,6 +156,7 @@ class DbController extends ApiController
 
     public function handle(Request $request)
     {
+        set_time_limit(120);
         $table = $request->input('table');
         $action = $request->input('action', 'select');
 
@@ -334,6 +335,7 @@ class DbController extends ApiController
 
     public function batch(Request $request)
     {
+        set_time_limit(120);
         $requests = $request->input('requests', []);
         if (! is_array($requests)) {
             return $this->deny('Daftar request batch tidak valid', 422);

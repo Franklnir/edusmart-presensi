@@ -417,6 +417,7 @@ class AdminController extends ApiController
 
     public function dashboardSummary(Request $request)
     {
+        set_time_limit(120);
         if (! $this->isAdmin($request)) {
             return $this->deny();
         }

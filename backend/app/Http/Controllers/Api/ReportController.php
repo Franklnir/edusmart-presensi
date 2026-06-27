@@ -12,6 +12,7 @@ class ReportController extends ApiController
 {
     public function teacherSummary(Request $request)
     {
+        set_time_limit(120);
         if (! $this->isAdmin($request) && ! $this->isGuru($request)) {
             return $this->deny();
         }
@@ -68,6 +69,7 @@ class ReportController extends ApiController
 
     public function homeroomSummary(Request $request)
     {
+        set_time_limit(120);
         if (! $this->isAdmin($request) && ! $this->isGuru($request)) {
             return $this->deny();
         }
