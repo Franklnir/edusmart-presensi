@@ -41,6 +41,7 @@ const ABackup = lazyRoute('/admin/backup')
 const AStorage = lazyRoute('/admin/storage')
 const APengaturan = lazyRoute('/admin/pengaturan')
 const ASuperMonitoring = lazyRoute('/admin/monitoring')
+const ASuperBackgroundJobs = lazyRoute('/admin/background-job')
 const ASuperServerMonitoring = lazyRoute('/admin/monitoring-server')
 const ASuperMonitorLog = lazyRoute('/admin/monitoring-log')
 const AAnimasiFlow = lazyRoute('/admin/animasi-flow')
@@ -143,6 +144,7 @@ const AppRoutes = () => (
     >
       <Route path="/admin/pengaturan" element={lazyElement(APengaturan)} />
       <Route path="/admin/monitoring" element={lazyElement(ASuperMonitoring)} />
+      <Route path="/admin/background-job" element={lazyElement(ASuperBackgroundJobs)} />
       <Route path="/admin/monitoring-server" element={lazyElement(ASuperServerMonitoring)} />
       <Route path="/admin/monitoring-log" element={lazyElement(ASuperMonitorLog)} />
       <Route path="/admin/animasi-flow" element={lazyElement(AAnimasiFlow)} />

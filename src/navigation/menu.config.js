@@ -105,6 +105,7 @@ export const superAdminMonitoringGroup = {
   icon: 'monitor',
   items: [
     { id: 'super-monitoring', to: '/admin/monitoring', label: 'Monitoring', icon: 'signal' },
+    { id: 'super-background-job', to: '/admin/background-job', label: 'Background Job', icon: 'queue' },
     { id: 'super-monitoring-server', to: '/admin/monitoring-server', label: 'Monitoring Server', icon: 'monitor' },
     { id: 'super-monitoring-log', to: '/admin/monitoring-log', label: 'Monitor Log', icon: 'terminal' },
     { id: 'super-animasi-flow', to: '/admin/animasi-flow', label: 'Animasi Flow', icon: 'workflow' },

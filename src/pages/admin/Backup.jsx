@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CalendarClock, Cloud, Database, ExternalLink, RefreshCw, ShieldCheck, UploadCloud } from 'lucide-react'
+import { AlertTriangle, Building2, CalendarClock, Cloud, Database, ExternalLink, RefreshCw, ShieldCheck, UploadCloud } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -715,6 +715,10 @@ export default function BackupAdmin() {
 
   const handleSaveToGoogleDrive = async () => {
     if (driveSaving || loading || downloading) return
+    if (isSuperAdmin) {
+      pushToast('warning', 'Simpan manual ke Google Drive hanya tersedia untuk Admin Sekolah. Gunakan backup bulanan tenant atau unduh file backup.')
+      return
+    }
     setDriveSaving(true)
     try {
       if (periodType === 'date_range' && (!startDate || !endDate)) {
@@ -1052,6 +1056,10 @@ export default function BackupAdmin() {
   const driveReady = Boolean(driveStatus?.ready)
   const driveProviderReady = Boolean(driveStatus?.provider_configured)
   const monthlyMonths = Array.isArray(monthlyStatus?.months) ? monthlyStatus.months : []
+  const selectedTenant = useMemo(
+    () => superTenants.find((tenant) => String(tenant.id) === String(selectedTenantId)) || null,
+    [selectedTenantId, superTenants]
+  )
 
   const formatPreview = useMemo(() => {
     if (!payload) {
@@ -1074,7 +1082,7 @@ export default function BackupAdmin() {
   }, [payload, format])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-6">
+    <div className="space-y-6 p-4 sm:p-6">
       {monthlyProgress ? (
         <div className="fixed inset-x-0 top-4 z-[90] mx-auto w-[min(92vw,520px)] rounded-2xl border border-blue-100 bg-white p-4 shadow-2xl">
           <div className="flex items-center justify-between gap-3">
@@ -1094,41 +1102,55 @@ export default function BackupAdmin() {
           </div>
         </div>
       ) : null}
-      <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
+      <div className="space-y-6">
         {isSuperAdmin ? (
-          <section className="rounded-2xl border border-indigo-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">Pilih Tenant (Mode Super Admin)</h3>
-                <p className="text-xs text-slate-500">
-                  Anda sedang dalam mode Super Admin. Pilih tenant sekolah untuk mengelola backup mereka.
-                </p>
+          <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card sm:p-6">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-indigo-50 text-indigo-700">
+                  <Building2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">Mode Super Admin</p>
+                  <h2 className="mt-1 text-lg font-extrabold text-slate-950">Pilih Sekolah</h2>
+                  <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                    Pilih tenant sekolah untuk preview, download, restore, sinkron status Drive, dan menjalankan backup bulanan dengan konteks tenant yang tepat.
+                  </p>
+                </div>
               </div>
-              <div className="w-full sm:w-64">
+              <div className="w-full lg:max-w-md">
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Tenant sekolah
+                </label>
                 <select
                   value={selectedTenantId}
                   onChange={(e) => setSelectedTenantId(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-400"
                   disabled={superLoading}
                 >
-                  <option value="" disabled>-- Pilih Sekolah --</option>
+                  <option value="" disabled>Pilih sekolah</option>
                   {superTenants.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name || t.id}
                     </option>
                   ))}
                 </select>
+                <p className="mt-2 text-xs font-medium text-slate-500">
+                  {selectedTenant ? `Tenant aktif: ${selectedTenant.name || selectedTenant.id}` : `${superTenants.length || 0} sekolah tersedia`}
+                </p>
               </div>
             </div>
           </section>
         ) : null}
 
         {isSuperAdmin && !selectedTenantId ? (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center shadow-sm">
-            <AlertTriangle className="mx-auto h-12 w-12 text-amber-500 mb-3" />
-            <h3 className="text-lg font-bold text-amber-900">Pilih Sekolah</h3>
-            <p className="text-sm text-amber-700 mt-1">
-              Silakan pilih sekolah dari menu dropdown di atas untuk mengelola data backup.
+          <div className="rounded-2xl border border-dashed border-indigo-200 bg-white p-8 text-center shadow-card">
+            <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-indigo-50 text-indigo-700">
+              <Building2 className="h-6 w-6" />
+            </div>
+            <h3 className="mt-4 text-lg font-extrabold text-slate-950">Pilih sekolah terlebih dahulu</h3>
+            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+              Data backup, status Drive, jadwal bulanan, dan restore akan tampil setelah tenant sekolah dipilih.
             </p>
           </div>
         ) : (
@@ -1136,8 +1158,8 @@ export default function BackupAdmin() {
             <section className="page-title-card">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-blue-100 rounded-lg">
-                <Database className="h-7 w-7 text-blue-600" />
+              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 text-blue-700">
+                <Database className="h-7 w-7" />
               </div>
               <div>
                 <h1 className="page-title-heading">Backup Data Sekolah</h1>
@@ -1152,7 +1174,7 @@ export default function BackupAdmin() {
           </div>
         </section>
 
-        <section className="bg-white border border-gray-200 rounded-2xl p-6 shadow-lg space-y-5">
+        <section className="space-y-5 rounded-2xl border border-slate-100 bg-white p-5 shadow-card sm:p-6">
           <div>
             <h2 className="text-base font-semibold text-slate-900">Jenis Backup</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
@@ -1229,11 +1251,11 @@ export default function BackupAdmin() {
                 <button
                   type="button"
                   onClick={handleConnectGoogleDrive}
-                  disabled={driveConnecting || driveLoading || !driveProviderReady}
+                  disabled={driveConnecting || driveLoading || !driveProviderReady || isSuperAdmin}
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 shadow-sm hover:bg-blue-50 disabled:opacity-60"
                 >
                   <ExternalLink className="h-4 w-4" />
-                  {driveConnecting ? 'Membuka Google...' : driveReady ? 'Sambungkan Ulang' : 'Sambungkan Drive'}
+                  {isSuperAdmin ? 'Dikelola Admin Sekolah' : (driveConnecting ? 'Membuka Google...' : driveReady ? 'Sambungkan Ulang' : 'Sambungkan Drive')}
                 </button>
                 <button
                   type="button"
@@ -1580,11 +1602,11 @@ export default function BackupAdmin() {
             <button
               type="button"
               onClick={handleSaveToGoogleDrive}
-              disabled={loading || downloading || driveSaving || !driveReady}
+              disabled={loading || downloading || driveSaving || !driveReady || isSuperAdmin}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
             >
               <UploadCloud className="h-4 w-4" />
-              {driveSaving ? 'Menyimpan ke Drive...' : 'Simpan JSON + Excel ke Google Drive'}
+              {driveSaving ? 'Menyimpan ke Drive...' : (isSuperAdmin ? 'Simpan manual oleh Admin Sekolah' : 'Simpan JSON + Excel ke Google Drive')}
             </button>
           </div>
 
@@ -1786,7 +1808,7 @@ export default function BackupAdmin() {
           </div>
         </section>
 
-        <section className="bg-white border border-gray-200 rounded-2xl p-6 shadow-lg">
+        <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card sm:p-6">
           <h2 className="text-base font-semibold text-slate-900 mb-3">Ringkasan Backup</h2>
 
           {isPreviewStale && (

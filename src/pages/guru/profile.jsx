@@ -862,8 +862,7 @@ export default function ProfileGuru() {
   ) : null
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 sm:p-6">
-      <div className="mx-auto max-w-7xl space-y-6">
+    <div className="space-y-6 p-4 sm:p-6">
         <div className="page-title-card">
           <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
             <div className="flex items-center gap-4">
@@ -1168,7 +1167,6 @@ export default function ProfileGuru() {
             await submitAccountChange(plan, code)
           }}
         />
-      </div>
     </div>
   )
 }

@@ -16,6 +16,7 @@ import {
   GraduationCap,
   HardDrive,
   Home,
+  ListChecks,
   LogOut,
   Menu,
   MessageCircle,
@@ -65,6 +66,7 @@ const iconComponents = {
   menu: Menu,
   x: X,
   workflow: Workflow,
+  queue: ListChecks,
 }
 
 export const Icon = React.memo(({ name, className = 'w-5 h-5' }) => {

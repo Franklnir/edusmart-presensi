@@ -1035,8 +1035,7 @@ export default function EditProfile() {
   // ==================== RENDER ====================
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 sm:p-6">
-      <div className="mx-auto max-w-7xl space-y-6">
+    <div className="space-y-6 p-4 sm:p-6">
         {/* HEADER */}
         <div className="page-title-card">
           <div className="flex flex-col justify-between gap-6 md:flex-row md:items-center">
@@ -1504,8 +1503,6 @@ export default function EditProfile() {
             await submitAccountChange(plan, code)
           }}
         />
-      </div>
-
     </div>
   )
 }

@@ -127,7 +127,7 @@ function StatusPill({ status, label }) {
   )
 }
 
-function PageGate({ superAdminChecked, isSuperAdmin, children }) {
+export function PageGate({ superAdminChecked, isSuperAdmin, children }) {
   if (!superAdminChecked) return <div className="p-6 text-sm text-slate-500">Memuat akses super admin...</div>
   if (!isSuperAdmin) {
     return (
@@ -183,7 +183,7 @@ function QueueMetricCard({ label, value, hint, icon: Icon, status = 'healthy' })
   )
 }
 
-function QueueStatusPanel({ jobs }) {
+export function QueueStatusPanel({ jobs }) {
   const status = jobs?.status || {}
   const horizon = jobs?.horizon || {}
   const redis = jobs?.redis || {}
@@ -278,7 +278,7 @@ function QueueStatusPanel({ jobs }) {
   )
 }
 
-function QueueTable({ queues = [] }) {
+export function QueueTable({ queues = [] }) {
   return (
     <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -324,7 +324,7 @@ function QueueTable({ queues = [] }) {
   )
 }
 
-function WorkerPanel({ supervisors = [], heartbeats = {} }) {
+export function WorkerPanel({ supervisors = [], heartbeats = {} }) {
   const scheduler = heartbeats.scheduler || {}
   const quizWorker = heartbeats.quiz_worker || {}
   return (
@@ -379,7 +379,7 @@ function WorkerPanel({ supervisors = [], heartbeats = {} }) {
   )
 }
 
-function JobTable({ title, rows = [], empty, failed = false }) {
+export function JobTable({ title, rows = [], empty, failed = false }) {
   const listRef = useRef(null)
   const [maxListHeight, setMaxListHeight] = useState(null)
   const shouldScroll = rows.length > JOB_LIST_VISIBLE_COUNT
@@ -583,7 +583,6 @@ export default function SuperMonitoring() {
   const totals = data?.totals || {}
   const charts = data?.charts || {}
   const top = data?.top_tenants || {}
-  const jobs = data?.jobs || {}
 
   const loadData = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
@@ -643,19 +642,6 @@ export default function SuperMonitoring() {
           <StatCard label="Total Guru" value={formatNumber(totals.teachers)} hint={`${formatNumber(data?.active_by_role?.guru)} sedang aktif`} icon={UsersRound} tone="emerald" />
           <StatCard label="Admin Sekolah" value={formatNumber(totals.admins)} hint={`${formatNumber(data?.active_by_role?.admin)} sedang aktif`} icon={UsersRound} tone="amber" />
           <StatCard label="Online Sekarang" value={formatNumber(totals.online_now)} hint={`Window ${data?.active_window_minutes || 5} menit`} icon={Signal} tone="emerald" />
-        </div>
-
-        <QueueStatusPanel jobs={jobs} />
-
-        <div className="grid gap-4 xl:grid-cols-[1.35fr_.9fr]">
-          <QueueTable queues={jobs?.queues || []} />
-          <WorkerPanel supervisors={jobs?.horizon?.supervisors || []} heartbeats={jobs?.heartbeats || {}} />
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-3">
-          <JobTable title="Job Pending Horizon" rows={jobs?.horizon?.pending_jobs || []} empty="Tidak ada job pending." />
-          <JobTable title="Job Terbaru" rows={jobs?.horizon?.recent_jobs || []} empty="Belum ada riwayat Horizon." />
-          <JobTable title="Failed Job" rows={jobs?.database_failed_jobs?.recent?.length ? jobs.database_failed_jobs.recent : (jobs?.horizon?.failed_jobs || [])} empty="Tidak ada failed job." failed />
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[1.45fr_.95fr]">

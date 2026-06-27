@@ -43,6 +43,7 @@ const routeLoaders = {
   '/admin/permission-admin': () => import('../pages/admin/PermissionAdmin'),
   '/admin/pengaturan': () => import('../pages/admin/pengaturan'),
   '/admin/monitoring': () => import('../pages/admin/SuperMonitoring'),
+  '/admin/background-job': () => import('../pages/admin/SuperBackgroundJobs'),
   '/admin/monitoring-server': () => import('../pages/admin/SuperServerMonitoring'),
   '/admin/monitoring-log': () => import('../pages/admin/SuperMonitorLog'),
   '/admin/animasi-flow': () => import('../pages/admin/AnimasiFlow'),
