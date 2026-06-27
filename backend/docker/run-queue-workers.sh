@@ -30,6 +30,10 @@ fi
 
 pids=""
 
+if php artisan list --raw 2>/dev/null | grep -qx 'horizon'; then
+  exec php artisan horizon
+fi
+
 start_worker() {
   queue="$1"
   php artisan queue:work redis \

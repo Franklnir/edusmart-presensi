@@ -1,10 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
+  AlertTriangle,
   BarChart3,
   Building2,
+  CheckCircle2,
+  Clock3,
+  Database,
+  ExternalLink,
+  Gauge,
+  ListChecks,
   RefreshCw,
+  ServerCog,
   Signal,
+  TimerReset,
   UsersRound
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -19,6 +28,102 @@ const roleLabel = {
   siswa: 'Siswa',
   guru: 'Guru',
   admin: 'Admin'
+}
+
+const statusMeta = {
+  healthy: {
+    label: 'Sehat',
+    icon: CheckCircle2,
+    badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    iconBox: 'bg-emerald-100 text-emerald-700'
+  },
+  running: {
+    label: 'Running',
+    icon: CheckCircle2,
+    badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    iconBox: 'bg-emerald-100 text-emerald-700'
+  },
+  completed: {
+    label: 'Selesai',
+    icon: CheckCircle2,
+    badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    iconBox: 'bg-emerald-100 text-emerald-700'
+  },
+  pending: {
+    label: 'Pending',
+    icon: Clock3,
+    badge: 'border-sky-200 bg-sky-50 text-sky-700',
+    iconBox: 'bg-sky-100 text-sky-700'
+  },
+  reserved: {
+    label: 'Diproses',
+    icon: Clock3,
+    badge: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+    iconBox: 'bg-indigo-100 text-indigo-700'
+  },
+  warning: {
+    label: 'Pantau',
+    icon: AlertTriangle,
+    badge: 'border-amber-200 bg-amber-50 text-amber-700',
+    iconBox: 'bg-amber-100 text-amber-700'
+  },
+  paused: {
+    label: 'Paused',
+    icon: AlertTriangle,
+    badge: 'border-amber-200 bg-amber-50 text-amber-700',
+    iconBox: 'bg-amber-100 text-amber-700'
+  },
+  inactive: {
+    label: 'Inactive',
+    icon: AlertTriangle,
+    badge: 'border-slate-200 bg-slate-50 text-slate-700',
+    iconBox: 'bg-slate-100 text-slate-700'
+  },
+  unknown: {
+    label: 'Unknown',
+    icon: AlertTriangle,
+    badge: 'border-slate-200 bg-slate-50 text-slate-700',
+    iconBox: 'bg-slate-100 text-slate-700'
+  },
+  critical: {
+    label: 'Tindakan',
+    icon: AlertTriangle,
+    badge: 'border-rose-200 bg-rose-50 text-rose-700',
+    iconBox: 'bg-rose-100 text-rose-700'
+  },
+  failed: {
+    label: 'Gagal',
+    icon: AlertTriangle,
+    badge: 'border-rose-200 bg-rose-50 text-rose-700',
+    iconBox: 'bg-rose-100 text-rose-700'
+  },
+  unavailable: {
+    label: 'Error',
+    icon: AlertTriangle,
+    badge: 'border-rose-200 bg-rose-50 text-rose-700',
+    iconBox: 'bg-rose-100 text-rose-700'
+  }
+}
+
+const getStatusMeta = (status) => statusMeta[status] || statusMeta.unknown
+
+const formatDuration = (seconds) => {
+  const value = Number(seconds)
+  if (!Number.isFinite(value) || value < 0) return '-'
+  if (value < 60) return `${Math.round(value)} dtk`
+  if (value < 3600) return `${Math.round(value / 60)} mnt`
+  return `${Math.round(value / 3600)} jam`
+}
+
+function StatusPill({ status, label }) {
+  const meta = getStatusMeta(status)
+  const Icon = meta.icon
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ${meta.badge}`}>
+      <Icon size={13} />
+      {label || meta.label}
+    </span>
+  )
 }
 
 function PageGate({ superAdminChecked, isSuperAdmin, children }) {
@@ -56,6 +161,254 @@ function StatCard({ label, value, hint, icon: Icon, tone = 'indigo' }) {
       </div>
       {hint ? <p className="mt-3 text-sm text-slate-500">{hint}</p> : null}
     </div>
+  )
+}
+
+function QueueMetricCard({ label, value, hint, icon: Icon, status = 'healthy' }) {
+  const meta = getStatusMeta(status)
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
+          <p className="mt-2 truncate text-2xl font-extrabold text-slate-950">{value}</p>
+        </div>
+        <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl ${meta.iconBox}`}>
+          <Icon size={19} />
+        </span>
+      </div>
+      {hint ? <p className="mt-3 text-sm text-slate-500">{hint}</p> : null}
+    </div>
+  )
+}
+
+function QueueStatusPanel({ jobs }) {
+  const status = jobs?.status || {}
+  const horizon = jobs?.horizon || {}
+  const redis = jobs?.redis || {}
+  const counts = horizon?.counts || {}
+  const failed = jobs?.database_failed_jobs || {}
+  const queueBacklog = (jobs?.queues || []).reduce((sum, row) => sum + Number(row.total_backlog || 0), 0)
+  const heartbeat = jobs?.heartbeats || {}
+  const schedulerStatus = heartbeat?.scheduler?.status || 'unknown'
+  const quizWorkerStatus = heartbeat?.quiz_worker?.status || 'unknown'
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">Queue & Background Jobs</p>
+          <h2 className="mt-1 text-xl font-extrabold text-slate-950">Worker Queue Operasional</h2>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusPill status={status.level} label={status.label} />
+          {horizon.dashboard_url ? (
+            <a
+              href={horizon.dashboard_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
+            >
+              <ExternalLink size={14} />
+              Horizon
+            </a>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+        <QueueMetricCard
+          label="Horizon"
+          value={horizon.status || '-'}
+          hint={horizon.version ? `Versi ${horizon.version}` : 'Dashboard queue'}
+          icon={ServerCog}
+          status={horizon.status === 'running' ? 'healthy' : horizon.status}
+        />
+        <QueueMetricCard
+          label="Redis"
+          value={redis.ok ? `${redis.latency_ms ?? 0} ms` : 'Error'}
+          hint="Koneksi queue"
+          icon={Database}
+          status={redis.status}
+        />
+        <QueueMetricCard
+          label="Backlog"
+          value={formatNumber(queueBacklog)}
+          hint="Ready + delayed + reserved"
+          icon={ListChecks}
+          status={queueBacklog > 0 ? 'warning' : 'healthy'}
+        />
+        <QueueMetricCard
+          label="Worker"
+          value={formatNumber(counts.processes)}
+          hint="Proses aktif"
+          icon={Gauge}
+          status={Number(counts.processes || 0) > 0 ? 'healthy' : 'warning'}
+        />
+        <QueueMetricCard
+          label="Failed 1 Jam"
+          value={formatNumber(failed.last_hour)}
+          hint={`${formatNumber(failed.last_24h)} dalam 24 jam`}
+          icon={AlertTriangle}
+          status={Number(failed.last_hour || 0) > 0 ? 'critical' : (Number(failed.last_24h || 0) > 0 ? 'warning' : 'healthy')}
+        />
+        <QueueMetricCard
+          label="Scheduler"
+          value={schedulerStatus}
+          hint={`Worker quiz ${quizWorkerStatus}`}
+          icon={TimerReset}
+          status={schedulerStatus}
+        />
+      </div>
+
+      {Array.isArray(status.issues) && status.issues.length > 0 ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-700" />
+            <div className="min-w-0 space-y-1">
+              {status.issues.slice(0, 4).map((issue) => (
+                <p key={issue} className="text-sm font-semibold text-amber-900">{issue}</p>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function QueueTable({ queues = [] }) {
+  return (
+    <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="text-base font-extrabold text-slate-950">Queue Backlog</h2>
+        <ListChecks size={18} className="text-indigo-500" />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-500">
+              <th className="px-3 py-2 font-bold">Queue</th>
+              <th className="px-3 py-2 text-right font-bold">Ready</th>
+              <th className="px-3 py-2 text-right font-bold">Delayed</th>
+              <th className="px-3 py-2 text-right font-bold">Reserved</th>
+              <th className="px-3 py-2 text-right font-bold">Wait</th>
+              <th className="px-3 py-2 text-right font-bold">Worker</th>
+              <th className="px-3 py-2 text-right font-bold">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {queues.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-500">Belum ada queue yang terpantau.</td>
+              </tr>
+            ) : queues.map((queue) => (
+              <tr key={queue.name} className="border-b border-slate-50 last:border-0">
+                <td className="px-3 py-3">
+                  <div className="font-bold text-slate-950">{queue.label || queue.name}</div>
+                  <div className="text-xs text-slate-500">{queue.name}</div>
+                </td>
+                <td className="px-3 py-3 text-right font-semibold text-slate-700">{formatNumber(queue.ready)}</td>
+                <td className="px-3 py-3 text-right font-semibold text-slate-700">{formatNumber(queue.delayed)}</td>
+                <td className="px-3 py-3 text-right font-semibold text-slate-700">{formatNumber(queue.reserved)}</td>
+                <td className="px-3 py-3 text-right font-semibold text-slate-700">{formatDuration(queue.wait_seconds)}</td>
+                <td className="px-3 py-3 text-right font-semibold text-slate-700">{formatNumber(queue.processes)}</td>
+                <td className="px-3 py-3 text-right"><StatusPill status={queue.status} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function WorkerPanel({ supervisors = [], heartbeats = {} }) {
+  const scheduler = heartbeats.scheduler || {}
+  const quizWorker = heartbeats.quiz_worker || {}
+  return (
+    <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="text-base font-extrabold text-slate-950">Worker & Heartbeat</h2>
+        <ServerCog size={18} className="text-indigo-500" />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+        <div className="rounded-2xl border border-slate-100 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-bold text-slate-950">Scheduler</span>
+            <StatusPill status={scheduler.status} />
+          </div>
+          <p className="text-xs text-slate-500">
+            {scheduler.last_seen_at ? `${formatDateTime(scheduler.last_seen_at)} · ${formatDuration(scheduler.age_seconds)}` : 'Belum ada heartbeat'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-100 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-bold text-slate-950">Quiz Worker</span>
+            <StatusPill status={quizWorker.status} />
+          </div>
+          <p className="text-xs text-slate-500">
+            {quizWorker.last_seen_at ? `${formatDateTime(quizWorker.last_seen_at)} · ${formatDuration(quizWorker.age_seconds)}` : 'Belum ada heartbeat'}
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 space-y-3">
+        {supervisors.length === 0 ? (
+          <div className="rounded-2xl bg-slate-50 p-5 text-sm text-slate-500">Horizon supervisor belum aktif.</div>
+        ) : supervisors.map((supervisor) => (
+          <div key={supervisor.name} className="rounded-2xl border border-slate-100 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-extrabold text-slate-950">{supervisor.name}</p>
+                <p className="text-xs text-slate-500">PID {supervisor.pid || '-'} · {formatNumber(supervisor.total_processes)} proses</p>
+              </div>
+              <StatusPill status={supervisor.status} />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(supervisor.queues || []).map((item) => (
+                <span key={`${supervisor.name}-${item.queue}`} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">
+                  {item.queue.replace('redis:', '')}: {formatNumber(item.processes)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function JobTable({ title, rows = [], empty, failed = false }) {
+  return (
+    <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="text-base font-extrabold text-slate-950">{title}</h2>
+        {failed ? <AlertTriangle size={18} className="text-rose-500" /> : <Clock3 size={18} className="text-indigo-500" />}
+      </div>
+      <div className="space-y-2">
+        {rows.length === 0 ? (
+          <div className="rounded-xl bg-slate-50 p-5 text-sm text-slate-500">{empty}</div>
+        ) : rows.map((job) => (
+          <div key={`${title}-${job.id || job.uuid || job.index}`} className="rounded-xl border border-slate-100 p-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-slate-950">{job.name || 'Job'}</p>
+                <p className="text-xs text-slate-500">{job.queue || '-'} · {job.status || 'failed'}</p>
+              </div>
+              <StatusPill status={failed ? 'critical' : (job.status === 'completed' ? 'healthy' : job.status)} />
+            </div>
+            {job.failed_at || job.completed_at || job.reserved_at ? (
+              <p className="mt-2 text-xs text-slate-500">
+                {formatDateTime(job.failed_at || job.completed_at || job.reserved_at)}
+              </p>
+            ) : null}
+            {job.exception ? (
+              <p className="mt-2 line-clamp-2 text-xs font-medium text-rose-700">{job.exception}</p>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -185,6 +538,7 @@ export default function SuperMonitoring() {
   const totals = data?.totals || {}
   const charts = data?.charts || {}
   const top = data?.top_tenants || {}
+  const jobs = data?.jobs || {}
 
   const loadData = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
@@ -244,6 +598,19 @@ export default function SuperMonitoring() {
           <StatCard label="Total Guru" value={formatNumber(totals.teachers)} hint={`${formatNumber(data?.active_by_role?.guru)} sedang aktif`} icon={UsersRound} tone="emerald" />
           <StatCard label="Admin Sekolah" value={formatNumber(totals.admins)} hint={`${formatNumber(data?.active_by_role?.admin)} sedang aktif`} icon={UsersRound} tone="amber" />
           <StatCard label="Online Sekarang" value={formatNumber(totals.online_now)} hint={`Window ${data?.active_window_minutes || 5} menit`} icon={Signal} tone="emerald" />
+        </div>
+
+        <QueueStatusPanel jobs={jobs} />
+
+        <div className="grid gap-4 xl:grid-cols-[1.35fr_.9fr]">
+          <QueueTable queues={jobs?.queues || []} />
+          <WorkerPanel supervisors={jobs?.horizon?.supervisors || []} heartbeats={jobs?.heartbeats || {}} />
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-3">
+          <JobTable title="Job Pending Horizon" rows={jobs?.horizon?.pending_jobs || []} empty="Tidak ada job pending." />
+          <JobTable title="Job Terbaru" rows={jobs?.horizon?.recent_jobs || []} empty="Belum ada riwayat Horizon." />
+          <JobTable title="Failed Job" rows={jobs?.database_failed_jobs?.recent?.length ? jobs.database_failed_jobs.recent : (jobs?.horizon?.failed_jobs || [])} empty="Tidak ada failed job." failed />
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[1.45fr_.95fr]">

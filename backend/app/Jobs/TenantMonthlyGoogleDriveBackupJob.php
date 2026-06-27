@@ -33,6 +33,15 @@ class TenantMonthlyGoogleDriveBackupJob implements ShouldQueue
         $this->onQueue((string) config('backup.queue', 'backup'));
     }
 
+    public function tags(): array
+    {
+        return [
+            'tenant:'.$this->tenantId,
+            'backup:monthly',
+            'queue:'.(string) config('backup.queue', 'backup'),
+        ];
+    }
+
     public function handle(TenantBackupService $tenantBackupService): void
     {
         $tenantBackupService->putMonthlyBackupJobStatus($this->tenantId, $this->jobId, [

@@ -6,6 +6,7 @@ use App\Models\Profile;
 use App\Models\User;
 use App\Services\Backup\TenantBackupService;
 use App\Services\GoogleDrive\GoogleDriveService;
+use App\Services\Monitoring\QueueMonitoringService;
 use App\Services\Rfid\RfidDeviceService;
 use App\Services\Rfid\TenantMqttConfigService;
 use App\Support\Tenancy\TenantDomainService;
@@ -105,7 +106,8 @@ class SuperAdminController extends ApiController
         private readonly RfidDeviceService $rfidDeviceService,
         private readonly TenantMqttConfigService $tenantMqttConfigService,
         private readonly GoogleDriveService $googleDriveService,
-        private readonly TenantBackupService $tenantBackupService
+        private readonly TenantBackupService $tenantBackupService,
+        private readonly QueueMonitoringService $queueMonitoringService
     ) {}
 
     public function me(Request $request)
@@ -1242,6 +1244,7 @@ class SuperAdminController extends ApiController
                 'tenant_counts' => $tenants->sortByDesc('total_users')->take(10)->values(),
                 'tenant_online' => $tenants->sortByDesc('online_now')->take(10)->values(),
             ],
+            'jobs' => $this->queueMonitoringService->snapshot($this->horizonDashboardUrl($request)),
         ]);
     }
 
@@ -1824,7 +1827,18 @@ class SuperAdminController extends ApiController
             'top_tenants' => ['students' => [], 'teachers' => [], 'admins' => [], 'overall' => []],
             'active_users' => [],
             'charts' => ['presence_24h' => [], 'tenant_counts' => [], 'tenant_online' => []],
+            'jobs' => $this->queueMonitoringService->snapshot(''),
         ];
+    }
+
+    private function horizonDashboardUrl(Request $request): string
+    {
+        $path = trim((string) config('horizon.path', 'horizon'), '/');
+        if ($path === '') {
+            return '';
+        }
+
+        return rtrim($request->getSchemeAndHttpHost(), '/').'/'.$path;
     }
 
     private function monitoringPresenceRows(Carbon $since)

@@ -19,6 +19,11 @@ class QuizWorkerHeartbeatJob implements ShouldQueue
         $this->onQueue((string) config('quiz.scoring_queue', 'quiz-scoring'));
     }
 
+    public function tags(): array
+    {
+        return ['heartbeat', 'quiz-worker'];
+    }
+
     public function handle(): void
     {
         Cache::put(

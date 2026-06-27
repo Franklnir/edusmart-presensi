@@ -13,6 +13,7 @@ use App\Services\WhatsApp\WhatsAppIntegrationService;
 use App\Services\WhatsApp\WhatsAppNotificationService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schedule;
@@ -24,6 +25,17 @@ use Illuminate\Validation\Rules\Password as PasswordRule;
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+Schedule::call(function (): void {
+    Cache::put('scheduler:last-heartbeat', now()->toISOString(), now()->addMinutes(10));
+})
+    ->name('scheduler:heartbeat')
+    ->everyMinute()
+    ->onOneServer();
+
+Schedule::command('horizon:snapshot')
+    ->everyFiveMinutes()
+    ->onOneServer();
 
 Schedule::command('backup:monthly-google-drive')
     ->dailyAt((string) config('backup.monthly_auto_start_time', '23:15'))

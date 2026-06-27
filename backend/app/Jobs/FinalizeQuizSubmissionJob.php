@@ -40,6 +40,15 @@ class FinalizeQuizSubmissionJob implements ShouldBeUnique, ShouldQueue
         return $this->tenantId.':'.$this->submissionId;
     }
 
+    public function tags(): array
+    {
+        return [
+            'tenant:'.$this->tenantId,
+            'quiz-submission:'.$this->submissionId,
+            'queue:'.(string) config('quiz.scoring_queue', 'quiz-scoring'),
+        ];
+    }
+
     public function handle(
         QuizScoringService $scoringService,
         WhatsAppNotificationService $notificationService

@@ -24,6 +24,14 @@ class SendWhatsAppMessageJob implements ShouldQueue
         public readonly string $logId
     ) {}
 
+    public function tags(): array
+    {
+        return [
+            'whatsapp',
+            'whatsapp-log:'.$this->logId,
+        ];
+    }
+
     public function handle(WhatsAppIntegrationService $integrationService): void
     {
         $log = WhatsAppMessageLog::query()->find($this->logId);

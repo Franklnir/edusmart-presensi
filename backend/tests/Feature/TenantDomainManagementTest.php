@@ -693,6 +693,39 @@ class TenantDomainManagementTest extends TestCase
             ->assertJsonPath('error', 'Topik scan MQTT rfid/scan sudah dipakai oleh tenant SMA Bali pada host/port yang sama.');
     }
 
+    public function test_super_admin_monitoring_includes_queue_snapshot(): void
+    {
+        config()->set('tenancy.root_domain', 'edusmart.test');
+        config()->set('tenancy.admin_subdomain', 'admin26');
+        config()->set('tenancy.admin_hosts', []);
+        config()->set('tenancy.allow_root_for_super_admin', false);
+
+        $superAdmin = $this->createSuperAdmin();
+
+        $this
+            ->actingAs($superAdmin)
+            ->getJson('http://admin26.edusmart.test/api/super/monitoring')
+            ->assertOk()
+            ->assertJsonStructure([
+                'data' => [
+                    'jobs' => [
+                        'generated_at',
+                        'status' => ['level', 'label', 'issues'],
+                        'redis' => ['ok', 'status'],
+                        'horizon' => ['installed', 'status', 'dashboard_url', 'counts'],
+                        'queues',
+                        'database_failed_jobs' => ['available', 'total', 'last_hour', 'last_24h', 'recent'],
+                        'heartbeats' => [
+                            'scheduler' => ['status', 'last_seen_at', 'age_seconds', 'max_age_seconds'],
+                            'quiz_worker' => ['status', 'last_seen_at', 'age_seconds', 'max_age_seconds'],
+                        ],
+                    ],
+                ],
+            ])
+            ->assertJsonPath('data.jobs.horizon.installed', true)
+            ->assertJsonPath('data.jobs.horizon.dashboard_url', 'http://admin26.edusmart.test/horizon');
+    }
+
     private function createSuperAdmin(): User
     {
         $user = User::query()->create([
