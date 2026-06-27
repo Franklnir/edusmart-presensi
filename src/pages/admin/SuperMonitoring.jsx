@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -23,6 +23,7 @@ import { formatDateTime } from '../../lib/time'
 
 const numberFormatter = new Intl.NumberFormat('id-ID')
 const formatNumber = (value) => numberFormatter.format(Number(value || 0))
+const JOB_LIST_VISIBLE_COUNT = 5
 
 const roleLabel = {
   siswa: 'Siswa',
@@ -379,13 +380,57 @@ function WorkerPanel({ supervisors = [], heartbeats = {} }) {
 }
 
 function JobTable({ title, rows = [], empty, failed = false }) {
+  const listRef = useRef(null)
+  const [maxListHeight, setMaxListHeight] = useState(null)
+  const shouldScroll = rows.length > JOB_LIST_VISIBLE_COUNT
+
+  useLayoutEffect(() => {
+    if (!shouldScroll) {
+      setMaxListHeight(null)
+      return undefined
+    }
+
+    const measureList = () => {
+      const list = listRef.current
+      if (!list) return
+
+      const visibleItems = Array.from(list.children).slice(0, JOB_LIST_VISIBLE_COUNT)
+      const first = visibleItems[0]
+      const last = visibleItems[visibleItems.length - 1]
+      if (!first || !last) return
+
+      const nextHeight = Math.ceil(last.offsetTop + last.offsetHeight - first.offsetTop)
+      setMaxListHeight((current) => (current === nextHeight ? current : nextHeight))
+    }
+
+    measureList()
+    const frame = window.requestAnimationFrame(measureList)
+    window.addEventListener('resize', measureList)
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', measureList)
+    }
+  }, [failed, rows, shouldScroll, title])
+
   return (
     <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-base font-extrabold text-slate-950">{title}</h2>
+        <div>
+          <h2 className="text-base font-extrabold text-slate-950">{title}</h2>
+          {shouldScroll ? (
+            <p className="mt-1 text-xs font-medium text-slate-500">
+              Tampil {JOB_LIST_VISIBLE_COUNT} dari {formatNumber(rows.length)} job, scroll untuk lainnya.
+            </p>
+          ) : null}
+        </div>
         {failed ? <AlertTriangle size={18} className="text-rose-500" /> : <Clock3 size={18} className="text-indigo-500" />}
       </div>
-      <div className="space-y-2">
+      <div
+        ref={listRef}
+        className={`space-y-2 ${shouldScroll ? 'overflow-y-auto overscroll-contain pr-1' : ''}`}
+        style={shouldScroll && maxListHeight ? { maxHeight: `${maxListHeight}px` } : undefined}
+      >
         {rows.length === 0 ? (
           <div className="rounded-xl bg-slate-50 p-5 text-sm text-slate-500">{empty}</div>
         ) : rows.map((job) => (
