@@ -7,6 +7,10 @@ import './index.css'
 import Toast from './components/Toast'
 import { queryClient } from './lib/queryClient'
 
+// Register PWA Service Worker
+import { registerSW } from 'virtual:pwa-register'
+registerSW({ immediate: true })
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

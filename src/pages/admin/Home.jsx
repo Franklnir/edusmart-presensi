@@ -337,6 +337,14 @@ export default function AHome() {
     }
   }, [loadCurrentAcademicPeriod, loadStatistics])
 
+  // LIVE RFID SYNC: Auto-poll statistics every 10 seconds silently
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadStatistics()
+    }, 10000)
+    return () => clearInterval(interval)
+  }, [loadStatistics])
+
 
   /* --- Data Umum (Guru & Siswa) --- */
   const [guruList, setGuruList] = useLocalCache('admin_dashboard_guruList', [])
