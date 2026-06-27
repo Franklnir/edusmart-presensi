@@ -640,10 +640,10 @@ const ensureCsrf = async (force = false) => {
   }
 
   csrfPromise = (async () => {
-    const res = await fetch(`${API_URL}/sanctum/csrf-cookie`, {
+    const res = await fetchWithTransientRetry(`${API_URL}/sanctum/csrf-cookie`, {
       method: 'GET',
       credentials: 'include'
-    })
+    }, { method: 'GET' })
     if (!res.ok) {
       throw new Error(`Gagal mengambil CSRF cookie (${res.status})`)
     }
@@ -666,11 +666,53 @@ const makeError = (message, status, code, extra = {}) => ({
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const API_RETRY_DELAYS_MS = [350, 900]
+const requestAbortReasons = typeof WeakMap !== 'undefined' ? new WeakMap() : null
+
 const isAbortError = (error) => (
   error?.name === 'AbortError' ||
   error?.code === 20 ||
   /aborted|abort/i.test(String(error?.message || ''))
 )
+
+const setAbortReason = (signal, reason) => {
+  if (!requestAbortReasons || !signal || !reason) return
+  try {
+    requestAbortReasons.set(signal, reason)
+  } catch { }
+}
+
+const getAbortReason = (signal) => {
+  if (!requestAbortReasons || !signal) return ''
+  try {
+    return requestAbortReasons.get(signal) || ''
+  } catch {
+    return ''
+  }
+}
+
+const fetchWithTransientRetry = async (url, init = {}, options = {}) => {
+  const method = String(options.method || init?.method || 'GET').toUpperCase()
+  const retryable = method === 'GET' || method === 'HEAD'
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await fetch(url, init)
+    } catch (error) {
+      const canRetry =
+        retryable &&
+        attempt < API_RETRY_DELAYS_MS.length &&
+        !isAbortError(error) &&
+        !init?.signal?.aborted
+
+      if (!canRetry) {
+        throw error
+      }
+
+      await wait(API_RETRY_DELAYS_MS[attempt])
+    }
+  }
+}
 
 const isSessionExpiredStatus = (status) => status === 401 || status === 419
 
@@ -876,13 +918,13 @@ const runApiFetch = async (path, options = {}) => {
   }
 
   const runFetch = async (requestHeaders) => {
-    return fetch(`${API_URL}${path}`, {
+    return fetchWithTransientRetry(`${API_URL}${path}`, {
       method,
       credentials: 'include',
       headers: requestHeaders,
       body: finalBody,
       signal
-    })
+    }, { method })
   }
 
   let res
@@ -890,6 +932,19 @@ const runApiFetch = async (path, options = {}) => {
     res = await runFetch(headers)
   } catch (error) {
     if (isAbortError(error)) {
+      if (getAbortReason(signal) === 'timeout') {
+        return {
+          data: null,
+          error: makeError(
+            `Request ke server API timeout (${API_URL}). Coba lagi beberapa saat.`,
+            0,
+            'REQUEST_TIMEOUT'
+          ),
+          raw: null,
+          aborted: true
+        }
+      }
+
       return {
         data: null,
         error: makeError('Request dibatalkan', 0, 'REQUEST_ABORTED'),
@@ -923,6 +978,19 @@ const runApiFetch = async (path, options = {}) => {
       res = await runFetch(retryHeaders)
     } catch (error) {
       if (isAbortError(error)) {
+        if (getAbortReason(signal) === 'timeout') {
+          return {
+            data: null,
+            error: makeError(
+              `Request ke server API timeout (${API_URL}). Coba lagi beberapa saat.`,
+              0,
+              'REQUEST_TIMEOUT'
+            ),
+            raw: null,
+            aborted: true
+          }
+        }
+
         return {
           data: null,
           error: makeError('Request dibatalkan', 0, 'REQUEST_ABORTED'),
@@ -999,6 +1067,7 @@ const createAbortableOptions = (path, method, options = {}) => {
   if (staleKey) {
     const previous = staleRequestControllers.get(staleKey)
     if (previous && !previous.signal.aborted) {
+      setAbortReason(previous.signal, 'stale')
       previous.abort()
     }
     staleRequestControllers.set(staleKey, controller)
@@ -1006,14 +1075,21 @@ const createAbortableOptions = (path, method, options = {}) => {
 
   if (externalSignal) {
     if (externalSignal.aborted) {
+      setAbortReason(controller.signal, 'external')
       controller.abort()
     } else {
-      externalSignal.addEventListener('abort', () => controller.abort(), { once: true })
+      externalSignal.addEventListener('abort', () => {
+        setAbortReason(controller.signal, 'external')
+        controller.abort()
+      }, { once: true })
     }
   }
 
   if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-    timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    timeoutId = setTimeout(() => {
+      setAbortReason(controller.signal, 'timeout')
+      controller.abort()
+    }, timeoutMs)
   }
 
   return {
@@ -1384,11 +1460,11 @@ export const downloadAuthenticatedFile = async (path, fallbackName = 'download.b
 
   let res
   try {
-    res = await fetch(`${API_URL}${path}`, {
+    res = await fetchWithTransientRetry(`${API_URL}${path}`, {
       method: 'GET',
       credentials: 'include',
       headers
-    })
+    }, { method: 'GET' })
   } catch {
     return {
       data: null,
