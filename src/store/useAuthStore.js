@@ -873,6 +873,7 @@ export const useAuthStore = create((set, get) => ({
      =========================== */
   expireSession: (message = 'Sesi login Anda telah berakhir. Silakan masuk lagi.') => {
     clearAuthSessionHint()
+    supabase.invalidateCache?.()
     set({
       user: null,
       profile: null,

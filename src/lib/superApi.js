@@ -6,7 +6,14 @@ const superApi = {
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async domains() {
-      const res = await apiFetch('/api/super/domains', { method: 'GET' })
+      const res = await apiFetch('/api/super/domains', {
+        method: 'GET',
+        cacheTtlMs: 30 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 10 * 60 * 1000,
+        staleKey: 'super.domains',
+        timeoutMs: 15000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async createAdminDomain(payload = {}) {
@@ -32,11 +39,25 @@ const superApi = {
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async tenants() {
-      const res = await apiFetch('/api/super/tenants', { method: 'GET' })
+      const res = await apiFetch('/api/super/tenants', {
+        method: 'GET',
+        cacheTtlMs: 30 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 10 * 60 * 1000,
+        staleKey: 'super.tenants',
+        timeoutMs: 15000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async tenantDetail(id) {
-      const res = await apiFetch(`/api/super/tenants/${id}`, { method: 'GET' })
+      const res = await apiFetch(`/api/super/tenants/${id}`, {
+        method: 'GET',
+        cacheTtlMs: 30 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 10 * 60 * 1000,
+        staleKey: `super.tenant-detail.${id}`,
+        timeoutMs: 15000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async tenantBackup(id, options = {}) {
@@ -48,7 +69,14 @@ const superApi = {
         params.set('months', String(Math.trunc(Number(monthsRaw))))
       }
       const query = params.toString() ? `?${params.toString()}` : ''
-      const res = await apiFetch(`/api/super/tenants/${id}/backup${query}`, { method: 'GET' })
+      const res = await apiFetch(`/api/super/tenants/${id}/backup${query}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
+        staleKey: `super.tenant-backup.${id}`,
+        timeoutMs: 20000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async saveTenantBackupToGoogleDrive(id, payload = {}) {
@@ -66,6 +94,8 @@ const superApi = {
       const res = await apiFetch(`/api/super/tenants/${id}/backup/monthly-status${suffix}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
         staleKey: `super.tenant-backup-monthly-status.${id}`,
         timeoutMs: 20000
       })
@@ -128,6 +158,8 @@ const superApi = {
     async tenantRfidDevices(id) {
       const res = await apiFetch(`/api/super/tenants/${id}/rfid-devices`, {
         cacheTtlMs: 5000,
+        persistCache: true,
+        staleCacheTtlMs: 2 * 60 * 1000,
         staleKey: `super.rfid-devices.${id}`
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
@@ -165,7 +197,14 @@ const superApi = {
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async admins() {
-      const res = await apiFetch('/api/super/admins', { method: 'GET' })
+      const res = await apiFetch('/api/super/admins', {
+        method: 'GET',
+        cacheTtlMs: 30 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 10 * 60 * 1000,
+        staleKey: 'super.admins',
+        timeoutMs: 15000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async createAdmin(payload) {
@@ -180,6 +219,8 @@ const superApi = {
       const res = await apiFetch('/api/super/monitoring', {
         method: 'GET',
         cacheTtlMs: 5000,
+        persistCache: true,
+        staleCacheTtlMs: 60 * 1000,
         staleKey: 'super.monitoring',
         timeoutMs: 20000
       })
@@ -189,6 +230,8 @@ const superApi = {
       const res = await apiFetch('/api/super/monitoring/server', {
         method: 'GET',
         cacheTtlMs: 3000,
+        persistCache: true,
+        staleCacheTtlMs: 30 * 1000,
         staleKey: 'super.monitoring-server',
         timeoutMs: 15000
       })
@@ -198,6 +241,8 @@ const superApi = {
       const res = await apiFetch(`/api/super/monitoring/logs${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 3000,
+        persistCache: true,
+        staleCacheTtlMs: 60 * 1000,
         staleKey: `super.monitoring-logs.${JSON.stringify(params || {})}`,
         timeoutMs: 20000
       })
@@ -207,6 +252,8 @@ const superApi = {
       const res = await apiFetch(`/api/super/monitoring/logs/${encodeURIComponent(id)}`, {
         method: 'GET',
         cacheTtlMs: 3000,
+        persistCache: true,
+        staleCacheTtlMs: 60 * 1000,
         staleKey: `super.monitoring-log.${id}`,
         timeoutMs: 20000
       })
@@ -216,6 +263,8 @@ const superApi = {
       const res = await apiFetch('/api/super/storage', {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
         staleKey: 'super.storage',
         timeoutMs: 20000
       })
@@ -225,6 +274,8 @@ const superApi = {
       const res = await apiFetch(`/api/super/tenants/${id}/storage${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
         staleKey: `super.tenant-storage.${id}`,
         timeoutMs: 20000
       })
@@ -234,6 +285,8 @@ const superApi = {
       const res = await apiFetch(`/api/super/tenants/${id}/google-drive${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
         staleKey: `super.tenant-google-drive.${id}`,
         timeoutMs: 20000
       })
@@ -243,6 +296,8 @@ const superApi = {
       const res = await apiFetch(`/api/super/tenants/${id}/google-drive/files${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
         staleKey: `super.tenant-google-drive-files.${id}`,
         timeoutMs: 20000
       })
@@ -340,6 +395,8 @@ const superApi = {
       const res = await apiFetch(`/api/super/whatsapp${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 2 * 60 * 1000,
         staleKey: `super.whatsapp.${JSON.stringify(params || {})}`,
         timeoutMs: 20000
       })

@@ -177,7 +177,11 @@ const MAX_PERSISTED_API_CACHE_ENTRIES = 80
 const DEFAULT_DB_SELECT_CACHE_TTL_MS = Number(
   import.meta.env.VITE_DB_SELECT_CACHE_TTL_MS || 1000 * 60 * 5
 )
+const DEFAULT_PERSISTED_API_STALE_TTL_MS = Number(
+  import.meta.env.VITE_PERSISTED_API_STALE_TTL_MS || 1000 * 60 * 10
+)
 const MAX_API_RESPONSE_CACHE_ENTRIES = 250
+const persistedApiRevalidations = new Map()
 
 const isPlainObjectValue = (value) => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -274,33 +278,60 @@ const writePersistedCacheIndex = (storage, entries) => {
   } catch { }
 }
 
-const getPersistedApiResponse = (key) => {
+const getPersistedApiResponse = (key, options = {}) => {
   const storage = getApiCacheStorage()
   if (!storage || !key) return null
 
   const storageKey = persistedCacheKey(key)
   try {
     const entry = JSON.parse(storage.getItem(storageKey) || 'null')
-    if (!entry || entry.expiresAt <= Date.now()) {
+    if (!entry) {
       storage.removeItem(storageKey)
       return null
     }
 
-    return cloneApiResult(entry.value)
+    const now = Date.now()
+    const expiresAt = Number(entry.expiresAt || entry.freshUntil || 0)
+    const staleExpiresAt = Number(entry.staleExpiresAt || expiresAt)
+    const allowStale = options.allowStale === true
+
+    if (expiresAt > now) {
+      return {
+        stale: false,
+        value: cloneApiResult(entry.value)
+      }
+    }
+
+    if (allowStale && staleExpiresAt > now) {
+      return {
+        stale: true,
+        value: cloneApiResult(entry.value)
+      }
+    }
+
+    storage.removeItem(storageKey)
+    return null
   } catch {
     storage.removeItem(storageKey)
     return null
   }
 }
 
-const setPersistedApiResponse = (key, value, ttlMs) => {
+const setPersistedApiResponse = (key, value, ttlMs, options = {}) => {
   const storage = getApiCacheStorage()
   if (!storage || !key || !Number.isFinite(ttlMs) || ttlMs <= 0) return
 
   const storageKey = persistedCacheKey(key)
   try {
+    const now = Date.now()
+    const staleTtlMs = Number(options.staleTtlMs || DEFAULT_PERSISTED_API_STALE_TTL_MS)
+    const normalizedStaleTtlMs = Number.isFinite(staleTtlMs)
+      ? Math.max(ttlMs, staleTtlMs)
+      : ttlMs
+
     storage.setItem(storageKey, JSON.stringify({
-      expiresAt: Date.now() + ttlMs,
+      expiresAt: now + ttlMs,
+      staleExpiresAt: now + normalizedStaleTtlMs,
       value: cloneApiResult(value)
     }))
 
@@ -1040,11 +1071,52 @@ const runApiFetch = async (path, options = {}) => {
     }
   }
 
+  if (
+    method !== 'GET' &&
+    method !== 'HEAD' &&
+    options.invalidateCache !== false &&
+    !isCacheableApiRequest(path, method, body, options)
+  ) {
+    invalidateDbSelectCache()
+  }
+
   return {
     data: json?.data ?? json,
     error: null,
     raw: json
   }
+}
+
+const revalidatePersistedApiResponse = (path, options, dedupeKey, cacheTtlMs, staleCacheTtlMs) => {
+  if (!dedupeKey || persistedApiRevalidations.has(dedupeKey)) return
+
+  const refreshOptions = {
+    ...options,
+    cacheTtlMs: 0,
+    dedupe: false,
+    persistCache: false,
+    signal: undefined,
+    staleKey: ''
+  }
+
+  const task = runApiFetch(path, refreshOptions)
+    .then((result) => {
+      const hasBatchErrors = Object.keys(result?.raw?.errors || {}).length > 0
+      if (!result?.error && !hasBatchErrors) {
+        setCachedApiResponse(dedupeKey, result, cacheTtlMs)
+        setPersistedApiResponse(dedupeKey, result, cacheTtlMs, {
+          staleTtlMs: staleCacheTtlMs
+        })
+      }
+    })
+    .catch(() => {
+      // Keep stale cache available; the foreground request should stay smooth.
+    })
+    .finally(() => {
+      persistedApiRevalidations.delete(dedupeKey)
+    })
+
+  persistedApiRevalidations.set(dedupeKey, task)
 }
 
 const createAbortableOptions = (path, method, options = {}) => {
@@ -1122,10 +1194,26 @@ export const apiFetch = async (path, options = {}) => {
     const cached = getCachedApiResponse(dedupeKey)
     if (cached) return cached
     if (canPersistApiCache(path, method, options)) {
-      const persisted = getPersistedApiResponse(dedupeKey)
-      if (persisted) {
-        setCachedApiResponse(dedupeKey, persisted, cacheTtlMs)
-        return persisted
+      const staleCacheTtlMs = Number(options.staleCacheTtlMs || DEFAULT_PERSISTED_API_STALE_TTL_MS)
+      const persisted = getPersistedApiResponse(dedupeKey, {
+        allowStale: options.returnStaleCache !== false,
+      })
+
+      if (persisted?.value) {
+        const cachedTtl = persisted.stale ? Math.min(cacheTtlMs, 3000) : cacheTtlMs
+        setCachedApiResponse(dedupeKey, persisted.value, cachedTtl)
+
+        if (persisted.stale && options.revalidateOnStale !== false) {
+          revalidatePersistedApiResponse(path, options, dedupeKey, cacheTtlMs, staleCacheTtlMs)
+        }
+
+        return {
+          ...persisted.value,
+          cache: {
+            persisted: true,
+            stale: persisted.stale
+          }
+        }
       }
     }
   }
@@ -1145,7 +1233,9 @@ export const apiFetch = async (path, options = {}) => {
       if (canUseCache && !result?.error && !hasBatchErrors) {
         setCachedApiResponse(dedupeKey, result, cacheTtlMs)
         if (canPersistApiCache(path, method, options) && options.persistCache !== false) {
-          setPersistedApiResponse(dedupeKey, result, cacheTtlMs)
+          setPersistedApiResponse(dedupeKey, result, cacheTtlMs, {
+            staleTtlMs: Number(options.staleCacheTtlMs || DEFAULT_PERSISTED_API_STALE_TTL_MS)
+          })
         }
       }
       return result
@@ -2784,6 +2874,8 @@ const reports = {
     const res = await apiFetch(`/api/reports/teacher-summary${buildQueryString(params)}`, {
       method: 'GET',
       cacheTtlMs: 30 * 1000,
+      persistCache: true,
+      staleCacheTtlMs: 10 * 60 * 1000,
       staleKey: `reports.teacher-summary.${params?.type || 'default'}`,
       timeoutMs: 90000
     })
@@ -2793,6 +2885,8 @@ const reports = {
     const res = await apiFetch(`/api/reports/attendance-summary${buildQueryString(params)}`, {
       method: 'GET',
       cacheTtlMs: 30 * 1000,
+      persistCache: true,
+      staleCacheTtlMs: 10 * 60 * 1000,
       staleKey: 'reports.attendance-summary',
       timeoutMs: 90000
     })
@@ -2802,6 +2896,8 @@ const reports = {
     const res = await apiFetch(`/api/reports/task-summary${buildQueryString(params)}`, {
       method: 'GET',
       cacheTtlMs: 30 * 1000,
+      persistCache: true,
+      staleCacheTtlMs: 10 * 60 * 1000,
       staleKey: 'reports.task-summary',
       timeoutMs: 90000
     })
@@ -2811,6 +2907,8 @@ const reports = {
     const res = await apiFetch(`/api/reports/quiz-summary${buildQueryString(params)}`, {
       method: 'GET',
       cacheTtlMs: 30 * 1000,
+      persistCache: true,
+      staleCacheTtlMs: 10 * 60 * 1000,
       staleKey: 'reports.quiz-summary',
       timeoutMs: 90000
     })
@@ -2820,6 +2918,8 @@ const reports = {
     const res = await apiFetch(`/api/reports/homeroom-summary${buildQueryString(params)}`, {
       method: 'GET',
       cacheTtlMs: 30 * 1000,
+      persistCache: true,
+      staleCacheTtlMs: 10 * 60 * 1000,
       staleKey: 'reports.homeroom-summary',
       timeoutMs: 120000
     })
@@ -3454,7 +3554,11 @@ export const supabase = {
       const res = await apiFetch('/api/public/settings', {
         method: 'GET',
         cache: true,
-        cacheTtlMs: DEFAULT_DB_SELECT_CACHE_TTL_MS
+        cacheTtlMs: DEFAULT_DB_SELECT_CACHE_TTL_MS,
+        persistCache: true,
+        staleCacheTtlMs: 30 * 60 * 1000,
+        staleKey: 'public.settings',
+        timeoutMs: 12000
       })
 
       return { data: res.raw?.data ?? null, error: res.error }

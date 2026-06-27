@@ -42,6 +42,8 @@ const adminApi = {
       const res = await apiFetch('/api/admin/dashboard-summary', {
         method: 'GET',
         cacheTtlMs: 60 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 10 * 60 * 1000,
         staleKey: 'admin.dashboard-summary',
         timeoutMs: 15000
       })
@@ -51,6 +53,8 @@ const adminApi = {
       const res = await apiFetch(`/api/admin/students${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 10 * 60 * 1000,
         staleKey: 'admin.students',
         timeoutMs: 15000
       })
@@ -61,6 +65,8 @@ const adminApi = {
       const res = await apiFetch(`/api/admin/students/${id}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
         staleKey: `admin.student-detail.${id}`,
         timeoutMs: 12000
       })
@@ -80,6 +86,8 @@ const adminApi = {
       const res = await apiFetch(`/api/admin/academic-summary${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 15 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 10 * 60 * 1000,
         staleKey: 'admin.academic-summary',
         timeoutMs: 15000
       })
@@ -107,6 +115,8 @@ const adminApi = {
       const res = await apiFetch(`/api/admin/student-options${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 20 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 10 * 60 * 1000,
         staleKey: `admin.student-options.${params?.kelas || 'all'}`,
         timeoutMs: 12000
       })
@@ -116,6 +126,8 @@ const adminApi = {
       const res = await apiFetch(`/api/admin/teachers${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 10 * 60 * 1000,
         staleKey: 'admin.teachers',
         timeoutMs: 15000
       })
@@ -125,6 +137,8 @@ const adminApi = {
       const res = await apiFetch(`/api/admin/certificates${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 30 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 10 * 60 * 1000,
         staleKey: 'admin.certificates',
         timeoutMs: 15000
       })
@@ -134,6 +148,8 @@ const adminApi = {
       const res = await apiFetch(`/api/admin/scan-session-summary${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 2 * 60 * 1000,
         staleKey: 'admin.scan-session-summary',
         timeoutMs: 12000
       })
@@ -143,6 +159,8 @@ const adminApi = {
       const res = await apiFetch('/api/admin/feature-permissions', {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 10 * 60 * 1000,
         staleKey: 'admin.feature-permissions',
         timeoutMs: 15000
       })
@@ -209,13 +227,22 @@ const adminApi = {
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async monitoring() {
-      const res = await apiFetch('/api/admin/monitoring', { method: 'GET' })
+      const res = await apiFetch('/api/admin/monitoring', {
+        method: 'GET',
+        cacheTtlMs: 5000,
+        persistCache: true,
+        staleCacheTtlMs: 60 * 1000,
+        staleKey: 'admin.monitoring',
+        timeoutMs: 12000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async delegatedPermissions() {
       const res = await apiFetch('/api/guru/admin-permissions', {
         method: 'GET',
         cacheTtlMs: 30 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
         staleKey: 'guru.admin-permissions',
         timeoutMs: 12000
       })
@@ -253,6 +280,8 @@ const adminApi = {
       const res = await apiFetch(`/api/admin/backup/monthly-status${suffix}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
         staleKey: 'admin.backup-monthly-status',
         timeoutMs: 20000
       })
@@ -291,7 +320,14 @@ const adminApi = {
         query.set(String(key), String(value))
       })
       const suffix = query.toString() ? `?${query.toString()}` : ''
-      const res = await apiFetch(`/api/admin/approvals${suffix}`, { method: 'GET' })
+      const res = await apiFetch(`/api/admin/approvals${suffix}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 2 * 60 * 1000,
+        staleKey: `admin.approvals.${suffix}`,
+        timeoutMs: 15000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async approveApproval(id, payload = {}) {
@@ -309,7 +345,14 @@ const adminApi = {
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async whatsapp() {
-      const res = await apiFetch('/api/admin/whatsapp', { method: 'GET' })
+      const res = await apiFetch('/api/admin/whatsapp', {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 2 * 60 * 1000,
+        staleKey: 'admin.whatsapp',
+        timeoutMs: 15000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async connectWhatsApp() {
@@ -345,7 +388,14 @@ const adminApi = {
         query.set(String(key), String(value))
       })
       const suffix = query.toString() ? `?${query.toString()}` : ''
-      const res = await apiFetch(`/api/admin/google-drive${suffix}`, { method: 'GET' })
+      const res = await apiFetch(`/api/admin/google-drive${suffix}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
+        staleKey: 'admin.google-drive',
+        timeoutMs: 15000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async googleDriveFiles(params = {}) {
@@ -355,7 +405,14 @@ const adminApi = {
         query.set(String(key), String(value))
       })
       const suffix = query.toString() ? `?${query.toString()}` : ''
-      const res = await apiFetch(`/api/admin/google-drive/files${suffix}`, { method: 'GET' })
+      const res = await apiFetch(`/api/admin/google-drive/files${suffix}`, {
+        method: 'GET',
+        cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
+        staleKey: `admin.google-drive-files.${suffix}`,
+        timeoutMs: 20000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async googleDriveConnectUrl(payload = {}) {
@@ -389,6 +446,8 @@ const adminApi = {
       const res = await apiFetch(`/api/admin/storage-manager${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 5 * 60 * 1000,
         staleKey: 'admin.storage-manager',
         timeoutMs: 15000
       })
