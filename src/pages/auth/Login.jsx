@@ -460,6 +460,11 @@ const Login = () => {
     }
   }, [completeGooglePopupLogin, setCooldownEnd, setFailCount])
 
+  // Deteksi jika halaman login dibuka di dalam popup window (misalnya setelah Google OAuth callback)
+  const isPopupWindow = typeof window !== 'undefined' && (
+    window.opener != null || window.name === 'edusmart_google_auth_popup'
+  )
+
   // Loading state
   if (isLoadingSettings) {
     return (
@@ -468,6 +473,191 @@ const Login = () => {
         <p className="login-loading-text">Memuat halaman login...</p>
       </div>
     );
+  }
+
+  // Jika dibuka di popup window (Google OAuth redirect kembali ke /login di popup),
+  // tampilkan versi minimalis yang bersih
+  if (isPopupWindow) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #f8fafc 0%, #eef2ff 50%, #e0f2fe 100%)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '16px',
+        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
+      }}>
+        <div style={{
+          width: '100%',
+          maxWidth: '380px',
+          background: '#ffffff',
+          borderRadius: '24px',
+          boxShadow: '0 20px 60px rgba(100, 116, 139, 0.15), 0 0 0 1px rgba(226, 232, 240, 0.8)',
+          overflow: 'hidden',
+          textAlign: 'center',
+        }}>
+          {/* Header */}
+          <div style={{
+            padding: '32px 24px 20px',
+            borderBottom: '1px solid #f1f5f9',
+          }}>
+            <div style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '16px',
+              background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '16px',
+              boxShadow: '0 8px 24px rgba(99, 102, 241, 0.3)',
+            }}>
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none">
+                <path d="M21.805 12.23c0-.76-.068-1.49-.195-2.19H12v4.15h5.49a4.69 4.69 0 0 1-2.04 3.08v2.56h3.3c1.93-1.78 3.055-4.4 3.055-7.6Z" fill="#fff" fillOpacity=".9"/>
+                <path d="M12 22c2.76 0 5.075-.915 6.765-2.475l-3.3-2.56c-.915.615-2.085.98-3.465.98-2.66 0-4.915-1.795-5.72-4.21H2.87v2.64A10 10 0 0 0 12 22Z" fill="#fff" fillOpacity=".75"/>
+                <path d="M6.28 13.735a5.97 5.97 0 0 1-.32-1.935c0-.67.115-1.32.32-1.935V7.225H2.87A9.99 9.99 0 0 0 2 11.8c0 1.61.385 3.135.87 4.575l3.41-2.64Z" fill="#fff" fillOpacity=".65"/>
+                <path d="M12 5.655c1.5 0 2.845.515 3.905 1.525l2.93-2.93C17.07 2.61 14.755 1.6 12 1.6A10 10 0 0 0 2.87 7.225l3.41 2.64c.805-2.415 3.06-4.21 5.72-4.21Z" fill="#fff" fillOpacity=".85"/>
+              </svg>
+            </div>
+
+            <h1 style={{
+              fontSize: '17px',
+              fontWeight: '700',
+              color: '#0f172a',
+              letterSpacing: '-0.02em',
+              margin: '0 0 4px',
+            }}>
+              Login Google Selesai
+            </h1>
+
+            <p style={{
+              fontSize: '12px',
+              color: '#64748b',
+              margin: 0,
+            }}>
+              Sedang memproses akun Anda...
+            </p>
+          </div>
+
+          {/* Status */}
+          <div style={{ padding: '24px' }}>
+            {error && (
+              <div style={{
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                borderRadius: '14px',
+                padding: '16px',
+                marginBottom: '12px',
+              }}>
+                <p style={{
+                  fontSize: '12px',
+                  color: '#b91c1c',
+                  margin: 0,
+                  lineHeight: '1.5',
+                }}>
+                  {error}
+                </p>
+              </div>
+            )}
+
+            {info && (
+              <div style={{
+                background: '#f0fdf4',
+                border: '1px solid #bbf7d0',
+                borderRadius: '14px',
+                padding: '16px',
+                marginBottom: '12px',
+              }}>
+                <p style={{
+                  fontSize: '12px',
+                  color: '#166534',
+                  margin: 0,
+                  lineHeight: '1.5',
+                }}>
+                  {info}
+                </p>
+              </div>
+            )}
+
+            {!error && !info && (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '8px 0',
+              }}>
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  border: '3px solid #e2e8f0',
+                  borderTopColor: '#6366f1',
+                  borderRadius: '50%',
+                  animation: 'popup-login-spin 0.8s linear infinite',
+                }} />
+                <p style={{
+                  fontSize: '12px',
+                  color: '#94a3b8',
+                  margin: 0,
+                }}>
+                  Mohon tunggu sebentar...
+                </p>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                try { window.close() } catch { /* ignore */ }
+                window.location.href = '/'
+              }}
+              style={{
+                width: '100%',
+                padding: '10px',
+                background: '#f1f5f9',
+                color: '#475569',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px',
+                fontSize: '12px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                marginTop: '8px',
+                transition: 'all 0.15s',
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = '#e2e8f0'
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = '#f1f5f9'
+              }}
+            >
+              Tutup Jendela Ini
+            </button>
+          </div>
+
+          {/* Security footer */}
+          <div style={{
+            padding: '10px 24px 14px',
+            borderTop: '1px solid #f1f5f9',
+          }}>
+            <p style={{
+              fontSize: '10px',
+              color: '#94a3b8',
+              margin: 0,
+            }}>
+              🔒 Koneksi terenkripsi · EduSmart tidak menyimpan password Google
+            </p>
+          </div>
+        </div>
+
+        <style>{`
+          @keyframes popup-login-spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    )
   }
 
   return (
