@@ -61,8 +61,8 @@ export const getGoogleAuthBridgeOrigin = () => {
 }
 
 const popupFeatures = () => {
-  const width = 500
-  const height = 560
+  const width = 460
+  const height = 520
   const left =
     typeof window !== 'undefined'
       ? Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2))
@@ -118,13 +118,16 @@ export const openGoogleAuthPopup = ({
 
   const state = createStateToken()
   const popupUrl = new URL(bridgeUrl, window.location.origin)
+  const returnUrl = new URL(
+    `${window.location.origin}${window.location.pathname}${window.location.search}${window.location.hash}`
+  )
+  returnUrl.searchParams.set('google_popup_state', state)
+  returnUrl.searchParams.set('google_popup_mode', mode)
+
   popupUrl.searchParams.set('mode', mode)
   popupUrl.searchParams.set('origin', window.location.origin)
   popupUrl.searchParams.set('state', state)
-  popupUrl.searchParams.set(
-    'return_to',
-    `${window.location.origin}${window.location.pathname}${window.location.search}${window.location.hash}`
-  )
+  popupUrl.searchParams.set('return_to', returnUrl.toString())
 
   const popup = window.open(
     popupUrl.toString(),

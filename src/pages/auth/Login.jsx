@@ -9,6 +9,7 @@ import { shouldForceAccountSetup } from '../../utils/accountSetup';
 import { sanitizeExternalUrl, sanitizeMediaUrl } from '../../utils/sanitize';
 import AuthIcon from '../../components/AuthIcon';
 import '../../styles/Login.css';
+import '../../styles/GooglePopup.css';
 
 const sanitizeNextPath = (value) => {
   const raw = String(value || '').trim();
@@ -53,6 +54,35 @@ const resolveRetryAfterSeconds = (result, fallbackMessage = '') => {
 
   return 0
 }
+
+const DEFAULT_LOGIN_SETTINGS = {
+  nama_sekolah: 'Sekolah',
+  alamat: '',
+  telepon: '',
+  email: '',
+  logo_url: ''
+}
+
+const GoogleLogo = () => (
+  <svg viewBox="0 0 24 24" width="30" height="30" fill="none">
+    <path
+      d="M21.805 12.23c0-.76-.068-1.49-.195-2.19H12v4.15h5.49a4.69 4.69 0 0 1-2.04 3.08v2.56h3.3c1.93-1.78 3.055-4.4 3.055-7.6Z"
+      fill="#4285F4"
+    />
+    <path
+      d="M12 22c2.76 0 5.075-.915 6.765-2.475l-3.3-2.56c-.915.615-2.085.98-3.465.98-2.66 0-4.915-1.795-5.72-4.21H2.87v2.64A10 10 0 0 0 12 22Z"
+      fill="#34A853"
+    />
+    <path
+      d="M6.28 13.735a5.97 5.97 0 0 1-.32-1.935c0-.67.115-1.32.32-1.935V7.225H2.87A9.99 9.99 0 0 0 2 11.8c0 1.61.385 3.135.87 4.575l3.41-2.64Z"
+      fill="#FBBC05"
+    />
+    <path
+      d="M12 5.655c1.5 0 2.845.515 3.905 1.525l2.93-2.93C17.07 2.61 14.755 1.6 12 1.6A10 10 0 0 0 2.87 7.225l3.41 2.64c.805-2.415 3.06-4.21 5.72-4.21Z"
+      fill="#EA4335"
+    />
+  </svg>
+)
 
 const Login = () => {
   const navigate = useNavigate();
@@ -103,9 +133,8 @@ const Login = () => {
     startCooldownSeconds(seconds);
   }, [startCooldownSeconds]);
 
-  const [settings, setSettings] = useState(null);
+  const [settings, setSettings] = useState(DEFAULT_LOGIN_SETTINGS);
   const [settingsId, setSettingsId] = useState(null);
-  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const [logoPreview, setLogoPreview] = useState('');
   const nextAfterLogin = sanitizeNextPath(
     new URLSearchParams(location.search).get('next')
@@ -121,13 +150,7 @@ const Login = () => {
 
         if (error && error.code === 'PGRST116') {
           // Tidak ada data settings, gunakan default
-          data = {
-            nama_sekolah: 'Sekolah',
-            alamat: '',
-            telepon: '',
-            email: '',
-            logo_url: ''
-          };
+          data = DEFAULT_LOGIN_SETTINGS;
         } else if (error) {
           throw error;
         }
@@ -135,19 +158,11 @@ const Login = () => {
         if (!isCancelled) {
           setSettings(data);
           if (data?.id) setSettingsId(data.id);
-          setIsLoadingSettings(false);
         }
       } catch (_err) {
         if (!isCancelled) {
           // Tetap lanjut meski settings gagal load
-          setSettings({
-            nama_sekolah: 'Sekolah',
-            alamat: '',
-            telepon: '',
-            email: '',
-            logo_url: ''
-          });
-          setIsLoadingSettings(false);
+          setSettings(DEFAULT_LOGIN_SETTINGS);
         }
       }
     };
@@ -166,6 +181,10 @@ const Login = () => {
       const url = new URL(window.location.href)
       const googleStatus = String(url.searchParams.get('google') || '').trim()
       const googleError = String(url.searchParams.get('google_error') || '').trim()
+      const googlePopupState = String(url.searchParams.get('google_popup_state') || '').trim()
+      const googlePopupMode = String(url.searchParams.get('google_popup_mode') || 'login')
+        .trim()
+        .toLowerCase()
       const loginReason = String(url.searchParams.get('reason') || '').trim()
       if (!googleStatus && !loginReason) return
 
@@ -191,6 +210,36 @@ const Login = () => {
         nextInfo = 'Akun Google berhasil ditautkan.'
       }
 
+      const openedAsPopup = window.opener != null || window.name === 'edusmart_google_auth_popup'
+      if (openedAsPopup && googlePopupState && googleStatus) {
+        const mode = googlePopupMode === 'link' ? 'link' : 'login'
+        const payload = {
+          source: 'edusmart-google-popup',
+          type: nextError ? 'edusmart-google-error' : 'edusmart-google-oauth-success',
+          state: googlePopupState,
+          mode,
+          status: googleStatus || 'success'
+        }
+
+        if (nextError) {
+          payload.error = nextError
+        }
+
+        try {
+          window.opener?.postMessage(payload, window.location.origin)
+        } catch {
+          // ignore popup bridge errors
+        }
+
+        window.setTimeout(() => {
+          try {
+            window.close()
+          } catch {
+            // ignore close errors
+          }
+        }, nextError ? 1800 : 700)
+      }
+
       setInfo(nextInfo)
       if (nextError) {
         setError(nextError)
@@ -200,6 +249,8 @@ const Login = () => {
 
       url.searchParams.delete('google')
       url.searchParams.delete('google_error')
+      url.searchParams.delete('google_popup_state')
+      url.searchParams.delete('google_popup_mode')
       const cleaned = `${url.pathname}${url.search}${url.hash}`
       window.history.replaceState({}, '', cleaned)
     } catch {
@@ -429,12 +480,13 @@ const Login = () => {
       const result = await loginWithGoogleCredential(credential)
       if (result?.error) {
         setError(result.error)
-        return
+        return result
       }
 
       setFailCount(0)
       setCooldownEnd(0)
       setInfo('Login Google berhasil. Mengarahkan ke dashboard...')
+      return result
     } finally {
       setIsGoogleSubmitting(false)
     }
@@ -449,12 +501,13 @@ const Login = () => {
       const result = await completeGooglePopupLogin()
       if (result?.error) {
         setError(result.error)
-        return
+        return result
       }
 
       setFailCount(0)
       setCooldownEnd(0)
       setInfo('Login Google berhasil. Mengarahkan ke dashboard...')
+      return result
     } finally {
       setIsGoogleSubmitting(false)
     }
@@ -465,197 +518,71 @@ const Login = () => {
     window.opener != null || window.name === 'edusmart_google_auth_popup'
   )
 
-  // Loading state
-  if (isLoadingSettings) {
-    return (
-      <div className="login-loading">
-        <div className="login-spinner"></div>
-        <p className="login-loading-text">Memuat halaman login...</p>
-      </div>
-    );
-  }
-
   // Jika dibuka di popup window (Google OAuth redirect kembali ke /login di popup),
   // tampilkan versi minimalis yang bersih
   if (isPopupWindow) {
+    const popupHasError = Boolean(error)
+    const popupHasSuccess = Boolean(info && !popupHasError)
+    const popupTitle = popupHasError
+      ? 'Login Google belum selesai'
+      : popupHasSuccess
+        ? 'Login Google berhasil'
+        : 'Menyelesaikan login Google'
+    const popupDescription = popupHasError
+      ? 'Tutup jendela ini, lalu coba login Google sekali lagi dari halaman utama.'
+      : popupHasSuccess
+        ? 'Sesi sedang disiapkan di halaman utama. Jendela ini akan tertutup otomatis.'
+        : 'Mohon tunggu sebentar saat kami menyiapkan sesi akun Anda.'
+
     return (
-      <div style={{
-        minHeight: '100vh',
-        background: 'linear-gradient(135deg, #f8fafc 0%, #eef2ff 50%, #e0f2fe 100%)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '16px',
-        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
-      }}>
-        <div style={{
-          width: '100%',
-          maxWidth: '380px',
-          background: '#ffffff',
-          borderRadius: '24px',
-          boxShadow: '0 20px 60px rgba(100, 116, 139, 0.15), 0 0 0 1px rgba(226, 232, 240, 0.8)',
-          overflow: 'hidden',
-          textAlign: 'center',
-        }}>
-          {/* Header */}
-          <div style={{
-            padding: '32px 24px 20px',
-            borderBottom: '1px solid #f1f5f9',
-          }}>
-            <div style={{
-              width: '56px',
-              height: '56px',
-              borderRadius: '16px',
-              background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '16px',
-              boxShadow: '0 8px 24px rgba(99, 102, 241, 0.3)',
-            }}>
-              <svg viewBox="0 0 24 24" width="28" height="28" fill="none">
-                <path d="M21.805 12.23c0-.76-.068-1.49-.195-2.19H12v4.15h5.49a4.69 4.69 0 0 1-2.04 3.08v2.56h3.3c1.93-1.78 3.055-4.4 3.055-7.6Z" fill="#fff" fillOpacity=".9"/>
-                <path d="M12 22c2.76 0 5.075-.915 6.765-2.475l-3.3-2.56c-.915.615-2.085.98-3.465.98-2.66 0-4.915-1.795-5.72-4.21H2.87v2.64A10 10 0 0 0 12 22Z" fill="#fff" fillOpacity=".75"/>
-                <path d="M6.28 13.735a5.97 5.97 0 0 1-.32-1.935c0-.67.115-1.32.32-1.935V7.225H2.87A9.99 9.99 0 0 0 2 11.8c0 1.61.385 3.135.87 4.575l3.41-2.64Z" fill="#fff" fillOpacity=".65"/>
-                <path d="M12 5.655c1.5 0 2.845.515 3.905 1.525l2.93-2.93C17.07 2.61 14.755 1.6 12 1.6A10 10 0 0 0 2.87 7.225l3.41 2.64c.805-2.415 3.06-4.21 5.72-4.21Z" fill="#fff" fillOpacity=".85"/>
-              </svg>
+      <div className="google-popup-page">
+        <main className="google-popup-shell">
+          <section className="google-popup-panel" aria-live="polite">
+            <div className="google-popup-logo" aria-hidden="true">
+              <GoogleLogo />
             </div>
+            <p className="google-popup-kicker">Google sign-in</p>
+            <h1 className="google-popup-title">{popupTitle}</h1>
+            <p className="google-popup-description">{popupDescription}</p>
 
-            <h1 style={{
-              fontSize: '17px',
-              fontWeight: '700',
-              color: '#0f172a',
-              letterSpacing: '-0.02em',
-              margin: '0 0 4px',
-            }}>
-              Login Google Selesai
-            </h1>
-
-            <p style={{
-              fontSize: '12px',
-              color: '#64748b',
-              margin: 0,
-            }}>
-              Sedang memproses akun Anda...
-            </p>
-          </div>
-
-          {/* Status */}
-          <div style={{ padding: '24px' }}>
             {error && (
-              <div style={{
-                background: '#fef2f2',
-                border: '1px solid #fecaca',
-                borderRadius: '14px',
-                padding: '16px',
-                marginBottom: '12px',
-              }}>
-                <p style={{
-                  fontSize: '12px',
-                  color: '#b91c1c',
-                  margin: 0,
-                  lineHeight: '1.5',
-                }}>
-                  {error}
-                </p>
+              <div className="google-popup-status google-popup-status--error">
+                <span>{error}</span>
               </div>
             )}
 
-            {info && (
-              <div style={{
-                background: '#f0fdf4',
-                border: '1px solid #bbf7d0',
-                borderRadius: '14px',
-                padding: '16px',
-                marginBottom: '12px',
-              }}>
-                <p style={{
-                  fontSize: '12px',
-                  color: '#166534',
-                  margin: 0,
-                  lineHeight: '1.5',
-                }}>
-                  {info}
-                </p>
+            {info && !error && (
+              <div className="google-popup-status google-popup-status--success">
+                <span className="google-popup-check" aria-hidden="true" />
+                <span>{info}</span>
               </div>
             )}
 
             {!error && !info && (
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '12px',
-                padding: '8px 0',
-              }}>
-                <div style={{
-                  width: '32px',
-                  height: '32px',
-                  border: '3px solid #e2e8f0',
-                  borderTopColor: '#6366f1',
-                  borderRadius: '50%',
-                  animation: 'popup-login-spin 0.8s linear infinite',
-                }} />
-                <p style={{
-                  fontSize: '12px',
-                  color: '#94a3b8',
-                  margin: 0,
-                }}>
-                  Mohon tunggu sebentar...
-                </p>
+              <div className="google-popup-status">
+                <span className="google-popup-spinner" aria-hidden="true" />
+                <span>Memproses akun Google...</span>
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={() => {
-                try { window.close() } catch { /* ignore */ }
-                window.location.href = '/'
-              }}
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#f1f5f9',
-                color: '#475569',
-                border: '1px solid #e2e8f0',
-                borderRadius: '12px',
-                fontSize: '12px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                marginTop: '8px',
-                transition: 'all 0.15s',
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.background = '#e2e8f0'
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.background = '#f1f5f9'
-              }}
-            >
-              Tutup Jendela Ini
-            </button>
-          </div>
+            <div className="google-popup-actions">
+              <button
+                type="button"
+                className="google-popup-button"
+                onClick={() => {
+                  try { window.close() } catch { /* ignore */ }
+                  window.location.href = '/'
+                }}
+              >
+                Tutup jendela
+              </button>
+            </div>
 
-          {/* Security footer */}
-          <div style={{
-            padding: '10px 24px 14px',
-            borderTop: '1px solid #f1f5f9',
-          }}>
-            <p style={{
-              fontSize: '10px',
-              color: '#94a3b8',
-              margin: 0,
-            }}>
-              🔒 Koneksi terenkripsi · EduSmart tidak menyimpan password Google
+            <p className="google-popup-secure">
+              Koneksi aman. EduSmart tidak menyimpan password Google Anda.
             </p>
-          </div>
-        </div>
-
-        <style>{`
-          @keyframes popup-login-spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+          </section>
+        </main>
       </div>
     )
   }

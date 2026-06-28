@@ -3,9 +3,10 @@ import React, { useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import ConfirmDialog from './components/ConfirmDialog'
+import AppBootShell from './components/AppBootShell'
 import AppRoutes from './router'
 import { useAuthStore } from './store/useAuthStore'
-import { SESSION_EXPIRED_EVENT, supabase } from './lib/supabase'
+import { SESSION_EXPIRED_EVENT, hasAuthSessionHint, supabase } from './lib/supabase'
 import { isMarketingLandingPath } from './utils/marketingHost'
 import {
   DEFAULT_USER_THEME,
@@ -34,6 +35,12 @@ const App = () => {
   const isAuthPage = AUTH_PATHS.some((p) => location.pathname.startsWith(p))
   const isMarketingPage = isMarketingLandingPath(location.pathname)
   const isQuizSessionPage = location.pathname.startsWith('/siswa/quiz/session/')
+  const shouldShowBootShell =
+    !initialized &&
+    !user &&
+    !isAuthPage &&
+    !isMarketingPage &&
+    hasAuthSessionHint()
   const role = profile?.role || ''
   const canTrackPresence = Boolean(user?.id && profile?.id && !isSuperAdmin && !isMarketingPage)
   const canApplyUserTheme = canUseUserTheme(role)
@@ -204,6 +211,15 @@ const App = () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [user?.id])
+
+  if (shouldShowBootShell) {
+    return (
+      <div className={appShellClassName}>
+        <AppBootShell />
+        <ConfirmDialog />
+      </div>
+    )
+  }
 
   // Layout untuk halaman publik/auth (landing, login, register, dll)
   if (isMarketingPage || isAuthPage || !user) {

@@ -437,7 +437,7 @@ export const setAuthSessionHint = (value = true) => {
 
 export const clearAuthSessionHint = () => setAuthSessionHint(false)
 
-const hasAuthSessionHint = () => {
+export const hasAuthSessionHint = () => {
   const storage = getSessionStorage()
   if (!storage) return false
 
