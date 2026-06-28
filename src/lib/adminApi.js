@@ -232,10 +232,9 @@ const adminApi = {
     async monitoring() {
       const res = await apiFetch('/api/admin/monitoring', {
         method: 'GET',
-        cacheTtlMs: 5000,
-        persistCache: true,
-        staleCacheTtlMs: 60 * 1000,
-        staleKey: 'admin.monitoring',
+        cacheTtlMs: 0,
+        persistCache: false,
+        staleKey: '',
         timeoutMs: 12000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }

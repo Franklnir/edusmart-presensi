@@ -78,4 +78,100 @@ class PresenceControllerTest extends TestCase
             'role' => 'siswa',
         ]);
     }
+
+    public function test_admin_monitoring_is_scoped_to_current_tenant(): void
+    {
+        config(['tenancy.allow_header_override' => true]);
+
+        $tenantId = (string) DB::table('tenants')->where('slug', 'default')->value('id');
+        $otherTenantId = (string) Str::uuid();
+        DB::table('tenants')->insert([
+            'id' => $otherTenantId,
+            'name' => 'Sekolah Lain',
+            'slug' => 'sekolah-lain',
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $admin = $this->createProfileUser($tenantId, 'admin', 'admin-monitoring@example.com', 'Admin Monitoring');
+        $student = $this->createProfileUser($tenantId, 'siswa', 'student-monitoring@example.com', 'Siswa Tenant Ini', 'x-a');
+        $teacher = $this->createProfileUser($tenantId, 'guru', 'teacher-monitoring@example.com', 'Guru Tenant Ini');
+        $otherStudent = $this->createProfileUser($otherTenantId, 'siswa', 'student-other-monitoring@example.com', 'Siswa Tenant Lain', 'x-b');
+
+        DB::table('user_presence')->insert([
+            [
+                'tenant_id' => $tenantId,
+                'user_id' => $student->id,
+                'device_id' => 'student-device',
+                'role' => 'siswa',
+                'last_seen_at' => now(),
+                'activity_count' => 2,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'tenant_id' => $tenantId,
+                'user_id' => $teacher->id,
+                'device_id' => 'teacher-device',
+                'role' => 'guru',
+                'last_seen_at' => now(),
+                'activity_count' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'tenant_id' => $otherTenantId,
+                'user_id' => $otherStudent->id,
+                'device_id' => 'other-device',
+                'role' => 'siswa',
+                'last_seen_at' => now(),
+                'activity_count' => 9,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $response = $this
+            ->actingAs($admin)
+            ->withHeader('X-Tenant', 'default')
+            ->getJson('/api/admin/monitoring');
+
+        $response->assertOk();
+        $studentIds = collect($response->json('data.students'))->pluck('id');
+        $teacherIds = collect($response->json('data.teachers'))->pluck('id');
+
+        $this->assertTrue($studentIds->contains($student->id));
+        $this->assertTrue($teacherIds->contains($teacher->id));
+        $this->assertFalse($studentIds->contains($otherStudent->id));
+    }
+
+    private function createProfileUser(
+        string $tenantId,
+        string $role,
+        string $email,
+        string $name,
+        string $kelas = ''
+    ): User {
+        $user = User::query()->create([
+            'id' => (string) Str::uuid(),
+            'name' => $name,
+            'email' => $email,
+            'password' => Hash::make('password123'),
+        ]);
+
+        DB::table('profiles')->insert([
+            'id' => $user->id,
+            'tenant_id' => $tenantId,
+            'email' => $user->email,
+            'nama' => $name,
+            'role' => $role,
+            'kelas' => $kelas,
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $user;
+    }
 }
