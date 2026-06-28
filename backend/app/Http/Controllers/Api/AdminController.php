@@ -427,16 +427,19 @@ class AdminController extends ApiController
             return $this->deny('Tenant tidak valid', 400);
         }
 
-        $cacheKey = "tenant:{$tenantId}:admin-dashboard-summary:v2";
-        $payload = Cache::remember($cacheKey, now()->addSeconds(60), function () use ($tenantId) {
+        $settings = $this->firstTenantRow('settings', $tenantId);
+        $requestedAcademicYear = AcademicPeriod::normalizeAcademicYear($this->queryText($request, 'tahun_ajaran'));
+        $tahunAjaran = $requestedAcademicYear ?: (AcademicPeriod::normalizeAcademicYear($settings?->tahun_ajaran ?? null) ?: '');
+
+        $cacheKey = $this->dashboardSummaryCacheKey($tenantId, $tahunAjaran);
+        $payload = Cache::remember($cacheKey, now()->addSeconds(60), function () use ($tenantId, $settings, $tahunAjaran) {
             $profileCounts = DB::table('profiles')
                 ->select('role', DB::raw('count(*) as aggregate'))
                 ->where('tenant_id', $tenantId)
-                ->whereIn('role', ['siswa', 'guru', 'admin'])
+                ->whereIn('role', ['guru', 'admin'])
                 ->groupBy('role')
                 ->pluck('aggregate', 'role');
 
-            $settings = $this->firstTenantRow('settings', $tenantId);
             $periodStart = $settings?->periode_mulai ?? null;
             $periodEnd = $settings?->periode_selesai ?? null;
 
@@ -446,13 +449,14 @@ class AdminController extends ApiController
             }
 
             return [
-                'siswa' => (int) ($profileCounts['siswa'] ?? 0),
+                'siswa' => $this->studentCountForAcademicYear($tenantId, $tahunAjaran),
                 'guru' => (int) ($profileCounts['guru'] ?? 0),
                 'admin' => (int) ($profileCounts['admin'] ?? 0),
-                'kelas' => $this->tenantTableCount('kelas', $tenantId),
+                'kelas' => $this->classesForAcademicYear($tenantId, $tahunAjaran)->count(),
                 'absensi' => Schema::hasTable('absensi') ? (int) $attendanceQuery->count() : 0,
                 'pengumuman' => $this->tenantTableCount('pengumuman', $tenantId),
                 'eskul' => $this->tenantTableCount('ekskul', $tenantId),
+                'tahun_ajaran' => $tahunAjaran,
                 'generated_at' => now()->toISOString(),
             ];
         });
@@ -756,6 +760,10 @@ class AdminController extends ApiController
         );
 
         Cache::forget("tenant:{$tenantId}:admin-dashboard-summary:v2");
+        Cache::forget($this->dashboardSummaryCacheKey(
+            $tenantId,
+            AcademicPeriod::normalizeAcademicYear($this->firstTenantRow('settings', $tenantId)?->tahun_ajaran ?? null) ?: ''
+        ));
         $this->logAudit($request, 'profiles', $historyId ?: 'student-import', 'IMPORT', null, [
             'summary' => $summary,
             'history_id' => $historyId,
@@ -789,20 +797,12 @@ class AdminController extends ApiController
 
         $settings = $this->firstTenantRow('settings', $tenantId);
         if ($tahunAjaran === '') {
-            $tahunAjaran = (string) ($settings?->tahun_ajaran ?? '');
+            $tahunAjaran = AcademicPeriod::normalizeAcademicYear($settings?->tahun_ajaran ?? null) ?: '';
+        } else {
+            $tahunAjaran = AcademicPeriod::normalizeAcademicYear($tahunAjaran) ?: $tahunAjaran;
         }
 
-        $classes = $this->tenantQuery('kelas', $tenantId)
-            ->select($this->existingColumns('kelas', [
-                'id', 'nama', 'grade', 'suffix', 'tingkat', 'jurusan',
-                'angkatan', 'tahun_ajaran', 'semester', 'is_active',
-                'created_at', 'updated_at',
-            ]))
-            ->orderBy(Schema::hasColumn('kelas', 'grade') ? 'grade' : 'id')
-            ->when(Schema::hasColumn('kelas', 'suffix'), fn ($builder) => $builder->orderBy('suffix'))
-            ->get()
-            ->map(fn ($row) => (array) $row)
-            ->values();
+        $classes = $this->classesForAcademicYear($tenantId, $tahunAjaran);
 
         $selectedClassId = $requestedClassId;
         if ($selectedClassId === '' || ! $classes->contains(fn ($row) => (string) ($row['id'] ?? '') === $selectedClassId)) {
@@ -819,38 +819,51 @@ class AdminController extends ApiController
             ->map(fn ($row) => (array) $row)
             ->values();
 
-        $selectedStructure = $selectedClassId !== '' && Schema::hasTable('kelas_struktur')
-            ? $this->tenantQuery('kelas_struktur', $tenantId)
+        $classIds = $classes
+            ->pluck('id')
+            ->filter(fn ($id) => trim((string) $id) !== '')
+            ->map(fn ($id) => (string) $id)
+            ->values()
+            ->all();
+
+        $classStructureRows = collect();
+        if (Schema::hasTable('kelas_struktur')) {
+            $classStructureRows = $this->tenantQuery('kelas_struktur', $tenantId)
                 ->select($this->existingColumns('kelas_struktur', [
                     'kelas_id', 'wali_guru_id', 'wali_guru_nama',
                     'ketua_siswa_id', 'ketua_siswa_nama', 'created_at', 'updated_at',
                 ]))
-                ->where('kelas_id', $selectedClassId)
-                ->first()
+                ->when(! empty($classIds), fn ($builder) => $builder->whereIn('kelas_id', $classIds))
+                ->get()
+                ->map(fn ($row) => (array) $row)
+                ->values();
+        }
+
+        $selectedStructure = $selectedClassId !== ''
+            ? $classStructureRows->first(fn ($row) => (string) ($row['kelas_id'] ?? '') === $selectedClassId)
             : null;
+
+        $schoolStructureRows = Schema::hasTable('struktur_sekolah')
+            ? $this->tenantQuery('struktur_sekolah', $tenantId)
+                ->select($this->existingColumns('struktur_sekolah', [
+                    'id', 'jabatan', 'guru_id', 'guru_nama', 'created_at', 'updated_at',
+                ]))
+                ->orderBy('jabatan')
+                ->get()
+                ->map(fn ($row) => (array) $row)
+                ->values()
+            : collect();
 
         $students = collect();
         if ($includeStudents && $selectedClassId !== '') {
             $studentLimit = max(1, min(1000, (int) $request->query('students_limit', 250)));
-            $studentQuery = DB::table('profiles')
-                ->where('tenant_id', $tenantId)
-                ->where('role', 'siswa')
-                ->where('kelas', $selectedClassId);
-
-            if ($studentStatus !== '') {
-                $studentQuery->whereRaw('lower(coalesce(status, \'active\')) = ?', [$studentStatus]);
-            }
-
-            $students = $studentQuery
-                ->select($this->existingColumns('profiles', [
-                    'id', 'nama', 'email', 'kelas', 'role', 'status', 'nis', 'angkatan',
-                    'created_via', 'created_by',
-                ]))
-                ->orderBy('nama')
-                ->limit($studentLimit)
-                ->get()
-                ->map(fn ($row) => (array) $row)
-                ->values();
+            $students = $this->studentsForAcademicYearClass(
+                $tenantId,
+                $selectedClassId,
+                $tahunAjaran,
+                $studentStatus,
+                $studentLimit
+            );
 
             $historiesByStudent = $this->studentClassHistoriesForStudents(
                 $tenantId,
@@ -903,6 +916,9 @@ class AdminController extends ApiController
                 'settings' => $settings ? (array) $settings : null,
                 'guru' => $teacherRows,
                 'kelas' => $classes,
+                'struktur' => $classStructureRows,
+                'kelas_struktur' => $classStructureRows,
+                'struktur_sekolah' => $schoolStructureRows,
                 'selected_class_id' => $selectedClassId,
                 'selected_structure' => $selectedStructure ? (array) $selectedStructure : null,
                 'selected_students' => $students,
@@ -1306,6 +1322,32 @@ class AdminController extends ApiController
         $search = strtolower($this->queryText($request, 'q'));
         $kelas = $this->queryText($request, 'kelas');
         $status = strtolower($this->queryText($request, 'status') ?: 'active');
+        $tahunAjaran = AcademicPeriod::normalizeAcademicYear($this->queryText($request, 'tahun_ajaran')) ?: '';
+
+        $historyHasPeriodRows = $tahunAjaran !== '' && $this->hasStudentClassHistoryForYear($tenantId, $tahunAjaran);
+        if ($historyHasPeriodRows) {
+            $rows = $this->studentOptionRowsFromClassHistory(
+                $tenantId,
+                $tahunAjaran,
+                $kelas,
+                $status,
+                $search,
+                $perPage + 1
+            );
+
+            $hasMore = $rows->count() > $perPage;
+
+            return response()->json([
+                'data' => [
+                    'rows' => $rows->take($perPage)->values(),
+                    'meta' => [
+                        'per_page' => $perPage,
+                        'has_more' => $hasMore,
+                        'all' => $allRows,
+                    ],
+                ],
+            ]);
+        }
 
         $query = DB::table('profiles')
             ->where('tenant_id', $tenantId)
@@ -1313,6 +1355,8 @@ class AdminController extends ApiController
 
         if ($status !== '') {
             $query->whereRaw('lower(coalesce(status, \'active\')) = ?', [$status]);
+        } else {
+            $query->whereRaw('lower(coalesce(status, \'active\')) <> ?', ['alumni']);
         }
         if ($kelas !== '') {
             $query->where('kelas', $kelas);
@@ -3490,6 +3534,346 @@ class AdminController extends ApiController
         }
 
         return $count;
+    }
+
+    private function dashboardSummaryCacheKey(string $tenantId, string $tahunAjaran = ''): string
+    {
+        return "tenant:{$tenantId}:admin-dashboard-summary:v3:".sha1($tahunAjaran ?: 'active');
+    }
+
+    private function studentCountForAcademicYear(string $tenantId, string $tahunAjaran = ''): int
+    {
+        if ($tahunAjaran !== '' && $this->hasStudentClassHistoryForYear($tenantId, $tahunAjaran)) {
+            $query = $this->tenantQuery('student_class_histories', $tenantId)
+                ->where('tahun_ajaran', $tahunAjaran)
+                ->whereNotNull('student_id')
+                ->whereNotNull('class_id')
+                ->where('class_id', '!=', '')
+                ->whereRaw('lower(coalesce(status, \'active\')) <> ?', ['alumni']);
+
+            return (int) $query->distinct()->count('student_id');
+        }
+
+        if (! Schema::hasTable('profiles')) {
+            return 0;
+        }
+
+        return (int) DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->whereRaw('lower(coalesce(status, \'active\')) <> ?', ['alumni'])
+            ->count();
+    }
+
+    private function classesForAcademicYear(string $tenantId, string $tahunAjaran = '')
+    {
+        $baseRows = $this->classRowsFromTable($tenantId);
+        $periodTableRows = $this->classRowsFromTable($tenantId, $tahunAjaran);
+        $historyRows = $this->classRowsFromStudentHistory($tenantId, $tahunAjaran);
+
+        if ($historyRows->isNotEmpty()) {
+            $baseById = $baseRows->keyBy(fn ($row) => (string) ($row['id'] ?? ''));
+            $merged = [];
+
+            foreach ($historyRows as $row) {
+                $id = (string) ($row['id'] ?? '');
+                if ($id === '') {
+                    continue;
+                }
+
+                $base = (array) ($baseById->get($id) ?? []);
+                $merged[$id] = $this->mergeClassRowPreferNonEmpty($base, $row);
+            }
+
+            foreach ($periodTableRows as $row) {
+                $id = (string) ($row['id'] ?? '');
+                if ($id === '') {
+                    continue;
+                }
+
+                $merged[$id] = isset($merged[$id])
+                    ? $this->mergeClassRowPreferNonEmpty($row, $merged[$id])
+                    : $row;
+            }
+
+            return $this->sortClassRows(collect(array_values($merged)));
+        }
+
+        if ($periodTableRows->isNotEmpty()) {
+            return $this->sortClassRows($periodTableRows);
+        }
+
+        return $this->sortClassRows($baseRows);
+    }
+
+    private function classRowsFromTable(string $tenantId, string $tahunAjaran = '')
+    {
+        if (! Schema::hasTable('kelas')) {
+            return collect();
+        }
+
+        if ($tahunAjaran !== '' && ! Schema::hasColumn('kelas', 'tahun_ajaran')) {
+            return collect();
+        }
+
+        $query = $this->tenantQuery('kelas', $tenantId)
+            ->select($this->existingColumns('kelas', [
+                'id', 'nama', 'grade', 'suffix', 'tingkat', 'jurusan',
+                'angkatan', 'tahun_ajaran', 'semester', 'is_active',
+                'created_at', 'updated_at',
+            ]));
+
+        if ($tahunAjaran !== '' && Schema::hasColumn('kelas', 'tahun_ajaran')) {
+            $query->where('tahun_ajaran', $tahunAjaran);
+        }
+
+        return $query
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->values();
+    }
+
+    private function classRowsFromStudentHistory(string $tenantId, string $tahunAjaran = '')
+    {
+        if ($tahunAjaran === '' || ! $this->hasStudentClassHistoryForYear($tenantId, $tahunAjaran)) {
+            return collect();
+        }
+
+        $rows = $this->tenantQuery('student_class_histories', $tenantId)
+            ->where('tahun_ajaran', $tahunAjaran)
+            ->whereNotNull('class_id')
+            ->where('class_id', '!=', '')
+            ->whereRaw('lower(coalesce(status, \'active\')) <> ?', ['alumni'])
+            ->select($this->existingColumns('student_class_histories', [
+                'class_id', 'class_name', 'grade', 'suffix', 'angkatan',
+                'tahun_ajaran', 'semester',
+            ]))
+            ->orderBy('class_id')
+            ->limit(10000)
+            ->get();
+
+        $classes = [];
+        foreach ($rows as $row) {
+            $id = trim((string) ($row->class_id ?? ''));
+            if ($id === '') {
+                continue;
+            }
+
+            $name = trim((string) ($row->class_name ?? '')) ?: $id;
+            $grade = $this->normalizeClassGrade((string) ($row->grade ?? '')) ?: $this->parseClassGrade($name);
+            $suffix = trim((string) ($row->suffix ?? ''));
+            if ($suffix === '') {
+                $suffix = $this->stripClassGradePrefix($name, $grade);
+            }
+
+            $next = [
+                'id' => $id,
+                'nama' => $name,
+                'grade' => $grade,
+                'suffix' => $suffix,
+                'tingkat' => $grade,
+                'jurusan' => '',
+                'angkatan' => trim((string) ($row->angkatan ?? '')),
+                'tahun_ajaran' => $tahunAjaran,
+                'semester' => trim((string) ($row->semester ?? '')),
+                'is_active' => true,
+            ];
+
+            $classes[$id] = isset($classes[$id])
+                ? $this->mergeClassRowPreferNonEmpty($classes[$id], $next)
+                : $next;
+        }
+
+        return collect(array_values($classes))->values();
+    }
+
+    private function mergeClassRowPreferNonEmpty(array $base, array $override): array
+    {
+        $row = $base;
+        foreach ($override as $key => $value) {
+            if ($value === null) {
+                continue;
+            }
+            if (is_string($value) && trim($value) === '') {
+                continue;
+            }
+            $row[$key] = $value;
+        }
+
+        return $row;
+    }
+
+    private function sortClassRows($rows)
+    {
+        $gradeOrder = [
+            'VII' => 0,
+            'VIII' => 1,
+            'IX' => 2,
+            'X' => 3,
+            'XI' => 4,
+            'XII' => 5,
+        ];
+
+        return $rows
+            ->sort(function (array $a, array $b) use ($gradeOrder) {
+                $gradeA = $this->normalizeClassGrade((string) ($a['grade'] ?? ''))
+                    ?: $this->parseClassGrade((string) ($a['nama'] ?? $a['id'] ?? ''));
+                $gradeB = $this->normalizeClassGrade((string) ($b['grade'] ?? ''))
+                    ?: $this->parseClassGrade((string) ($b['nama'] ?? $b['id'] ?? ''));
+                $orderA = $gradeOrder[$gradeA] ?? 999;
+                $orderB = $gradeOrder[$gradeB] ?? 999;
+                if ($orderA !== $orderB) {
+                    return $orderA <=> $orderB;
+                }
+
+                $suffixCompare = strcasecmp((string) ($a['suffix'] ?? ''), (string) ($b['suffix'] ?? ''));
+                if ($suffixCompare !== 0) {
+                    return $suffixCompare;
+                }
+
+                return strcasecmp((string) ($a['nama'] ?? $a['id'] ?? ''), (string) ($b['nama'] ?? $b['id'] ?? ''));
+            })
+            ->values();
+    }
+
+    private function hasStudentClassHistoryForYear(string $tenantId, string $tahunAjaran = ''): bool
+    {
+        return $tahunAjaran !== ''
+            && Schema::hasTable('student_class_histories')
+            && Schema::hasColumn('student_class_histories', 'student_id')
+            && Schema::hasColumn('student_class_histories', 'tahun_ajaran')
+            && (bool) $this->tenantQuery('student_class_histories', $tenantId)
+                ->where('tahun_ajaran', $tahunAjaran)
+                ->whereNotNull('student_id')
+                ->exists();
+    }
+
+    private function studentOptionRowsFromClassHistory(
+        string $tenantId,
+        string $tahunAjaran,
+        string $kelas = '',
+        string $status = 'active',
+        string $search = '',
+        int $limit = 51
+    ) {
+        if (
+            $tahunAjaran === ''
+            || ! Schema::hasTable('student_class_histories')
+            || ! Schema::hasTable('profiles')
+            || ! Schema::hasColumn('student_class_histories', 'student_id')
+            || ! Schema::hasColumn('student_class_histories', 'class_id')
+            || ! Schema::hasColumn('student_class_histories', 'tahun_ajaran')
+        ) {
+            return collect();
+        }
+
+        $limit = max(1, min(10001, $limit));
+        $fetchLimit = min(20000, max($limit + 25, $limit * 3));
+        $status = strtolower(trim($status));
+        $search = strtolower(trim($search));
+
+        $query = $this->tenantQuery('student_class_histories', $tenantId, 'sch')
+            ->join('profiles as p', 'p.id', '=', 'sch.student_id')
+            ->where('p.role', 'siswa')
+            ->where('sch.tahun_ajaran', $tahunAjaran)
+            ->whereNotNull('sch.class_id')
+            ->where('sch.class_id', '!=', '');
+
+        if (Schema::hasColumn('profiles', 'tenant_id')) {
+            $query->where('p.tenant_id', $tenantId);
+        }
+        if ($kelas !== '') {
+            $query->where('sch.class_id', $kelas);
+        }
+
+        $statusExpression = 'lower(coalesce(sch.status, \'active\'))';
+        if ($status !== '') {
+            $query->whereRaw("{$statusExpression} = ?", [$status]);
+        } else {
+            $query->whereRaw("{$statusExpression} <> ?", ['alumni']);
+        }
+
+        if ($search !== '') {
+            $like = '%'.$search.'%';
+            $query->where(function ($builder) use ($like) {
+                $builder->whereRaw('lower(coalesce(p.nama, \'\')) like ?', [$like])
+                    ->orWhereRaw('lower(coalesce(p.email, \'\')) like ?', [$like])
+                    ->orWhereRaw('lower(coalesce(p.nis, \'\')) like ?', [$like])
+                    ->orWhereRaw('lower(coalesce(sch.class_id, \'\')) like ?', [$like])
+                    ->orWhereRaw('lower(coalesce(sch.class_name, \'\')) like ?', [$like]);
+            });
+        }
+
+        $rows = $query
+            ->select($this->prefixedExistingColumns('profiles', [
+                'id', 'nama', 'email', 'nis', 'created_via', 'created_by',
+            ], 'p'))
+            ->selectRaw('coalesce(sch.class_id, p.kelas) as kelas')
+            ->selectRaw('coalesce(sch.status, \'active\') as status')
+            ->selectRaw('coalesce(sch.angkatan, p.angkatan) as angkatan')
+            ->orderBy('sch.class_id')
+            ->orderBy('p.nama')
+            ->limit($fetchLimit)
+            ->get();
+
+        $unique = [];
+        foreach ($rows as $row) {
+            $id = trim((string) ($row->id ?? ''));
+            if ($id === '' || isset($unique[$id])) {
+                continue;
+            }
+
+            $item = (array) $row;
+            $item['role'] = 'siswa';
+            $item['uid'] = $id;
+            $unique[$id] = $item;
+            if (count($unique) >= $limit) {
+                break;
+            }
+        }
+
+        return collect(array_values($unique))->values();
+    }
+
+    private function studentsForAcademicYearClass(
+        string $tenantId,
+        string $classId,
+        string $tahunAjaran = '',
+        string $studentStatus = '',
+        int $limit = 250
+    ) {
+        if ($tahunAjaran !== '' && $this->hasStudentClassHistoryForYear($tenantId, $tahunAjaran)) {
+            return $this->studentOptionRowsFromClassHistory(
+                $tenantId,
+                $tahunAjaran,
+                $classId,
+                $studentStatus,
+                '',
+                $limit
+            )->take($limit)->values();
+        }
+
+        $studentQuery = DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->where('kelas', $classId);
+
+        if ($studentStatus !== '') {
+            $studentQuery->whereRaw('lower(coalesce(status, \'active\')) = ?', [$studentStatus]);
+        } else {
+            $studentQuery->whereRaw('lower(coalesce(status, \'active\')) <> ?', ['alumni']);
+        }
+
+        return $studentQuery
+            ->select($this->existingColumns('profiles', [
+                'id', 'nama', 'email', 'kelas', 'role', 'status', 'nis', 'angkatan',
+                'created_via', 'created_by',
+            ]))
+            ->orderBy('nama')
+            ->limit($limit)
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->values();
     }
 
     private function studentClassHistoriesForStudents(string $tenantId, array $studentIds): array

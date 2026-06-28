@@ -7,6 +7,7 @@ const confirmDelete = (msg = 'Yakin mau dihapus?') => window.confirm(msg)
 export default function OrganisasiTab({
   guruList,
   siswaList,
+  academicPeriod = null,
   pushToast,
   showHeader = true
 }) {
@@ -35,6 +36,33 @@ export default function OrganisasiTab({
     nama: siswa.nama || siswa.email || siswa.id
   })), [])
 
+  const loadPeriodStudentMap = useCallback(async () => {
+    const params = {
+      all: true,
+      per_page: 10000,
+      status: 'active'
+    }
+    if (academicPeriod?.tahunAjaran) {
+      params.tahun_ajaran = academicPeriod.tahunAjaran
+    }
+
+    const data = await queryClient.fetchQuery({
+      queryKey: queryKeys.admin.studentOptions(params),
+      queryFn: async () => {
+        const { data, error } = await supabase.admin.studentOptions(params)
+        if (error) throw error
+        return data
+      },
+      staleTime: 60 * 1000,
+    })
+
+    return new Map(
+      mapStudentOptions(data?.rows || [])
+        .filter((siswa) => siswa.uid)
+        .map((siswa) => [String(siswa.uid), siswa])
+    )
+  }, [academicPeriod?.tahunAjaran, mapStudentOptions])
+
   const loadMemberOptions = useCallback(async (query = '') => {
     setMemberOptionsLoading(true)
     try {
@@ -42,6 +70,9 @@ export default function OrganisasiTab({
         q: query,
         status: 'active',
         per_page: 50
+      }
+      if (academicPeriod?.tahunAjaran) {
+        params.tahun_ajaran = academicPeriod.tahunAjaran
       }
 
       const data = await queryClient.fetchQuery({
@@ -62,7 +93,7 @@ export default function OrganisasiTab({
     } finally {
       setMemberOptionsLoading(false)
     }
-  }, [mapStudentOptions, pushToast])
+  }, [academicPeriod?.tahunAjaran, mapStudentOptions, pushToast])
 
   useEffect(() => {
     loadOrgList()
@@ -85,7 +116,7 @@ export default function OrganisasiTab({
       setMemberSearch('')
       setAddMemberUid('')
     }
-  }, [orgSel])
+  }, [academicPeriod?.tahunAjaran, orgSel])
 
   useEffect(() => {
     if (!orgSel) return undefined
@@ -144,16 +175,32 @@ export default function OrganisasiTab({
     try {
       setLoading(true)
 
-      const { data, error } = await supabase
-        .from('organisasi_anggota')
-        .select('*')
-        .eq('organisasi_id', orgSel)
-        .order('jabatan', { ascending: false })
-        .order('nama')
+      const [anggotaResult, periodStudentMap] = await Promise.all([
+        supabase
+          .from('organisasi_anggota')
+          .select('*')
+          .eq('organisasi_id', orgSel)
+          .order('jabatan', { ascending: false })
+          .order('nama'),
+        loadPeriodStudentMap()
+      ])
 
+      const { data, error } = anggotaResult
       if (error) throw error
 
-      setOrgAnggota(data || [])
+      const rows = (data || [])
+        .map((row) => {
+          const siswa = periodStudentMap.get(String(row.siswa_id || ''))
+          if (!siswa) return null
+          return {
+            ...row,
+            nama: siswa.nama || row.nama,
+            kelas: siswa.kelas || row.kelas || ''
+          }
+        })
+        .filter(Boolean)
+
+      setOrgAnggota(rows)
     } catch (error) {
       console.error('Error loading anggota:', error)
       pushToast('error', 'Gagal memuat anggota organisasi')
@@ -770,6 +817,9 @@ export default function OrganisasiTab({
                         </div>
                         <div>
                           <span className="text-sm font-medium text-gray-900">{a.nama}</span>
+                          {a.kelas && (
+                            <div className="mt-0.5 text-xs text-gray-500">{a.kelas}</div>
+                          )}
                         </div>
                       </div>
                     </td>

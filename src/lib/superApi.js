@@ -1,4 +1,4 @@
-import { apiFetch, buildQueryString, downloadAuthenticatedFile } from './supabase'
+import { apiFetch, buildQueryString } from './supabase'
 
 const superApi = {
     async me() {
@@ -186,13 +186,6 @@ const superApi = {
       const res = await apiFetch(`/api/super/tenants/${tenantId}/admins/${userId}/reset-password`, {
         method: 'POST',
         body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async setTenantPrimaryAdmin(tenantId, userId) {
-      const res = await apiFetch(`/api/super/tenants/${tenantId}/admins/${userId}/primary`, {
-        method: 'PATCH',
-        body: {}
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
@@ -475,41 +468,6 @@ const superApi = {
       const suffix = query.toString() ? `?${query.toString()}` : ''
       const res = await apiFetch(`/api/super/audit-trail${suffix}`, { method: 'GET' })
       return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async plugins() {
-      const res = await apiFetch('/api/super/plugins', { method: 'GET' })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async inspectPlugin(formData) {
-      const res = await apiFetch('/api/super/plugins/inspect', {
-        method: 'POST',
-        body: formData
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async installPlugin(payload = {}) {
-      const res = await apiFetch('/api/super/plugins', {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async updatePluginStatus(id, payload = {}) {
-      const res = await apiFetch(`/api/super/plugins/${id}/status`, {
-        method: 'PATCH',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async deletePlugin(id, payload = {}) {
-      const res = await apiFetch(`/api/super/plugins/${id}`, {
-        method: 'DELETE',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async downloadPlugin(id, fallbackName = 'plugin.zip') {
-      return downloadAuthenticatedFile(`/api/super/plugins/${id}/download`, fallbackName)
     }
   }
 

@@ -22,7 +22,6 @@ import {
   School,
   Unplug,
   UserCog,
-  Users,
   XCircle
 } from 'lucide-react'
 import { CURRENT_TENANT_SLUG, supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
@@ -624,28 +623,6 @@ export default function APengaturan() {
     }
     setActiveSettingsMenu((current) => (current === nextMenu ? current : nextMenu))
   }, [location.search, navigate])
-
-  const handleSettingsMenuChange = (menuId) => {
-    if (!SETTINGS_MENU_IDS.has(menuId)) return
-    if (menuId === 'drive') {
-      navigate('/admin/storage?tab=drive')
-      return
-    }
-
-    setActiveSettingsMenu(menuId)
-
-    const params = new URLSearchParams(location.search)
-    params.set('menu', menuId)
-
-    const nextSearch = params.toString()
-    navigate(
-      {
-        pathname: location.pathname,
-        search: nextSearch ? `?${nextSearch}` : ''
-      },
-      { replace: true }
-    )
-  }
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -1819,40 +1796,6 @@ export default function APengaturan() {
       ok: Boolean(driveStatus?.share_uploaded_files)
     }
   ]
-  const settingsMenuItems = [
-    {
-      id: 'identity',
-      label: 'Identitas',
-      description: 'Profil sekolah, logo, visi misi, dan media sosial',
-      icon: School
-    },
-    {
-      id: 'academic',
-      label: 'Akademik',
-      description: 'Tahun ajaran penuh dan rentang bulan Ganjil/Genap',
-      icon: CalendarDays
-    },
-    {
-      id: 'drive',
-      label: 'Google Drive',
-      description: 'Koneksi, quota, storage kelas, dan inventaris file',
-      icon: Cloud
-    },
-    {
-      id: 'admin',
-      label: 'Akun Admin',
-      description: 'Profil, tautan Google, verifikasi email, dan logout',
-      icon: UserCog
-    },
-    {
-      id: 'registration',
-      label: 'Registrasi',
-      description: 'Buka atau tutup registrasi publik per role',
-      icon: Users
-    }
-  ]
-  const settingsVisibleMenuItems = settingsMenuItems.filter((item) => item.id !== 'academic' && item.id !== 'drive')
-  const activeSettings = settingsMenuItems.find((item) => item.id === activeSettingsMenu) || settingsMenuItems[0]
   const showSettingsMainColumn = ['identity', 'drive'].includes(activeSettingsMenu)
   const showSettingsSidebarColumn = ['identity', 'admin', 'registration'].includes(activeSettingsMenu)
   const settingsContentClass = activeSettingsMenu === 'identity'
@@ -1861,15 +1804,13 @@ export default function APengaturan() {
   const settingsMainColumnClass = activeSettingsMenu === 'identity'
     ? 'lg:col-span-2 space-y-6'
     : 'space-y-6'
-  const ActiveSettingsIcon = activeSettings.icon
   const isAcademicStandalone = activeSettingsMenu === 'academic'
-  const isStandaloneSettingsMenu = isAcademicStandalone
   const pageTitle = isAcademicStandalone
     ? 'Pengaturan Akademik'
     : 'Pengaturan Sistem'
   const pageDescription = isAcademicStandalone
     ? 'Kelola tahun ajaran penuh dan rentang bulan Ganjil/Genap.'
-    : 'Kelola identitas sekolah, Google Drive, akun admin, dan registrasi publik.'
+    : 'Kelola identitas sekolah, akun admin, dan registrasi publik.'
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1896,57 +1837,6 @@ export default function APengaturan() {
             </div>
           </div>
         </div>
-
-        {!isStandaloneSettingsMenu && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
-          <div className="flex gap-1.5 overflow-x-auto">
-            {settingsVisibleMenuItems.map((item) => {
-              const Icon = item.icon
-              const isActive = activeSettingsMenu === item.id
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => handleSettingsMenuChange(item.id)}
-                  aria-pressed={isActive}
-                  className={`flex shrink-0 items-center gap-2.5 rounded-xl border px-4 py-2.5 text-left transition-all ${
-                    isActive
-                      ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-sm'
-                      : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
-                    isActive ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
-                  }`}>
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold">{item.label}</span>
-                    <span className="block text-[11px] leading-4 text-slate-500">{item.description}</span>
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-        )}
-
-        {!isStandaloneSettingsMenu && (
-        <div className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-gradient-to-r from-blue-50/60 to-white px-5 py-3 shadow-sm">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
-            <ActiveSettingsIcon className="h-4 w-4" />
-          </span>
-          <div className="flex min-w-0 flex-1 items-center justify-between gap-4">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">{activeSettings.label}</h2>
-              <p className="text-xs text-slate-500">{activeSettings.description}</p>
-            </div>
-            <span className="hidden rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-blue-600 sm:inline-block">
-              Aktif
-            </span>
-          </div>
-        </div>
-        )}
 
         <div className="space-y-6">
           {loading && (

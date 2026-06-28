@@ -37,7 +37,6 @@ NEW_NODES = '''const FLOW_NODES = [
   { id: 'admin_siswa',    x: 660,  y: 1365, label: '👥 Kelola Siswa',  color: '#fbbf24' },
   { id: 'admin_scan',     x: 660,  y: 1440, label: '📱 Scan Absensi',  color: '#f59e0b' },
   { id: 'admin_sertif',   x: 900,  y: 990,  label: '🏆 Sertifikat',    color: '#d97706' },
-  { id: 'admin_approval', x: 900,  y: 1065, label: '✅ Approval',      color: '#d97706' },
   { id: 'admin_wa',       x: 900,  y: 1140, label: '💬 WhatsApp',      color: '#b45309' },
   { id: 'admin_storage',  x: 900,  y: 1215, label: '💾 Storage',       color: '#b45309' },
   { id: 'admin_backup',   x: 900,  y: 1290, label: '🔄 Backup',        color: '#b45309' },
@@ -52,7 +51,6 @@ NEW_NODES = '''const FLOW_NODES = [
   { id: 'sa_tenants',     x: 900,  y: 1550, label: '🏢 Kelola Tenant', color: '#f87171' },
   { id: 'sa_admins',      x: 900,  y: 1625, label: '🛡️ Super Admins',  color: '#ef4444' },
   { id: 'sa_audit',       x: 900,  y: 1700, label: '🔍 Audit Trail',   color: '#b91c1c' },
-  { id: 'sa_plugins',     x: 900,  y: 1775, label: '🔌 Plugins',       color: '#b91c1c' },
   { id: 'sa_wa_pusat',    x: 900,  y: 1850, label: '💬 WA Pusat',      color: '#991b1b' },
 
   // ─── INFRASTRUCTURE ───────────────────────────────
@@ -101,7 +99,6 @@ NEW_EDGES = '''const FLOW_EDGES = [
   { id: 'e_a6',     from: 'admin_dash',    to: 'admin_siswa' },
   { id: 'e_a7',     from: 'admin_dash',    to: 'admin_scan' },
   { id: 'e_a8',     from: 'admin_dash',    to: 'admin_sertif' },
-  { id: 'e_a9',     from: 'admin_dash',    to: 'admin_approval' },
   { id: 'e_a10',    from: 'admin_dash',    to: 'admin_wa' },
   { id: 'e_a11',    from: 'admin_dash',    to: 'admin_storage' },
   { id: 'e_a12',    from: 'admin_dash',    to: 'admin_backup' },
@@ -115,7 +112,6 @@ NEW_EDGES = '''const FLOW_EDGES = [
   { id: 'e_sa5',    from: 'sa_dash',       to: 'sa_tenants' },
   { id: 'e_sa6',    from: 'sa_dash',       to: 'sa_admins' },
   { id: 'e_sa7',    from: 'sa_dash',       to: 'sa_audit' },
-  { id: 'e_sa8',    from: 'sa_dash',       to: 'sa_plugins' },
   { id: 'e_sa9',    from: 'sa_dash',       to: 'sa_wa_pusat' },
 
   // Cross-role interactions
@@ -224,7 +220,7 @@ content = content.replace(
     '''<InfoCard emoji="🔐" title="Autentikasi" desc="Login email/Google, register & reset password" tone="violet" />
           <InfoCard emoji="👥" title="Multi-Role" desc="Siswa, Guru, Admin, Super Admin dengan akses berbeda" tone="indigo" />
           <InfoCard emoji="📋" title="Akademik" desc="Absensi, Quiz, Tugas, Laporan, Rapot & Eskul (soon)" tone="sky" />
-          <InfoCard emoji="⚙️" title="Manajemen" desc="Kelas, Jadwal, Sertifikat, Approval, WhatsApp & Backup" tone="emerald" />''',
+          <InfoCard emoji="⚙️" title="Manajemen" desc="Kelas, Jadwal, Sertifikat, WhatsApp & Backup" tone="emerald" />''',
 )
 
 with open(TARGET, 'w') as f:

@@ -397,6 +397,61 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         ]);
     }
 
+    public function test_academic_summary_and_student_options_follow_requested_academic_year_snapshots(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-summary-period@example.com', 'admin');
+        $alumniNow = $this->createUserWithProfile($tenantId, 'siswa', 'student-summary-alumni@example.com', '', [
+            'nama' => 'Alumni Sekarang',
+            'status' => 'alumni',
+            'angkatan' => '2023',
+            'tahun_lulus' => 2026,
+        ]);
+        $activeNow = $this->createUserWithProfile($tenantId, 'siswa', 'student-summary-active@example.com', 'x-a', [
+            'nama' => 'Siswa Aktif',
+            'angkatan' => '2026',
+        ]);
+
+        $this->insertClass($tenantId, 'xii-a', 'XII A', 'XII', 'A', '2023', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'x-a', 'X A', 'X', 'A', '2026', '2026/2027', 'Ganjil');
+        $this->insertSettingsPeriod($tenantId, '2026/2027', 'Ganjil');
+        $this->insertClassSnapshot($tenantId, $alumniNow->id, 'xii-a', 'XII A', 'XII', 'A', '2023', '2025/2026', 'Genap', 'active');
+        $this->insertClassSnapshot($tenantId, $alumniNow->id, '', '', null, null, '2023', '2026/2027', 'Ganjil', 'alumni', 'auto_rollover');
+        $this->insertClassSnapshot($tenantId, $activeNow->id, 'x-a', 'X A', 'X', 'A', '2026', '2026/2027', 'Ganjil', 'active');
+
+        Sanctum::actingAs($admin);
+
+        $pastSummary = $this->getJson('/api/admin/academic-summary?tahun_ajaran=2025/2026&include_students=false');
+        $pastSummary->assertOk();
+        $pastClasses = collect($pastSummary->json('data.kelas'))->pluck('id')->all();
+        $this->assertContains('xii-a', $pastClasses);
+        $this->assertNotContains('x-a', $pastClasses);
+
+        $currentSummary = $this->getJson('/api/admin/academic-summary?tahun_ajaran=2026/2027&include_students=false');
+        $currentSummary->assertOk();
+        $currentClasses = collect($currentSummary->json('data.kelas'))->pluck('id')->all();
+        $this->assertContains('x-a', $currentClasses);
+        $this->assertNotContains('xii-a', $currentClasses);
+
+        $pastOptions = $this->getJson('/api/admin/student-options?tahun_ajaran=2025/2026&status=active&all=1');
+        $pastOptions->assertOk();
+        $pastRows = collect($pastOptions->json('data.rows'));
+        $this->assertTrue($pastRows->contains(fn ($row) => $row['id'] === $alumniNow->id && $row['kelas'] === 'xii-a'));
+
+        $currentOptions = $this->getJson('/api/admin/student-options?tahun_ajaran=2026/2027&status=active&all=1');
+        $currentOptions->assertOk();
+        $currentRows = collect($currentOptions->json('data.rows'));
+        $this->assertFalse($currentRows->contains(fn ($row) => $row['id'] === $alumniNow->id));
+        $this->assertTrue($currentRows->contains(fn ($row) => $row['id'] === $activeNow->id && $row['kelas'] === 'x-a'));
+
+        $currentDashboard = $this->getJson('/api/admin/dashboard-summary?tahun_ajaran=2026/2027');
+        $currentDashboard->assertOk()
+            ->assertJsonPath('data.siswa', 1)
+            ->assertJsonPath('data.kelas', 1);
+    }
+
     private function defaultTenantId(): string
     {
         $tenantId = (string) DB::table('tenants')

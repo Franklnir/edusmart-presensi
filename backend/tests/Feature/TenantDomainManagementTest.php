@@ -133,7 +133,7 @@ class TenantDomainManagementTest extends TestCase
             ->assertJsonPath('error', 'Subdomain tidak bisa digunakan');
     }
 
-    public function test_super_admin_create_tenant_sets_first_admin_as_primary_admin(): void
+    public function test_super_admin_create_tenant_returns_created_admin_without_primary_admin_metadata(): void
     {
         config()->set('tenancy.root_domain', 'edusmart.test');
         config()->set('tenancy.admin_subdomain', 'admin26');
@@ -161,15 +161,18 @@ class TenantDomainManagementTest extends TestCase
 
         $this->assertDatabaseHas('settings', [
             'tenant_id' => $tenantId,
-            'approval_primary_admin_id' => $adminUserId,
+            'email' => 'admin-bali@example.com',
         ]);
 
-        $this
+        $detail = $this
             ->actingAs($superAdmin)
-            ->getJson("http://admin26.edusmart.test/api/super/tenants/{$tenantId}")
-            ->assertOk()
-            ->assertJsonPath('data.tenant.primary_admin_user_id', $adminUserId)
-            ->assertJsonPath('data.tenant.primary_admin_email', 'admin-bali@example.com');
+            ->getJson("http://admin26.edusmart.test/api/super/tenants/{$tenantId}");
+
+        $detail->assertOk();
+        $tenant = $detail->json('data.tenant');
+        $this->assertIsArray($tenant);
+        $this->assertArrayNotHasKey('primary_admin_user_id', $tenant);
+        $this->assertArrayNotHasKey('primary_admin_email', $tenant);
     }
 
     public function test_generated_tenant_admin_reset_password_satisfies_password_policy_shape(): void

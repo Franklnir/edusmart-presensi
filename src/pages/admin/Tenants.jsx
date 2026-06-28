@@ -665,7 +665,6 @@ const Tenants = () => {
   const [detailRefreshing, setDetailRefreshing] = useState(false)
   const [detailError, setDetailError] = useState('')
   const [resetLoadingByUser, setResetLoadingByUser] = useState({})
-  const [primaryAdminSavingByUser, setPrimaryAdminSavingByUser] = useState({})
   const [temporaryPasswords, setTemporaryPasswords] = useState({})
   const [backupLoading, setBackupLoading] = useState(false)
   const [backupMode, setBackupMode] = useState('full')
@@ -976,7 +975,6 @@ const Tenants = () => {
     setSelectedTenantId(tenantId)
     setDetailTab('overview')
     setTemporaryPasswords({})
-    setPrimaryAdminSavingByUser({})
     resetTenantDomainForm()
     setRfidWifiForm({ ssid: '', password: '' })
     setRfidDevices(null)
@@ -1525,62 +1523,6 @@ const Tenants = () => {
     }
   }
 
-  const handleSetPrimaryAdmin = async (admin) => {
-    const tenantId = tenantDetail?.tenant?.id || selectedTenantId
-    const userId = admin?.user_id
-    if (!tenantId || !userId) return
-
-    if (admin?.is_primary_admin) {
-      pushToast('info', `${admin?.name || admin?.email || 'Admin'} sudah menjadi admin utama`)
-      return
-    }
-
-    const label = admin?.email || admin?.name || userId
-    const confirmed = window.confirm(
-      `Jadikan ${label} sebagai Admin Utama tenant? Akun ini akan bisa menyimpan perubahan kritikal tanpa approval.`
-    )
-    if (!confirmed) return
-
-    setPrimaryAdminSavingByUser((prev) => ({ ...prev, [userId]: true }))
-    try {
-      const { data, error } = await supabase.super.setTenantPrimaryAdmin(tenantId, userId)
-      if (error) throw error
-
-      const primaryId = data?.primary_admin_user_id || userId
-      setTenantDetail((prev) => {
-        if (!prev) return prev
-        const nextAdmins = Array.isArray(prev.admins)
-          ? prev.admins.map((row) => ({
-              ...row,
-              is_primary_admin: String(row?.user_id || '') === String(primaryId)
-            }))
-          : prev.admins
-
-        return {
-          ...prev,
-          tenant: {
-            ...(prev.tenant || {}),
-            primary_admin_user_id: primaryId,
-            primary_admin_name: data?.primary_admin_name || null,
-            primary_admin_email: data?.primary_admin_email || null
-          },
-          admins: nextAdmins
-        }
-      })
-
-      pushToast('success', `${data?.primary_admin_name || label} ditetapkan sebagai admin utama`)
-      await loadTenantDetail(tenantId, { silent: true, suppressToast: true })
-    } catch (err) {
-      pushToast('error', err?.message || 'Gagal menetapkan admin utama tenant')
-    } finally {
-      setPrimaryAdminSavingByUser((prev) => {
-        const next = { ...prev }
-        delete next[userId]
-        return next
-      })
-    }
-  }
-
   const handleAddDeviceSubmit = async (e) => {
     e.preventDefault()
     if (!selectedTenantId) return
@@ -1774,10 +1716,6 @@ const Tenants = () => {
   const backupMonthlyMonths = Array.isArray(backupMonthlyStatus?.months) ? backupMonthlyStatus.months : []
   const detailDomains = Array.isArray(tenantDetail?.domains) ? tenantDetail.domains : []
   const detailRfidNotes = Array.isArray(detailRfidTemplate?.notes) ? detailRfidTemplate.notes : []
-  const primaryAdminUserId = String(detailTenant?.primary_admin_user_id || '')
-  const primaryAdminInfo = detailAdmins.find(
-    (admin) => String(admin?.user_id || '') === primaryAdminUserId
-  )
   const platformOverview = platformDomains?.platform || {}
   const adminDomains = Array.isArray(platformDomains?.admin_domains) ? platformDomains.admin_domains : []
   const tenantSummary = tenants.reduce(
@@ -2272,21 +2210,12 @@ const Tenants = () => {
                 <p className="mt-1 break-all text-sm text-slate-600">
                   {detailTenant?.slug ? `${detailTenant.slug}.${platformRootDomain || rootDomain}` : '-'}
                 </p>
-                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-3">
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                    <p className="font-semibold text-slate-500">Admin utama</p>
-                    <p className="mt-1 truncate text-slate-800">
-                      {primaryAdminInfo?.name ||
-                        primaryAdminInfo?.email ||
-                        detailTenant?.primary_admin_name ||
-                        'Belum ditetapkan'}
-                    </p>
-                  </div>
+                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                   <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                     <p className="font-semibold text-slate-500">Update status</p>
                     <p className="mt-1 text-slate-800">{formatDateTime(detailTenant?.status_changed_at)}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 sm:col-span-2 xl:col-span-1">
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                     <p className="font-semibold text-slate-500">Alasan status</p>
                     <p className="mt-1 truncate text-slate-800">{detailTenant?.status_reason || '-'}</p>
                   </div>
@@ -2311,7 +2240,6 @@ const Tenants = () => {
                     setTenantDetail(null)
                     setDetailError('')
                     setTemporaryPasswords({})
-                    setPrimaryAdminSavingByUser({})
                     resetTenantDomainForm()
                     setRfidWifiForm({ ssid: '', password: '' })
                     setRestorePayload(null)
@@ -2644,7 +2572,7 @@ const Tenants = () => {
                       <p className="text-xs font-semibold uppercase text-slate-500">Akses</p>
                       <p className="mt-1 text-sm font-bold text-slate-900">Kelola admin sekolah</p>
                       <p className="mt-1 text-xs text-slate-600">
-                        {detailAdmins.length} admin, utama: {primaryAdminInfo?.email || 'belum ditetapkan'}.
+                        {detailAdmins.length} admin terdaftar.
                       </p>
                     </button>
                     <button
@@ -3332,11 +3260,6 @@ const Tenants = () => {
                         <tr key={admin.user_id} className="border-t border-slate-100">
                           <td className="py-2 pr-4">
                             <p className="font-semibold text-slate-900">{admin.name || '-'}</p>
-                            {admin.is_primary_admin ? (
-                              <span className="inline-flex mt-1 text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-100 text-indigo-700">
-                                Admin Utama (Bypass Approval)
-                              </span>
-                            ) : null}
                           </td>
                           <td className="py-2 pr-4">{admin.email || '-'}</td>
                           <td className="py-2 pr-4">
@@ -3381,21 +3304,6 @@ const Tenants = () => {
                                   className="text-xs px-3 py-1.5 rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
                                 >
                                   {resetLoadingByUser[admin.user_id] ? 'Reset...' : 'Reset Password'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleSetPrimaryAdmin(admin)}
-                                  disabled={
-                                    Boolean(primaryAdminSavingByUser[admin.user_id]) ||
-                                    Boolean(admin.is_primary_admin)
-                                  }
-                                  className="text-xs px-3 py-1.5 rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
-                                >
-                                  {primaryAdminSavingByUser[admin.user_id]
-                                    ? 'Menyimpan...'
-                                    : admin.is_primary_admin
-                                      ? 'Admin Utama'
-                                      : 'Jadikan Utama'}
                                 </button>
                               </div>
                             )}

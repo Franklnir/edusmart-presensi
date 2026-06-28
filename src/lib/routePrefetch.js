@@ -49,9 +49,7 @@ const routeLoaders = {
   '/admin/animasi-flow': () => import('../pages/admin/AnimasiFlow'),
   '/admin/tenants': () => import('../pages/admin/Tenants'),
   '/admin/super-admins': () => import('../pages/admin/SuperAdmins'),
-  '/admin/approvals': () => import('../pages/admin/Approvals'),
   '/admin/audit-trail': () => import('../pages/admin/AuditTrail'),
-  '/admin/plugins': () => import('../pages/admin/Plugins'),
   '/admin/whatsapp': () => import('../pages/admin/WhatsApp')
 }
 

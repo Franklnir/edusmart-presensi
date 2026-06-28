@@ -92,7 +92,6 @@ class SuperAdminController extends ApiController
         'allowed_registrations',
         'registration_otps',
         'audit_log',
-        'approval_requests',
         'anggota_eksku1',
         'anggota_ekskul',
         'import_siswa_histories',
@@ -183,8 +182,6 @@ class SuperAdminController extends ApiController
             ->where('tenant_id', $tenant->id)
             ->groupBy('user_id');
 
-        $primaryAdminUserId = $this->resolveTenantPrimaryAdminUserId((string) $tenant->id);
-
         $admins = DB::table('profiles as p')
             ->leftJoin('users as u', 'u.id', '=', 'p.id')
             ->leftJoin('super_admins as sa', 'sa.user_id', '=', 'p.id')
@@ -205,18 +202,7 @@ class SuperAdminController extends ApiController
                 DB::raw('case when sa.user_id is not null then true else false end as is_super_admin')
             )
             ->orderBy('p.created_at', 'desc')
-            ->get()
-            ->map(function ($row) use ($primaryAdminUserId) {
-                $row->is_primary_admin = $primaryAdminUserId !== ''
-                    && (string) ($row->user_id ?? '') === $primaryAdminUserId;
-
-                return $row;
-            })
-            ->values();
-
-        $primaryAdmin = $admins->first(function ($row) use ($primaryAdminUserId) {
-            return $primaryAdminUserId !== '' && (string) ($row->user_id ?? '') === $primaryAdminUserId;
-        });
+            ->get();
 
         $domains = $this->tenantDomainService->listTenantDomains((string) $tenant->id);
         $rfidMqttConfig = $this->tenantMqttConfigService->tenantConfig(
@@ -237,9 +223,6 @@ class SuperAdminController extends ApiController
                     'status_changed_at' => $tenant->status_changed_at ?? null,
                     'status_changed_by' => $tenant->status_changed_by ?? null,
                     'archived_at' => $tenant->archived_at ?? null,
-                    'primary_admin_user_id' => $primaryAdminUserId !== '' ? $primaryAdminUserId : null,
-                    'primary_admin_name' => $primaryAdmin?->name ?? null,
-                    'primary_admin_email' => $primaryAdmin?->email ?? null,
                     'created_at' => $tenant->created_at,
                     'updated_at' => $tenant->updated_at,
                 ],
@@ -1388,10 +1371,6 @@ class SuperAdminController extends ApiController
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
-            if ($this->tableHasColumn('settings', 'approval_primary_admin_id')) {
-                $settingsPayload['approval_primary_admin_id'] = $userId;
-            }
-
             DB::table('settings')->insert($settingsPayload);
 
             $result = [
@@ -1405,7 +1384,6 @@ class SuperAdminController extends ApiController
                     'name' => $adminName,
                     'email' => $adminEmail,
                 ],
-                'primary_admin_user_id' => $userId,
             ];
         });
 
@@ -1631,96 +1609,6 @@ class SuperAdminController extends ApiController
         $this->logAudit($request, 'super_admins', $row->id, 'DELETE', $oldData, null, $tenantId);
 
         return response()->json(['data' => 'deleted']);
-    }
-
-    public function setTenantPrimaryAdmin(Request $request, string $tenantId, string $userId)
-    {
-        if (! $this->isSuperAdmin($request)) {
-            return $this->deny();
-        }
-
-        $tenant = $this->findTenantByIdOrSlug($tenantId);
-        if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
-        }
-
-        if (! $this->hasTable('settings') || ! $this->tableHasColumn('settings', 'approval_primary_admin_id')) {
-            return response()->json([
-                'error' => 'Kolom admin utama belum tersedia. Jalankan migrasi terbaru terlebih dahulu.',
-            ], 503);
-        }
-
-        $profile = Profile::query()
-            ->where('id', $userId)
-            ->where('tenant_id', $tenant->id)
-            ->where('role', 'admin')
-            ->first();
-        if (! $profile) {
-            return response()->json(['error' => 'Admin tenant tidak ditemukan'], 404);
-        }
-
-        if ($this->isSuperAdminByIdentity((string) $profile->id, (string) ($profile->email ?? ''))) {
-            return response()->json([
-                'error' => 'Akun super admin tidak bisa dijadikan admin utama tenant.',
-            ], 422);
-        }
-
-        $settings = DB::table('settings')
-            ->where('tenant_id', $tenant->id)
-            ->orderBy('id')
-            ->first();
-        if (! $settings) {
-            return response()->json([
-                'error' => 'Pengaturan tenant belum tersedia.',
-            ], 404);
-        }
-
-        $oldData = (array) $settings;
-        $currentPrimary = trim((string) ($settings->approval_primary_admin_id ?? ''));
-        if ($currentPrimary === (string) $profile->id) {
-            return response()->json([
-                'data' => [
-                    'tenant_id' => (string) $tenant->id,
-                    'settings_id' => (string) ($settings->id ?? ''),
-                    'primary_admin_user_id' => (string) $profile->id,
-                    'primary_admin_name' => $profile->nama,
-                    'primary_admin_email' => $profile->email,
-                ],
-            ]);
-        }
-
-        $updates = [
-            'approval_primary_admin_id' => (string) $profile->id,
-        ];
-        if ($this->tableHasColumn('settings', 'updated_at')) {
-            $updates['updated_at'] = now();
-        }
-
-        DB::table('settings')
-            ->where('id', $settings->id)
-            ->update($updates);
-
-        $newData = DB::table('settings')->where('id', $settings->id)->first();
-
-        $this->logAudit(
-            $request,
-            'settings',
-            (string) ($settings->id ?? ''),
-            'UPDATE',
-            $oldData,
-            $newData ? (array) $newData : null,
-            (string) $tenant->id
-        );
-
-        return response()->json([
-            'data' => [
-                'tenant_id' => (string) $tenant->id,
-                'settings_id' => (string) ($settings->id ?? ''),
-                'primary_admin_user_id' => (string) $profile->id,
-                'primary_admin_name' => $profile->nama,
-                'primary_admin_email' => $profile->email,
-            ],
-        ]);
     }
 
     public function resetTenantAdminPassword(Request $request, string $tenantId, string $userId)
@@ -4500,7 +4388,6 @@ class SuperAdminController extends ApiController
             'tenants',
             'tenant_domains',
             'super_admins',
-            'approval_requests',
             'absensi',
             'absensi_settings',
             'tugas_jawaban',
@@ -4514,7 +4401,6 @@ class SuperAdminController extends ApiController
             'tenants',
             'tenant_domains',
             'super_admins',
-            'approval_requests',
         ];
 
         if ($this->hasTable('audit_log')) {
@@ -4551,7 +4437,7 @@ class SuperAdminController extends ApiController
                     'medium',
                     'SETTINGS_CHANGE_BURST',
                     "Perubahan settings tinggi ({$settingsChangeCount} update/jam).",
-                    'Bandingkan perubahan settings dengan approval/aktivitas admin. Kunci akun admin terkait bila perubahan tidak dikenali.',
+                    'Bandingkan perubahan settings dengan aktivitas admin. Kunci akun admin terkait bila perubahan tidak dikenali.',
                     ['count' => $settingsChangeCount, 'window' => '1h', 'source' => 'audit_log']
                 );
             }
@@ -4748,8 +4634,6 @@ class SuperAdminController extends ApiController
                     $query
                         ->whereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%domain%'])
                         ->orWhereRaw('LOWER(CAST(old_data AS TEXT)) LIKE ?', ['%domain%'])
-                        ->orWhereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%approval_%'])
-                        ->orWhereRaw('LOWER(CAST(old_data AS TEXT)) LIKE ?', ['%approval_%'])
                         ->orWhereRaw('LOWER(CAST(new_data AS TEXT)) LIKE ?', ['%admin_lock%'])
                         ->orWhereRaw('LOWER(CAST(old_data AS TEXT)) LIKE ?', ['%admin_lock%']);
                 });
@@ -4762,8 +4646,8 @@ class SuperAdminController extends ApiController
                     $anomalies,
                     'medium',
                     'SECURITY_CONFIG_CHANGED',
-                    "Ada {$securityConfigChangeCount} perubahan konfigurasi domain/approval/admin lock dalam 24 jam.",
-                    'Cocokkan perubahan dengan tiket/approval. Jalankan smoke test domain dan pastikan tidak ada wildcard/host tidak dikenal yang aktif.',
+                    "Ada {$securityConfigChangeCount} perubahan konfigurasi domain/admin lock dalam 24 jam.",
+                    'Cocokkan perubahan dengan tiket operasional. Jalankan smoke test domain dan pastikan tidak ada wildcard/host tidak dikenal yang aktif.',
                     ['count' => $securityConfigChangeCount, 'window' => '24h', 'source' => 'audit_log']
                 );
             }
@@ -4806,24 +4690,6 @@ class SuperAdminController extends ApiController
                     'Akun '.((string) $actor->user_id)." membuat {$actor->total} perubahan data dalam 1 jam.",
                     'Pastikan ini aktivitas import/batch yang sah. Jika bukan, nonaktifkan akun sementara dan review perubahan terakhirnya.',
                     ['user_id' => (string) $actor->user_id, 'count' => (int) $actor->total, 'window' => '1h', 'source' => 'audit_log']
-                );
-            }
-        }
-
-        if ($this->hasTable('approval_requests')) {
-            $pendingQuery = DB::table('approval_requests')->where('status', 'pending');
-            if ($tenantId && $this->tableHasColumn('approval_requests', 'tenant_id')) {
-                $pendingQuery->where('tenant_id', $tenantId);
-            }
-            $pendingCount = (int) $pendingQuery->count();
-            if ($pendingCount >= 15) {
-                $this->appendAuditAnomaly(
-                    $anomalies,
-                    'medium',
-                    'APPROVAL_QUEUE_BACKLOG',
-                    "Antrian approval menumpuk ({$pendingCount} request pending).",
-                    'Minta admin utama menyelesaikan approval agar perubahan kritikal tidak menggantung dan tidak diulang manual.',
-                    ['count' => $pendingCount, 'source' => 'approval_requests']
                 );
             }
         }
@@ -5089,29 +4955,6 @@ class SuperAdminController extends ApiController
         $tenant = $tenantQuery->first();
 
         return $tenant ?: null;
-    }
-
-    private function resolveTenantPrimaryAdminUserId(string $tenantId): string
-    {
-        if ($tenantId === '') {
-            return '';
-        }
-
-        if (! $this->hasTable('settings') || ! $this->tableHasColumn('settings', 'approval_primary_admin_id')) {
-            return '';
-        }
-
-        try {
-            $row = DB::table('settings')
-                ->where('tenant_id', $tenantId)
-                ->orderBy('id')
-                ->first(['approval_primary_admin_id']);
-            $primaryAdminId = trim((string) ($row->approval_primary_admin_id ?? ''));
-
-            return $primaryAdminId;
-        } catch (\Throwable $e) {
-            return '';
-        }
     }
 
     private function buildTenantRfidTemplate(object $tenant): array

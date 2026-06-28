@@ -1,16 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
+import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import OrganisasiTab from './kelas/OrganisasiTab'
 
 export default function OrganisasiPage() {
   const { pushToast } = useUIStore()
+  const { activeSemesterPeriod: academicPeriod } = useActiveAcademicPeriod({ persistFilter: false })
   const [guruList, setGuruList] = useState([])
-  const [loading, setLoading] = useState(true)
 
   const loadPeople = useCallback(async () => {
     try {
-      setLoading(true)
       const guruResult = await supabase
         .from('profiles')
         .select('id,nama,email,jabatan,status')
@@ -25,8 +25,6 @@ export default function OrganisasiPage() {
       })))
     } catch (error) {
       pushToast('error', error?.message || 'Gagal memuat data organisasi')
-    } finally {
-      setLoading(false)
     }
   }, [pushToast])
 
@@ -43,23 +41,20 @@ export default function OrganisasiPage() {
           </div>
           <div>
             <h1 className="page-title-heading">Organisasi Sekolah</h1>
-            <p className="page-title-description">Kelola organisasi, pembina, jabatan, dan anggota siswa.</p>
+            <p className="page-title-description">
+              Kelola organisasi, pembina, jabatan, dan anggota siswa untuk tahun ajaran {academicPeriod?.tahunAjaran || 'aktif'}.
+            </p>
           </div>
         </div>
       </div>
 
-      {loading ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm font-semibold text-slate-500">
-          Memuat organisasi sekolah...
-        </div>
-      ) : (
-        <OrganisasiTab
-          guruList={guruList}
-          siswaList={[]}
-          pushToast={pushToast}
-          showHeader={false}
-        />
-      )}
+      <OrganisasiTab
+        guruList={guruList}
+        siswaList={[]}
+        academicPeriod={academicPeriod}
+        pushToast={pushToast}
+        showHeader={false}
+      />
     </div>
   )
 }

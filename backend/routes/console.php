@@ -302,14 +302,6 @@ Artisan::command('super-admin:bootstrap {--force-password : Reset password user 
                         'created_at' => $now,
                         'updated_at' => $now,
                     ]);
-                    $settings = DB::table('settings')->where('tenant_id', $tenant->id)->orderBy('id')->first(['id']);
-                }
-
-                if ($settings && Schema::hasColumn('settings', 'approval_primary_admin_id')) {
-                    DB::table('settings')->where('id', $settings->id)->update([
-                        'approval_primary_admin_id' => (string) $user->id,
-                        'updated_at' => $now,
-                    ]);
                 }
             }
         });

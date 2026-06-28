@@ -47,9 +47,7 @@ const ASuperMonitorLog = lazyRoute('/admin/monitoring-log')
 const AAnimasiFlow = lazyRoute('/admin/animasi-flow')
 const ATenants = lazyRoute('/admin/tenants')
 const ASuperAdmins = lazyRoute('/admin/super-admins')
-const AApprovals = lazyRoute('/admin/approvals')
 const AAuditTrail = lazyRoute('/admin/audit-trail')
-const APlugins = lazyRoute('/admin/plugins')
 const AWhatsApp = lazyRoute('/admin/whatsapp')
 const APermissionAdmin = lazyRoute('/admin/permission-admin')
 
@@ -151,7 +149,6 @@ const AppRoutes = () => (
       <Route path="/admin/tenants" element={lazyElement(ATenants)} />
       <Route path="/admin/super-admins" element={lazyElement(ASuperAdmins)} />
       <Route path="/admin/audit-trail" element={lazyElement(AAuditTrail)} />
-      <Route path="/admin/plugins" element={lazyElement(APlugins)} />
       <Route path="/admin/storage" element={lazyElement(AStorage)} />
       <Route element={<AdminLockGate />}>
         <Route path="/admin/home" element={lazyElement(AHome)} />
@@ -163,7 +160,6 @@ const AppRoutes = () => (
         <Route path="/admin/siswa" element={lazyElement(ASiswa)} />
         <Route path="/admin/scan" element={lazyElement(AScan)} />
         <Route path="/admin/backup" element={lazyElement(ABackup)} />
-        <Route path="/admin/approvals" element={lazyElement(AApprovals)} />
         <Route path="/admin/permission-admin" element={lazyElement(APermissionAdmin)} />
         <Route path="/admin/sertifikat" element={lazyElement(Sertifikat)} />
         <Route path="/admin/whatsapp" element={lazyElement(AWhatsApp)} />

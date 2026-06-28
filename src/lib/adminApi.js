@@ -38,13 +38,14 @@ const adminApi = {
       if (!res.error) invalidateDbSelectCache()
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
-    async dashboardSummary() {
-      const res = await apiFetch('/api/admin/dashboard-summary', {
+    async dashboardSummary(params = {}) {
+      const cacheKey = JSON.stringify(params || {})
+      const res = await apiFetch(`/api/admin/dashboard-summary${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 60 * 1000,
         persistCache: true,
         staleCacheTtlMs: 10 * 60 * 1000,
-        staleKey: 'admin.dashboard-summary',
+        staleKey: `admin.dashboard-summary.${cacheKey}`,
         timeoutMs: 15000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
@@ -83,12 +84,13 @@ const adminApi = {
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async academicSummary(params = {}) {
+      const cacheKey = JSON.stringify(params || {})
       const res = await apiFetch(`/api/admin/academic-summary${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 15 * 1000,
         persistCache: true,
         staleCacheTtlMs: 10 * 60 * 1000,
-        staleKey: 'admin.academic-summary',
+        staleKey: `admin.academic-summary.${cacheKey}`,
         timeoutMs: 15000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
@@ -112,12 +114,13 @@ const adminApi = {
       return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
     },
     async studentOptions(params = {}) {
+      const cacheKey = JSON.stringify(params || {})
       const res = await apiFetch(`/api/admin/student-options${buildQueryString(params)}`, {
         method: 'GET',
         cacheTtlMs: 20 * 1000,
         persistCache: true,
         staleCacheTtlMs: 10 * 60 * 1000,
-        staleKey: `admin.student-options.${params?.kelas || 'all'}`,
+        staleKey: `admin.student-options.${cacheKey}`,
         timeoutMs: 12000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
@@ -310,37 +313,6 @@ const adminApi = {
         method: 'GET',
         cacheTtlMs: 0,
         timeoutMs: 20000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async approvals(params = {}) {
-      const query = new URLSearchParams()
-      Object.entries(params || {}).forEach(([key, value]) => {
-        if (value === undefined || value === null || value === '') return
-        query.set(String(key), String(value))
-      })
-      const suffix = query.toString() ? `?${query.toString()}` : ''
-      const res = await apiFetch(`/api/admin/approvals${suffix}`, {
-        method: 'GET',
-        cacheTtlMs: 10 * 1000,
-        persistCache: true,
-        staleCacheTtlMs: 2 * 60 * 1000,
-        staleKey: `admin.approvals.${suffix}`,
-        timeoutMs: 15000
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async approveApproval(id, payload = {}) {
-      const res = await apiFetch(`/api/admin/approvals/${id}/approve`, {
-        method: 'POST',
-        body: payload
-      })
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    },
-    async rejectApproval(id, payload = {}) {
-      const res = await apiFetch(`/api/admin/approvals/${id}/reject`, {
-        method: 'POST',
-        body: payload
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },

@@ -200,7 +200,6 @@ class SettingsController extends ApiController
             'manual_jam_pulang_mulai', 'manual_jam_pulang_selesai',
             'visi', 'misi', 'link_instagram', 'link_facebook', 'link_youtube', 'link_tiktok',
             'auto_alpha_enabled',
-            'approval_maker_checker_enabled', 'approval_require_second_approver',
             'anomaly_alert_enabled', 'anomaly_bulk_threshold',
         ];
 

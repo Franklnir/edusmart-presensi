@@ -23,16 +23,6 @@ use Illuminate\Support\Str;
 
 class DbController extends ApiController
 {
-    private const CRITICAL_MAKER_CHECKER_TABLES = [
-        'settings',
-        'absensi',
-        'absensi_settings',
-        'absensi_rfid_settings',
-        'tugas_jawaban',
-        'quiz_submissions',
-        'quiz_answers',
-    ];
-
     private const REMOVED_SETTINGS_POLICY_FIELDS = [
         'ranking_weight_tugas',
         'ranking_weight_quiz',
@@ -46,6 +36,9 @@ class DbController extends ApiController
         'nilai_freeze_reason',
         'nilai_freeze_updated_by',
         'nilai_freeze_updated_at',
+        'approval_primary_admin_id',
+        'approval_maker_checker_enabled',
+        'approval_require_second_approver',
     ];
 
     private const RELATION_SELECTS = [
@@ -229,23 +222,6 @@ class DbController extends ApiController
         $offset = $request->input('offset');
         if ($offset !== null) {
             $offset = min(100000, max(0, (int) $offset));
-        }
-
-        if ($action !== 'select') {
-            $approvalResponse = $this->queueCriticalChangeApprovalIfNeeded(
-                $request,
-                $table,
-                $action,
-                $payload,
-                $filters,
-                $orders,
-                $limit,
-                $offset,
-                $tenantId
-            );
-            if ($approvalResponse !== null) {
-                return $approvalResponse;
-            }
         }
 
         if ($action === 'select') {
@@ -6986,129 +6962,6 @@ class DbController extends ApiController
         return $this->queryRowsToArray($query);
     }
 
-    private function queueCriticalChangeApprovalIfNeeded(
-        Request $request,
-        string $table,
-        string $action,
-        $payload,
-        array $filters,
-        array $orders,
-        ?int $limit,
-        ?int $offset,
-        ?string $tenantId
-    ) {
-        if ($request->attributes->get('approval_exec') === true) {
-            return null;
-        }
-
-        if (! in_array($action, ['insert', 'update', 'delete', 'upsert'], true)) {
-            return null;
-        }
-
-        if (! in_array($table, self::CRITICAL_MAKER_CHECKER_TABLES, true)) {
-            return null;
-        }
-
-        if ($this->isSuperAdmin($request)) {
-            return null;
-        }
-
-        if ($this->isGuru($request)) {
-            return null;
-        }
-
-        if (! $this->isAdmin($request)) {
-            return null;
-        }
-
-        if (! $tenantId) {
-            return null;
-        }
-
-        $userId = (string) ($request->user()?->id ?? '');
-        if ($this->isMakerCheckerBypassUser($tenantId, $userId)) {
-            return null;
-        }
-
-        if (! $this->isMakerCheckerEnabledForTenant($tenantId)) {
-            return null;
-        }
-
-        if (! $this->hasTable('approval_requests')) {
-            return null;
-        }
-
-        $user = $request->user();
-        $profile = $this->profile($request);
-        $rowEstimate = $this->estimateAffectedRowsFromPayload($payload);
-        if ($action === 'delete' && $rowEstimate < 1) {
-            $rowEstimate = 1;
-        }
-
-        $riskLevel = $this->deriveRiskLevelForApproval($table, $action, $rowEstimate);
-        $summary = $this->summarizeApprovalChange($table, $action, $rowEstimate);
-
-        $changePayload = [
-            'table' => $table,
-            'action' => $action,
-            'payload' => $payload,
-            'filters' => $filters,
-            'order' => $orders,
-            'onConflict' => $request->input('onConflict'),
-            'limit' => $limit,
-            'offset' => $offset,
-            'requested_at' => now()->toIso8601String(),
-        ];
-
-        $requestId = (string) Str::uuid();
-        DB::table('approval_requests')->insert([
-            'id' => $requestId,
-            'tenant_id' => $tenantId,
-            'status' => 'pending',
-            'target_table' => $table,
-            'target_action' => strtoupper($action),
-            'target_record_id' => $this->extractApprovalTargetRecordId($filters, $payload),
-            'change_payload' => json_encode($changePayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            'change_summary' => $summary,
-            'affected_rows_estimate' => max(1, $rowEstimate),
-            'risk_level' => $riskLevel,
-            'requested_by' => $user?->id ? (string) $user->id : null,
-            'requested_by_role' => $profile?->role,
-            'requested_at' => now(),
-            'request_note' => trim((string) $request->input('approval_note', '')) ?: null,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        $this->logAudit(
-            $request,
-            'approval_requests',
-            $requestId,
-            'INSERT',
-            null,
-            [
-                'tenant_id' => $tenantId,
-                'target_table' => $table,
-                'target_action' => strtoupper($action),
-                'risk_level' => $riskLevel,
-                'affected_rows_estimate' => max(1, $rowEstimate),
-            ],
-            $tenantId
-        );
-
-        return response()->json([
-            'data' => [
-                'approval_required' => true,
-                'approval_id' => $requestId,
-                'status' => 'pending',
-                'summary' => $summary,
-                'risk_level' => $riskLevel,
-                'affected_rows_estimate' => max(1, $rowEstimate),
-            ],
-            'message' => 'Perubahan kritikal masuk antrian maker-checker dan menunggu approval.',
-        ], 202);
-    }
-
     private function hasTable(string $table): bool
     {
         try {
@@ -7116,126 +6969,6 @@ class DbController extends ApiController
         } catch (\Throwable $e) {
             return false;
         }
-    }
-
-    private function isMakerCheckerEnabledForTenant(string $tenantId): bool
-    {
-        if (! Schema::hasTable('settings')) {
-            return false;
-        }
-
-        if (! $this->isSelectableColumn('settings', 'approval_maker_checker_enabled')) {
-            return true;
-        }
-
-        try {
-            $row = DB::table('settings')
-                ->where('tenant_id', $tenantId)
-                ->orderBy('id')
-                ->first(['approval_maker_checker_enabled']);
-            if (! $row) {
-                return true;
-            }
-
-            return (bool) ($row->approval_maker_checker_enabled ?? true);
-        } catch (\Throwable $e) {
-            return true;
-        }
-    }
-
-    private function isMakerCheckerBypassUser(string $tenantId, string $userId): bool
-    {
-        if ($tenantId === '' || $userId === '') {
-            return false;
-        }
-
-        if (! $this->isSelectableColumn('settings', 'approval_primary_admin_id')) {
-            return false;
-        }
-
-        try {
-            $row = DB::table('settings')
-                ->where('tenant_id', $tenantId)
-                ->orderBy('id')
-                ->first(['approval_primary_admin_id']);
-            if (! $row) {
-                return false;
-            }
-
-            $primaryAdminId = strtolower(trim((string) ($row->approval_primary_admin_id ?? '')));
-            if ($primaryAdminId === '') {
-                return false;
-            }
-
-            return $primaryAdminId === strtolower(trim($userId));
-        } catch (\Throwable $e) {
-            return false;
-        }
-    }
-
-    private function estimateAffectedRowsFromPayload($payload): int
-    {
-        if (is_array($payload)) {
-            if (array_is_list($payload)) {
-                return count($payload);
-            }
-
-            return 1;
-        }
-
-        return 1;
-    }
-
-    private function summarizeApprovalChange(string $table, string $action, int $rows): string
-    {
-        $actionLabel = strtoupper($action);
-        $rowLabel = $rows > 1 ? "{$rows} baris" : '1 baris';
-
-        return "{$actionLabel} pada {$table} ({$rowLabel})";
-    }
-
-    private function deriveRiskLevelForApproval(string $table, string $action, int $rows): string
-    {
-        if (strtolower($action) === 'delete') {
-            return 'high';
-        }
-        if ($table === 'settings') {
-            return 'high';
-        }
-        if ($rows >= 20) {
-            return 'high';
-        }
-        if ($rows >= 5) {
-            return 'medium';
-        }
-
-        return 'low';
-    }
-
-    private function extractApprovalTargetRecordId(array $filters, $payload): ?string
-    {
-        $filterId = $filters['eq']['id'] ?? null;
-        if (is_string($filterId) && trim($filterId) !== '') {
-            return trim($filterId);
-        }
-
-        if (is_array($payload)) {
-            if (array_key_exists('id', $payload) && $payload['id'] !== null) {
-                $candidate = trim((string) $payload['id']);
-                if ($candidate !== '') {
-                    return $candidate;
-                }
-            }
-
-            if (array_is_list($payload) && isset($payload[0]) && is_array($payload[0]) && isset($payload[0]['id'])) {
-                $candidate = trim((string) $payload[0]['id']);
-                if ($candidate !== '') {
-                    return $candidate;
-                }
-            }
-        }
-
-        return null;
     }
 
     private function normalizeSettingsGovernancePayload(&$payload): ?string
@@ -7249,11 +6982,6 @@ class DbController extends ApiController
         $this->mapPayload($payload, function ($row) use (&$error) {
             if ($error !== null || ! is_array($row)) {
                 return $row;
-            }
-
-            // Admin utama tenant hanya boleh diubah dari panel super admin.
-            if (array_key_exists('approval_primary_admin_id', $row)) {
-                unset($row['approval_primary_admin_id']);
             }
 
             foreach (self::REMOVED_SETTINGS_POLICY_FIELDS as $field) {
@@ -7307,8 +7035,6 @@ class DbController extends ApiController
             }
 
             foreach ([
-                'approval_maker_checker_enabled',
-                'approval_require_second_approver',
                 'anomaly_alert_enabled',
             ] as $boolKey) {
                 if (! array_key_exists($boolKey, $row)) {

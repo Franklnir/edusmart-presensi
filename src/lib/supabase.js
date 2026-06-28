@@ -1774,19 +1774,6 @@ class QueryBuilder {
 
     let data = res.raw?.data ?? res.data
 
-    if (data && typeof data === 'object' && data.approval_required) {
-      return {
-        data,
-        error: makeError(
-          data?.message ||
-          'Perubahan kritikal menunggu approval. Cek menu Approval.',
-          202,
-          'APPROVAL_REQUIRED'
-        ),
-        count
-      }
-    }
-
     if (this.action !== 'select') {
       invalidateDbSelectCache(this.table)
       pulseRealtimeForMutation(this.table)

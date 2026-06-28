@@ -62,11 +62,19 @@ export const menuConfig = {
       group: 'Sistem',
       icon: 'cog',
       items: [
-        { id: 'admin-approvals', to: '/admin/approvals', label: 'Approval', icon: 'shield' },
         { id: 'admin-storage', to: '/admin/storage', label: 'Storage', icon: 'storage' },
         { id: 'admin-backup', to: '/admin/backup', label: 'Backup', icon: 'backup' },
         { id: 'admin-permission-admin', to: '/admin/permission-admin', label: 'Permission Admin', icon: 'shield' },
-        { id: 'admin-pengaturan', to: '/admin/pengaturan?menu=identity', label: 'Pengaturan', icon: 'cog' },
+      ],
+    },
+    {
+      id: 'admin-pengaturan',
+      group: 'Pengaturan',
+      icon: 'cog',
+      items: [
+        { id: 'admin-pengaturan-identitas', to: '/admin/pengaturan?menu=identity', label: 'Identitas', icon: 'school' },
+        { id: 'admin-pengaturan-akun-admin', to: '/admin/pengaturan?menu=admin', label: 'Akun Admin', icon: 'user' },
+        { id: 'admin-pengaturan-registrasi', to: '/admin/pengaturan?menu=registration', label: 'Registrasi', icon: 'users' },
       ],
     },
   ],
@@ -122,7 +130,6 @@ export const superAdminGroup = {
     { id: 'super-whatsapp', to: '/admin/whatsapp', label: 'WA Pusat', icon: 'chat' },
     { id: 'super-admins', to: '/admin/super-admins', label: 'Super Admin', icon: 'shield' },
     { id: 'super-audit-trail', to: '/admin/audit-trail', label: 'Audit Trail', icon: 'chart' },
-    { id: 'super-plugins', to: '/admin/plugins', label: 'Plugins', icon: 'cog' },
   ],
 }
 

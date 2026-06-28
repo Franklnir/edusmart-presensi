@@ -182,11 +182,13 @@ function EmptyState({ icon: Icon, title, description }) {
 
 export default function StrukturSekolahTab({
   guruList,
+  academicPeriod = null,
   pushToast,
   showHeader = true
 }) {
   const [struktur, setStruktur] = useState([])
   const [waliKelas, setWaliKelas] = useState([])
+  const [summaryGuruList, setSummaryGuruList] = useState([])
   const [posBaru, setPosBaru] = useState('')
   const [posGuru, setPosGuru] = useState('')
   const [loading, setLoading] = useState(true)
@@ -199,7 +201,8 @@ export default function StrukturSekolahTab({
   const [editingWali, setEditingWali] = useState({ id: '', guruId: '' })
 
   const guruOptions = useMemo(() => {
-    return (guruList || [])
+    const source = Array.isArray(guruList) && guruList.length ? guruList : summaryGuruList
+    return (source || [])
       .filter((guru) => guru?.id)
       .map((guru) => {
         const name = guru.name || guru.nama || guru.email || guru.id
@@ -212,7 +215,7 @@ export default function StrukturSekolahTab({
         }
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'id'))
-  }, [guruList])
+  }, [guruList, summaryGuruList])
 
   const teacherById = useMemo(() => {
     return new Map(guruOptions.map((guru) => [guru.id, guru]))
@@ -231,35 +234,28 @@ export default function StrukturSekolahTab({
         setLoading(true)
       }
 
-      const [strukturResult, kelasResult, kelasStrukturResult] = await Promise.all([
-        supabase
-          .from('struktur_sekolah')
-          .select('*')
-          .order('jabatan'),
-        supabase
-          .from('kelas')
-          .select('*')
-          .order('grade')
-          .order('suffix'),
-        supabase
-          .from('kelas_struktur')
-          .select('kelas_id,wali_guru_id,wali_guru_nama,updated_at')
-      ])
+      const params = {
+        include_students: false,
+        include_schedule: false,
+        include_mapel: false
+      }
+      if (academicPeriod?.tahunAjaran) {
+        params.tahun_ajaran = academicPeriod.tahunAjaran
+      }
 
-      if (strukturResult.error) throw strukturResult.error
-      if (kelasResult.error) throw kelasResult.error
-      if (kelasStrukturResult.error) throw kelasStrukturResult.error
+      const { data, error } = await supabase.admin.academicSummary(params)
+      if (error) throw error
 
-      const strukturRows = (strukturResult.data || []).map((row) => ({
+      const strukturRows = (data?.struktur_sekolah || []).map((row) => ({
         ...row,
         jabatan: normalizeSpaces(row.jabatan) || row.id
       }))
 
       const strukturByKelasId = new Map(
-        (kelasStrukturResult.data || []).map((row) => [row.kelas_id, row])
+        ((data?.kelas_struktur || data?.struktur || [])).map((row) => [row.kelas_id, row])
       )
 
-      const waliRows = (kelasResult.data || []).map((kelas) => {
+      const waliRows = (data?.kelas || []).map((kelas) => {
         const kelasStruktur = strukturByKelasId.get(kelas.id) || {}
         return {
           id: kelas.id,
@@ -281,6 +277,14 @@ export default function StrukturSekolahTab({
 
       setStruktur(strukturRows)
       setWaliKelas(waliRows)
+      setSummaryGuruList((data?.guru || []).map((guru) => {
+        const name = guru.nama || guru.email || guru.id
+        return {
+          ...guru,
+          name,
+          label: `${name}${guru.email ? ` (${guru.email})` : ''}`
+        }
+      }))
     } catch (error) {
       console.error('Error loading struktur sekolah:', error)
       pushToast('error', error?.message || 'Gagal memuat struktur sekolah')
@@ -288,7 +292,7 @@ export default function StrukturSekolahTab({
       setLoading(false)
       setRefreshing(false)
     }
-  }, [pushToast])
+  }, [academicPeriod?.tahunAjaran, pushToast])
 
   useEffect(() => {
     loadData()

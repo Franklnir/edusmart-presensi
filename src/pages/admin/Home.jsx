@@ -228,34 +228,37 @@ export default function AHome() {
   const loadAllData = useCallback(async () => {
     setIsLoading(true)
     try {
-      await loadCurrentAcademicPeriod()
+      const periodPromise = loadCurrentAcademicPeriod()
+      const batchPromise = supabase.batch([
+        {
+          key: 'people',
+          query: supabase
+            .from('profiles')
+            .select('id, nama, email, kelas, role, status, angkatan')
+            .in('role', ['admin', 'guru', 'teacher'])
+            .order('role')
+            .order('nama')
+        },
+        {
+          key: 'pengumuman',
+          query: supabase
+            .from('pengumuman')
+            .select('id,judul,keterangan,target,created_at,updated_at')
+            .order('created_at', { ascending: false })
+        },
+        {
+          key: 'eskul',
+          query: supabase
+            .from('ekskul')
+            .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,created_at,updated_at')
+            .order('nama')
+        }
+      ])
+      const period = await periodPromise
+      const summaryParams = period?.tahunAjaran ? { tahun_ajaran: period.tahunAjaran } : {}
       const [summaryRes, batchRes] = await Promise.all([
-        supabase.admin.dashboardSummary(),
-        supabase.batch([
-          {
-            key: 'people',
-            query: supabase
-              .from('profiles')
-              .select('id, nama, email, kelas, role, status, angkatan')
-              .in('role', ['admin', 'guru', 'teacher'])
-              .order('role')
-              .order('nama')
-          },
-          {
-            key: 'pengumuman',
-            query: supabase
-              .from('pengumuman')
-              .select('id,judul,keterangan,target,created_at,updated_at')
-              .order('created_at', { ascending: false })
-          },
-          {
-            key: 'eskul',
-            query: supabase
-              .from('ekskul')
-              .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,created_at,updated_at')
-              .order('nama')
-          }
-        ])
+        supabase.admin.dashboardSummary(summaryParams),
+        batchPromise
       ])
 
       const { data, error, errors } = batchRes
@@ -306,7 +309,8 @@ export default function AHome() {
 
   const loadStatistics = useCallback(async () => {
     try {
-      const { data, error } = await supabase.admin.dashboardSummary()
+      const params = activeSchoolPeriod?.tahunAjaran ? { tahun_ajaran: activeSchoolPeriod.tahunAjaran } : {}
+      const { data, error } = await supabase.admin.dashboardSummary(params)
       if (error) throw error
 
       setStats({
@@ -321,7 +325,7 @@ export default function AHome() {
     } catch (error) {
       pushToast('error', 'Gagal memuat statistik')
     }
-  }, [pushToast])
+  }, [activeSchoolPeriod?.tahunAjaran, pushToast])
 
   useEffect(() => {
     const channel = supabase
@@ -351,6 +355,11 @@ export default function AHome() {
   const [siswaList, setSiswaList] = useLocalCache('admin_dashboard_siswaList', [])
   const [studentOptionsLoading, setStudentOptionsLoading] = useState(false)
   const [studentOptionsLoaded, setStudentOptionsLoaded] = useState(false)
+
+  useEffect(() => {
+    setStudentOptionsLoaded(false)
+    setSiswaList([])
+  }, [eskulDataPeriod?.tahunAjaran, setSiswaList])
 
   const mergeSiswaOptions = useCallback((rows = []) => {
     if (!Array.isArray(rows) || rows.length === 0) return
@@ -386,6 +395,7 @@ export default function AHome() {
         per_page: all ? 10000 : 100,
         status: 'active'
       }
+      if (eskulDataPeriod?.tahunAjaran) params.tahun_ajaran = eskulDataPeriod.tahunAjaran
       if (all) params.all = true
       if (kelas) params.kelas = kelas
 
@@ -407,7 +417,7 @@ export default function AHome() {
     } finally {
       setStudentOptionsLoading(false)
     }
-  }, [mergeSiswaOptions, pushToast, siswaList, studentOptionsLoaded, studentOptionsLoading])
+  }, [eskulDataPeriod?.tahunAjaran, mergeSiswaOptions, pushToast, siswaList, studentOptionsLoaded, studentOptionsLoading])
 
 
   // Map cepat: uid → {nama, kelas}
