@@ -10,7 +10,7 @@ import {
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
-import { FixedSizeList as List } from 'react-window'
+import { List } from 'react-window'
 
 // ================== KONFIGURASI BUCKET ==================
 const CERT_BUCKET = APP_CERT_BUCKET

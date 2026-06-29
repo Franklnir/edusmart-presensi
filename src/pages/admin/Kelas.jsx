@@ -10,6 +10,7 @@ import { Trash2 } from 'lucide-react'
 import { verifyCurrentUserPassword as verifyPassword } from '../../services/authService'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
+import { List } from 'react-window'
 import {
   SCHEDULE_SCOPE_YEAR,
   doScheduleScopesOverlap,
@@ -3671,28 +3672,43 @@ export default function AKelas({ initialTab = 'kelas' }) {
                               : 'Pilih semua terlihat'}
                           </button>
                         </div>
-                        <div className="max-h-72 overflow-y-auto divide-y divide-gray-100">
+                        <div className="h-72 relative">
                           {promotionStudentsLoading ? (
                             <div className="px-4 py-8 text-center text-sm text-gray-500">
                               Memuat daftar siswa...
                             </div>
                           ) : promotionCandidateSiswa.length ? (
-                            promotionCandidateSiswa.map((siswa) => (
-                              <label key={siswa.uid} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50">
-                                <input
-                                  type="checkbox"
-                                  className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
-                                  checked={promotionSelectedIds.includes(siswa.uid)}
-                                  onChange={() => togglePromotionSelect(siswa.uid)}
-                                />
-                                <span className="flex-1 min-w-0">
-                                  <span className="block text-sm font-medium text-gray-900 truncate">{siswa.nama}</span>
-                                  <span className="block text-xs text-gray-500 truncate">
-                                    {getKelasName(siswa.kelas)} • Angkatan {siswa.angkatan || '-'} • {siswa.email}
-                                  </span>
-                                </span>
-                              </label>
-                            ))
+                            <div className="absolute inset-0">
+                              <List
+                                height={288}
+                                itemCount={promotionCandidateSiswa.length}
+                                itemSize={64}
+                                width="100%"
+                                itemData={promotionCandidateSiswa}
+                              >
+                                {({ index, style, data }) => {
+                                  const siswa = data[index]
+                                  return (
+                                    <div style={style}>
+                                      <label className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-100 h-full cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
+                                          checked={promotionSelectedIds.includes(siswa.uid)}
+                                          onChange={() => togglePromotionSelect(siswa.uid)}
+                                        />
+                                        <span className="flex-1 min-w-0">
+                                          <span className="block text-sm font-medium text-gray-900 truncate">{siswa.nama}</span>
+                                          <span className="block text-xs text-gray-500 truncate">
+                                            {getKelasName(siswa.kelas)} • Angkatan {siswa.angkatan || '-'} • {siswa.email}
+                                          </span>
+                                        </span>
+                                      </label>
+                                    </div>
+                                  )
+                                }}
+                              </List>
+                            </div>
                           ) : (
                             <div className="px-4 py-8 text-center text-sm text-gray-500">
                               Tidak ada siswa aktif yang cocok dengan filter.

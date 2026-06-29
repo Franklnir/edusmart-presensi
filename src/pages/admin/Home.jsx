@@ -6,6 +6,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
+import { List } from 'react-window'
 
 /* ===== Utils ===== */
 const slug = (s = '') =>
@@ -378,21 +379,22 @@ export default function AHome() {
     })
   }, [])
 
-  const loadStudentOptions = useCallback(async ({ force = false, all = false, kelas = '' } = {}) => {
-    if (studentOptionsLoading) return []
-    if (studentOptionsLoaded && !force && !all && !kelas) return siswaList
-
+  const loadStudentOptions = useCallback(async ({ force = false, all = false, kelas = '', q = '' } = {}) => {
     setStudentOptionsLoading(true)
     try {
       const params = {
-        per_page: all ? 10000 : 100,
+        per_page: all ? 10000 : (q ? 50 : 100),
         status: 'active'
       }
       if (eskulDataPeriod?.tahunAjaran) params.tahun_ajaran = eskulDataPeriod.tahunAjaran
       if (all) params.all = true
       if (kelas) params.kelas = kelas
+      if (q) params.q = q
 
       const { data, error } = await supabase.admin.studentOptions(params)
+      if (data?.meta?.has_more !== undefined) {
+         setMemberOptionsHasMore(data.meta.has_more)
+      }
       if (error) throw error
       const rows = data?.rows || []
       mergeSiswaOptions(rows)
@@ -554,6 +556,8 @@ export default function AHome() {
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false)
   const [addMemberUid, setAddMemberUid] = useState('')
   const [addMemberMode, setAddMemberMode] = useState('single')
+  const [memberSearch, setMemberSearch] = useState('')
+  const [memberOptionsHasMore, setMemberOptionsHasMore] = useState(false)
   const [addMemberClass, setAddMemberClass] = useState('')
   const [loadingEskul, setLoadingEskul] = useState(false)
 
@@ -615,6 +619,15 @@ export default function AHome() {
     loadEskulList()
     setAddMemberUid('')
   }, [loadEskulList])
+
+  
+  useEffect(() => {
+    if (addMemberMode !== 'single' || addMemberLocked) return undefined
+    const timer = window.setTimeout(() => {
+      loadStudentOptions({ q: memberSearch, kelas: addMemberClass })
+    }, memberSearch ? 300 : 0)
+    return () => window.clearTimeout(timer)
+  }, [addMemberMode, addMemberLocked, memberSearch, addMemberClass, loadStudentOptions])
 
   const loadEskulAnggota = useCallback(async () => {
     if (!eskulSel) return
@@ -1704,28 +1717,43 @@ export default function AHome() {
 
                             <div className={addMemberMode === 'single' ? '' : 'hidden'}>
                               <label className="mb-2 block text-xs font-medium uppercase tracking-normal text-slate-500">
-                                Siswa
+                                Cari & Pilih Siswa
                               </label>
-                              <select
-                                className="w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-all duration-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100"
-                                value={addMemberUid}
-                                onFocus={() => loadStudentOptions({ force: !studentOptionsLoaded, all: true, kelas: addMemberClass })}
-                                onChange={(e) => setAddMemberUid(e.target.value)}
-                                disabled={addMemberLocked || addMemberMode !== 'single'}
-                              >
-                                <option value="">
-                                  {studentOptionsLoading
-                                    ? 'Memuat siswa...'
-                                    : studentOptionsLoaded || availableSiswaOptions.length
-                                      ? 'Pilih siswa'
-                                      : 'Klik untuk memuat siswa'}
-                                </option>
-                                {availableSiswaOptions.map((s) => (
-                                  <option key={s.uid} value={s.uid}>
-                                    {s.nama} ({s.kelas || 'Tanpa kelas'})
+                              <div className="flex flex-col gap-2">
+                                <input
+                                  type="text"
+                                  className="w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-all duration-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100"
+                                  placeholder="Ketik nama atau NIS untuk mencari..."
+                                  value={memberSearch}
+                                  onChange={(e) => {
+                                    setMemberSearch(e.target.value)
+                                    setAddMemberUid('')
+                                  }}
+                                  disabled={addMemberLocked || addMemberMode !== 'single'}
+                                />
+                                <select
+                                  className="w-full rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-all duration-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100"
+                                  value={addMemberUid}
+                                  onChange={(e) => setAddMemberUid(e.target.value)}
+                                  disabled={addMemberLocked || addMemberMode !== 'single'}
+                                >
+                                  <option value="">
+                                    {studentOptionsLoading
+                                      ? 'Memuat siswa...'
+                                      : 'Pilih hasil pencarian'}
                                   </option>
-                                ))}
-                              </select>
+                                  {availableSiswaOptions.map((s) => (
+                                    <option key={s.uid} value={s.uid}>
+                                      {s.nama} ({s.kelas || 'Tanpa kelas'})
+                                    </option>
+                                  ))}
+                                </select>
+                                {memberOptionsHasMore && (
+                                  <p className="text-[11px] text-emerald-700 font-semibold">
+                                    Hasil dibatasi 50. Ketik lebih spesifik jika siswa tidak ditemukan.
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           </div>
 
@@ -1741,48 +1769,8 @@ export default function AHome() {
                                 {anggotaDisplay.length} siswa
                               </span>
                             </div>
-                            <div className="space-y-4">
-                              {anggotaDisplay.map((a) => (
-                                <div
-                                  key={a.id}
-                                  className="flex flex-col gap-4 rounded-xl border-2 border-gray-200 p-4 transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-50 sm:flex-row sm:items-center sm:justify-between"
-                                >
-                                  <div className="flex items-center gap-4">
-                                    <div className="rounded-lg bg-emerald-100 p-3 text-emerald-600">
-                                      👤
-                                    </div>
-                                    <div>
-                                      <div className="font-semibold text-gray-900">
-                                        {a.nama}
-                                      </div>
-                                      <div className="mt-1 text-sm text-gray-500">
-                                        Kelas:{' '}
-                                        <span className="font-medium">{a.kelas}</span>
-                                        <span className="mx-1">•</span>
-                                        Angkatan: <span className="font-medium">{a.angkatan}</span>
-                                      </div>
-                                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">
-                                          ✅ Hadir:
-                                          <span className="ml-1">{a.hadirCount}</span>
-                                        </span>
-                                        <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-700">
-                                          📝 Izin:
-                                          <span className="ml-1">{a.izinCount}</span>
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <button
-                                    className="rounded-lg bg-red-50 px-4 py-2 text-xs font-semibold text-red-600 transition-all duration-200 hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                                    onClick={() => hapusAnggotaEskul(a.id)}
-                                    disabled={isViewingArchivePeriod}
-                                  >
-                                    🗑️ Hapus
-                                  </button>
-                                </div>
-                              ))}
-                              {anggotaDisplay.length === 0 && (
+                            <div className="space-y-4 relative min-h-[400px]">
+                              {anggotaDisplay.length === 0 ? (
                                 <div className="py-12 text-center">
                                   <div className="mb-4 text-6xl text-gray-300">👥</div>
                                   <p className="text-lg font-medium text-gray-500">
@@ -1791,6 +1779,58 @@ export default function AHome() {
                                   <p className="mt-2 text-gray-400">
                                     Tambahkan siswa ke ekskul ini
                                   </p>
+                                </div>
+                              ) : (
+                                <div className="absolute inset-0">
+                                  <List
+                                    height={400}
+                                    itemCount={anggotaDisplay.length}
+                                    itemSize={104}
+                                    width="100%"
+                                    itemData={anggotaDisplay}
+                                  >
+                                    {({ index, style, data }) => {
+                                      const a = data[index]
+                                      return (
+                                        <div style={style} className="pr-2 pb-2">
+                                          <div className="flex flex-col gap-4 rounded-xl border-2 border-gray-200 p-4 transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-50 h-full sm:flex-row sm:items-center sm:justify-between">
+                                            <div className="flex items-center gap-4">
+                                              <div className="rounded-lg bg-emerald-100 p-3 text-emerald-600 hidden sm:block">
+                                                👤
+                                              </div>
+                                              <div>
+                                                <div className="font-semibold text-gray-900 truncate max-w-[200px] sm:max-w-[400px]">
+                                                  {a.nama}
+                                                </div>
+                                                <div className="mt-1 text-sm text-gray-500">
+                                                  Kelas: <span className="font-medium">{a.kelas}</span>
+                                                  <span className="mx-1">•</span>
+                                                  Angkatan: <span className="font-medium">{a.angkatan}</span>
+                                                </div>
+                                                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                                                  <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">
+                                                    ✅ Hadir:
+                                                    <span className="ml-1">{a.hadirCount}</span>
+                                                  </span>
+                                                  <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-700">
+                                                    📝 Izin:
+                                                    <span className="ml-1">{a.izinCount}</span>
+                                                  </span>
+                                                </div>
+                                              </div>
+                                            </div>
+                                            <button
+                                              className="rounded-lg bg-red-50 px-4 py-2 text-xs font-semibold text-red-600 transition-all duration-200 hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                              onClick={() => hapusAnggotaEskul(a.id)}
+                                              disabled={isViewingArchivePeriod}
+                                            >
+                                              🗑️ Hapus
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )
+                                    }}
+                                  </List>
                                 </div>
                               )}
                             </div>
