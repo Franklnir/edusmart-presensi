@@ -243,6 +243,7 @@ const Login = () => {
   const [cooldownEnd, setCooldownEnd] = useState(0);
   const [cooldownLeft, setCooldownLeft] = useState(0);
   const cooldownTimerRef = useRef(null);
+  const hasProcessedUrl = useRef(false);
 
   // Cooldown timer effect
   useEffect(() => {
@@ -315,6 +316,9 @@ const Login = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
+
+    if (hasProcessedUrl.current) return undefined
+    hasProcessedUrl.current = true
 
     let redirectTimer = null
 
