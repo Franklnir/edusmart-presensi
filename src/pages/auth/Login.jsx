@@ -381,6 +381,14 @@ const Login = () => {
         return () => {
           if (redirectTimer) window.clearTimeout(redirectTimer)
         }
+      } else if (openedAsPopup && googlePopupState && !googleStatus && !loginReason) {
+        setError('Sesi login Google tidak dapat dilanjutkan (batas percobaan terlampaui atau diblokir). Silakan tutup jendela ini dan coba lagi dari halaman utama.')
+        
+        url.searchParams.delete('google_popup_state')
+        url.searchParams.delete('google_popup_mode')
+        const cleaned = `${url.pathname}${url.search}${url.hash}`
+        window.history.replaceState({}, '', cleaned)
+        return
       }
 
       if (!googleStatus && !loginReason) {
