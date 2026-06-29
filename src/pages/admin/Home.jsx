@@ -245,13 +245,6 @@ export default function AHome() {
             .from('pengumuman')
             .select('id,judul,keterangan,target,created_at,updated_at')
             .order('created_at', { ascending: false })
-        },
-        {
-          key: 'eskul',
-          query: supabase
-            .from('ekskul')
-            .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,created_at,updated_at')
-            .order('nama')
         }
       ])
       const period = await periodPromise
@@ -284,7 +277,7 @@ export default function AHome() {
         kelas: summary.kelas || 0,
         absensi: summary.absensi || 0,
         pengumuman: summary.pengumuman || (data?.pengumuman?.data || []).length,
-        eskul: summary.eskul || (data?.eskul?.data || []).length
+        eskul: summary.eskul || 0
       })
 
       setGuruList(
@@ -341,11 +334,11 @@ export default function AHome() {
     }
   }, [loadCurrentAcademicPeriod, loadStatistics])
 
-  // LIVE RFID SYNC: Auto-poll statistics every 10 seconds silently
+  // LIVE RFID SYNC: Auto-poll statistics every 60 seconds silently
   useEffect(() => {
     const interval = setInterval(() => {
       loadStatistics()
-    }, 10000)
+    }, 60000)
     return () => clearInterval(interval)
   }, [loadStatistics])
 
