@@ -117,7 +117,7 @@ Route::get('/auth/verify-email/{id}/{hash}', [AuthController::class, 'verifyEmai
     ->name('verification.verify')
     ->middleware('throttle:6,1');
 Route::get('/auth/me', [AuthController::class, 'me'])
-    ->middleware(['throttle:api'])
+    ->middleware(['auth:sanctum', 'throttle:api'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
