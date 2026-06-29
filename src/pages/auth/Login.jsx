@@ -84,6 +84,83 @@ const GoogleLogo = () => (
   </svg>
 )
 
+const GOOGLE_POPUP_NAME_PREFIX = 'edusmart_google_auth_popup'
+
+const normalizeGooglePopupMode = (value) => (
+  String(value || '').trim().toLowerCase() === 'link' ? 'link' : 'login'
+)
+
+const createGooglePopupStateToken = () => {
+  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID()
+  }
+
+  return `google_${Date.now()}_${Math.random().toString(36).slice(2)}`
+}
+
+const readPopupLaunchFromWindowName = () => {
+  if (typeof window === 'undefined') {
+    return {
+      isGooglePopupName: false,
+      state: '',
+      mode: 'login'
+    }
+  }
+
+  const popupName = String(window.name || '').trim()
+  if (popupName === GOOGLE_POPUP_NAME_PREFIX) {
+    return {
+      isGooglePopupName: true,
+      state: '',
+      mode: 'login'
+    }
+  }
+
+  const prefix = `${GOOGLE_POPUP_NAME_PREFIX}_`
+  if (!popupName.startsWith(prefix)) {
+    return {
+      isGooglePopupName: false,
+      state: '',
+      mode: 'login'
+    }
+  }
+
+  const raw = popupName.slice(prefix.length)
+  const modeMatch = raw.match(/^(login|link)_(.+)$/)
+
+  if (modeMatch) {
+    return {
+      isGooglePopupName: true,
+      state: String(modeMatch[2] || '').trim(),
+      mode: normalizeGooglePopupMode(modeMatch[1])
+    }
+  }
+
+  return {
+    isGooglePopupName: true,
+    state: raw.trim(),
+    mode: 'login'
+  }
+}
+
+const popupResumeStorageKey = (state) => `edusmart_google_popup_resume:${state}`
+
+const canResumeGooglePopupState = (state) => {
+  const safeState = String(state || '').trim()
+  if (!safeState || typeof window === 'undefined') return false
+
+  try {
+    const key = popupResumeStorageKey(safeState)
+    const attempts = Number(window.sessionStorage?.getItem(key) || '0')
+    if (Number.isFinite(attempts) && attempts >= 2) return false
+    window.sessionStorage?.setItem(key, String((Number.isFinite(attempts) ? attempts : 0) + 1))
+  } catch {
+    // If storage is blocked, still allow the recovery once in memory-less mode.
+  }
+
+  return true
+}
+
 const readGooglePopupRuntime = () => {
   const fallback = {
     isPopupWindow: false,
@@ -100,21 +177,25 @@ const readGooglePopupRuntime = () => {
   try {
     const url = new URL(window.location.href)
     const status = String(url.searchParams.get('google') || '').trim()
-    const state = String(url.searchParams.get('google_popup_state') || '').trim()
-    const mode = String(url.searchParams.get('google_popup_mode') || 'login')
-      .trim()
-      .toLowerCase()
+    const urlState = String(url.searchParams.get('google_popup_state') || '').trim()
+    const popupLaunch = readPopupLaunchFromWindowName()
+    const state = urlState || popupLaunch.state
+    const mode = normalizeGooglePopupMode(
+      url.searchParams.get('google_popup_mode') || popupLaunch.mode
+    )
+    const hasPopupParams = urlState !== '' || url.searchParams.has('google_popup_mode') || status !== ''
 
-    const popupName = String(window.name || '')
+    const isPopupWindow = popupLaunch.isGooglePopupName ||
+      (window.opener != null && hasPopupParams)
 
     return {
-      isPopupWindow: window.opener != null || popupName === 'edusmart_google_auth_popup' || popupName.startsWith('edusmart_google_auth_popup_'),
+      isPopupWindow,
       hasGoogleStatus: status !== '',
       hasPopupState: state !== '',
       isRedirectingToGoogle: false,
       status,
       state,
-      mode: mode === 'link' ? 'link' : 'login'
+      mode
     }
   } catch {
     return fallback
@@ -241,20 +322,32 @@ const Login = () => {
       const url = new URL(window.location.href)
       const googleStatus = String(url.searchParams.get('google') || '').trim()
       const googleError = String(url.searchParams.get('google_error') || '').trim()
-      const googlePopupState = String(url.searchParams.get('google_popup_state') || '').trim()
+      const popupLaunch = readPopupLaunchFromWindowName()
+      const googlePopupStateFromUrl = String(url.searchParams.get('google_popup_state') || '').trim()
+      let googlePopupState = googlePopupStateFromUrl || popupLaunch.state
       const hasGooglePopupStateParam = url.searchParams.has('google_popup_state')
       const hasGooglePopupModeParam = url.searchParams.has('google_popup_mode')
-      const googlePopupMode = String(url.searchParams.get('google_popup_mode') || 'login')
-        .trim()
-        .toLowerCase()
+      const googlePopupMode = normalizeGooglePopupMode(
+        url.searchParams.get('google_popup_mode') || popupLaunch.mode
+      )
       const loginReason = String(url.searchParams.get('reason') || '').trim()
-      const popupName = String(window.name || '')
-      const openedAsPopup =
-        window.opener != null ||
-        popupName === 'edusmart_google_auth_popup' ||
-        popupName.startsWith('edusmart_google_auth_popup_')
-      const normalizedPopupMode = googlePopupMode === 'link' ? 'link' : 'login'
-      const shouldResumeGooglePopup = openedAsPopup && googlePopupState && !googleStatus && !loginReason
+      const hasPopupMarker = popupLaunch.isGooglePopupName ||
+        hasGooglePopupStateParam ||
+        hasGooglePopupModeParam ||
+        googleStatus !== ''
+      const openedAsPopup = popupLaunch.isGooglePopupName ||
+        (window.opener != null && hasPopupMarker)
+      const normalizedPopupMode = googlePopupMode
+
+      if (openedAsPopup && !googlePopupState && !googleStatus && !loginReason) {
+        googlePopupState = createGooglePopupStateToken()
+      }
+
+      const shouldResumeGooglePopup = openedAsPopup &&
+        googlePopupState &&
+        !googleStatus &&
+        !loginReason &&
+        canResumeGooglePopupState(googlePopupState)
 
       setGooglePopupRuntime({
         isPopupWindow: openedAsPopup,
