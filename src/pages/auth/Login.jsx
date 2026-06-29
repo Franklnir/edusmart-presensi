@@ -105,8 +105,10 @@ const readGooglePopupRuntime = () => {
       .trim()
       .toLowerCase()
 
+    const popupName = String(window.name || '')
+
     return {
-      isPopupWindow: window.opener != null || window.name === 'edusmart_google_auth_popup',
+      isPopupWindow: window.opener != null || popupName === 'edusmart_google_auth_popup' || popupName.startsWith('edusmart_google_auth_popup_'),
       hasGoogleStatus: status !== '',
       hasPopupState: state !== '',
       isRedirectingToGoogle: false,
@@ -152,6 +154,7 @@ const Login = () => {
   const [info, setInfo] = useState('');
   const [error, setError] = useState('');
   const [googlePopupRuntime, setGooglePopupRuntime] = useState(readGooglePopupRuntime);
+  const [googlePopupRecoveryFailed, setGooglePopupRecoveryFailed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   // Rate limiting state
@@ -245,7 +248,11 @@ const Login = () => {
         .trim()
         .toLowerCase()
       const loginReason = String(url.searchParams.get('reason') || '').trim()
-      const openedAsPopup = window.opener != null || window.name === 'edusmart_google_auth_popup'
+      const popupName = String(window.name || '')
+      const openedAsPopup =
+        window.opener != null ||
+        popupName === 'edusmart_google_auth_popup' ||
+        popupName.startsWith('edusmart_google_auth_popup_')
       const normalizedPopupMode = googlePopupMode === 'link' ? 'link' : 'login'
       const shouldResumeGooglePopup = openedAsPopup && googlePopupState && !googleStatus && !loginReason
 
@@ -355,6 +362,64 @@ const Login = () => {
       if (redirectTimer) window.clearTimeout(redirectTimer)
     }
   }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    if (!googlePopupRuntime.isPopupWindow) return undefined
+    if (
+      googlePopupRuntime.hasGoogleStatus ||
+      googlePopupRuntime.hasPopupState ||
+      googlePopupRuntime.isRedirectingToGoogle
+    ) {
+      setGooglePopupRecoveryFailed(false)
+      return undefined
+    }
+
+    if (!window.opener) {
+      setGooglePopupRecoveryFailed(true)
+      return undefined
+    }
+
+    let attempts = 0
+    let stopped = false
+    setGooglePopupRecoveryFailed(false)
+
+    const askOpenerToRelaunch = () => {
+      if (stopped || attempts >= 8) return
+      attempts += 1
+
+      try {
+        window.opener.postMessage(
+          {
+            source: 'edusmart-google-popup',
+            type: 'edusmart-google-launch-request'
+          },
+          window.location.origin
+        )
+      } catch {
+        // Ignore; the timeout below will show a clear fallback.
+      }
+    }
+
+    askOpenerToRelaunch()
+    const interval = window.setInterval(askOpenerToRelaunch, 450)
+    const timeout = window.setTimeout(() => {
+      stopped = true
+      setGooglePopupRecoveryFailed(true)
+      window.clearInterval(interval)
+    }, 4200)
+
+    return () => {
+      stopped = true
+      window.clearInterval(interval)
+      window.clearTimeout(timeout)
+    }
+  }, [
+    googlePopupRuntime.hasGoogleStatus,
+    googlePopupRuntime.hasPopupState,
+    googlePopupRuntime.isPopupWindow,
+    googlePopupRuntime.isRedirectingToGoogle
+  ])
 
   // Realtime update settings jika ada perubahan
   useEffect(() => {
@@ -614,26 +679,28 @@ const Login = () => {
   // Jika callback Google kembali ke /login di popup,
   // tampilkan versi minimalis yang bersih
   if (googlePopupRuntime.isPopupWindow) {
+    const hasLiveOpener = typeof window !== 'undefined' && window.opener != null
     const popupMissingState = !googlePopupRuntime.hasGoogleStatus &&
       !googlePopupRuntime.hasPopupState &&
       !googlePopupRuntime.isRedirectingToGoogle
+    const popupRecoveringState = popupMissingState && hasLiveOpener && !googlePopupRecoveryFailed
     const popupErrorMessage = popupMissingState
       ? 'Sesi popup Google tidak lengkap. Tutup jendela ini, lalu klik Masuk dengan Google sekali lagi dari halaman utama.'
       : error
-    const popupHasError = Boolean(popupErrorMessage)
+    const popupHasError = Boolean(!popupRecoveringState && popupErrorMessage)
     const popupHasSuccess = Boolean(info && !popupHasError)
     const popupTitle = popupHasError
       ? 'Login Google belum siap'
       : popupHasSuccess
         ? 'Login Google berhasil'
-        : googlePopupRuntime.isRedirectingToGoogle
+        : googlePopupRuntime.isRedirectingToGoogle || popupRecoveringState
           ? 'Membuka pilihan akun Google'
           : 'Menyelesaikan login Google'
     const popupDescription = popupHasError
       ? 'Tutup jendela ini, lalu coba login Google sekali lagi dari halaman utama.'
       : popupHasSuccess
         ? 'Sesi sedang disiapkan di halaman utama. Jendela ini akan tertutup otomatis.'
-        : googlePopupRuntime.isRedirectingToGoogle
+        : googlePopupRuntime.isRedirectingToGoogle || popupRecoveringState
           ? 'Jendela ini akan diarahkan ke halaman resmi Google untuk memilih akun.'
           : 'Mohon tunggu sebentar saat kami menyiapkan sesi akun Anda.'
 
@@ -665,7 +732,7 @@ const Login = () => {
               <div className="google-popup-status">
                 <span className="google-popup-spinner" aria-hidden="true" />
                 <span>
-                  {googlePopupRuntime.isRedirectingToGoogle
+                  {googlePopupRuntime.isRedirectingToGoogle || popupRecoveringState
                     ? 'Membuka daftar akun Google...'
                     : 'Memproses akun Google...'}
                 </span>

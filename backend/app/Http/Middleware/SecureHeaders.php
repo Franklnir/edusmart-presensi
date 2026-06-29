@@ -18,9 +18,13 @@ class SecureHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
         $response->headers->set('Permissions-Policy', 'geolocation=(), camera=(), microphone=(), payment=(), usb=()');
+        $isGooglePopupRoute = $request->is('api/auth/google/redirect')
+            || $request->is('api/auth/google/link')
+            || $request->is('api/auth/google/callback')
+            || $request->is('api/auth/google/finalize-login');
         $isGooglePopupHtml = $request->is('api/auth/google/callback')
             || $request->is('api/auth/google/finalize-login');
-        $allowsGooglePopup = $isGooglePopupHtml || ! $isApiResponse;
+        $allowsGooglePopup = $isGooglePopupRoute || ! $isApiResponse;
 
         $response->headers->set(
             'Cross-Origin-Opener-Policy',

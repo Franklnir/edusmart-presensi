@@ -162,6 +162,7 @@ class GooglePopupLoginTest extends TestCase
         parse_str((string) parse_url((string) $location, PHP_URL_QUERY), $query);
         $this->assertSame('google-client-id', $query['client_id'] ?? null);
         $this->assertSame('https://sismu.biz.id/api/auth/google/callback', $query['redirect_uri'] ?? null);
+        $this->assertSame('select_account', $query['prompt'] ?? null);
         $this->assertNotEmpty($query['state'] ?? '');
 
         Http::fake([

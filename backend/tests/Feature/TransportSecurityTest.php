@@ -39,6 +39,28 @@ class TransportSecurityTest extends TestCase
         $response->assertHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
     }
 
+    public function test_google_oauth_redirect_allows_popup_opener_window(): void
+    {
+        config()->set('services.google.enabled', true);
+        config()->set('services.google.client_id', 'google-client-id');
+        config()->set('services.google.client_secret', 'google-client-secret');
+        config()->set('services.google.redirect_uri', 'https://sismu.biz.id/api/auth/google/callback');
+        config()->set('tenancy.allow_header_override', true);
+
+        $response = $this
+            ->withServerVariables(['HTTP_HOST' => 'sismu.biz.id'])
+            ->withHeader('X-Tenant', 'default')
+            ->get('/api/auth/google/redirect?'.http_build_query([
+                'popup' => '1',
+                'origin' => 'https://sismu.biz.id',
+                'popup_state' => 'popup-state-123',
+                'redirect' => 'https://sismu.biz.id/login?google_popup_state=popup-state-123',
+            ]));
+
+        $response->assertRedirect();
+        $response->assertHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    }
+
     public function test_authenticated_api_response_is_not_cacheable(): void
     {
         $tenantId = $this->defaultTenantId();

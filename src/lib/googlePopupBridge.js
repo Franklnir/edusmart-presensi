@@ -4,7 +4,7 @@ const ROOT_DOMAIN = String(import.meta.env.VITE_ROOT_DOMAIN || '')
 const EXPLICIT_BRIDGE_URL = String(import.meta.env.VITE_GOOGLE_AUTH_BRIDGE_URL || '').trim()
 const DEFAULT_BRIDGE_PATH = '/auth/google/popup'
 const POPUP_CLOSED_SUCCESS_GRACE_MS = 2500
-const GOOGLE_POPUP_NAME = 'edusmart_google_auth_popup'
+const GOOGLE_POPUP_NAME_PREFIX = 'edusmart_google_auth_popup'
 
 const isLocalHost = (host) => {
   const normalized = String(host || '').trim().toLowerCase()
@@ -133,6 +133,55 @@ const buildOAuthLaunchUrl = ({ mode, state }) => {
   return launchUrl
 }
 
+const buildPopupName = (state) => {
+  const safeState = String(state || '')
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .slice(0, 48)
+
+  return safeState
+    ? `${GOOGLE_POPUP_NAME_PREFIX}_${safeState}`
+    : `${GOOGLE_POPUP_NAME_PREFIX}_${Date.now()}`
+}
+
+const writePopupLaunchDocument = (popup, mode) => {
+  try {
+    const title = mode === 'link' ? 'Tautkan Google - EduSmart' : 'Masuk dengan Google - EduSmart'
+    popup.document.open()
+    popup.document.write(`<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${title}</title>
+  <style>
+    *,*::before,*::after{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f8fafc;color:#0f172a;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    main{width:min(420px,calc(100vw - 32px));border:1px solid #e2e8f0;border-radius:20px;background:#fff;box-shadow:0 24px 70px rgba(15,23,42,.14);padding:28px;text-align:center}
+    .logo{width:54px;height:54px;margin:0 auto 18px;border-radius:18px;display:grid;place-items:center;background:#fff;border:1px solid #e2e8f0;box-shadow:0 12px 32px rgba(15,23,42,.08);font-size:28px;font-weight:800;color:#4285f4}
+    .kicker{margin:0 0 8px;text-transform:uppercase;letter-spacing:.14em;font-size:11px;font-weight:800;color:#64748b}
+    h1{margin:0;font-size:22px;line-height:1.28;font-weight:800;letter-spacing:0}
+    p{margin:10px 0 0;color:#475569;font-size:14px;line-height:1.6}
+    .status{margin:24px auto 0;display:inline-flex;align-items:center;gap:10px;border:1px solid #dbeafe;border-radius:999px;background:#eff6ff;color:#2563eb;padding:10px 16px;font-size:13px;font-weight:800}
+    .spinner{width:18px;height:18px;border-radius:999px;border:2px solid #bfdbfe;border-top-color:#2563eb;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+  <main aria-live="polite">
+    <div class="logo" aria-hidden="true">G</div>
+    <p class="kicker">Google sign-in</p>
+    <h1>Membuka pilihan akun Google</h1>
+    <p>Mohon tunggu sebentar. Jendela ini akan diarahkan ke halaman resmi Google.</p>
+    <div class="status"><span class="spinner" aria-hidden="true"></span><span>Menyiapkan Google...</span></div>
+  </main>
+</body>
+</html>`)
+    popup.document.close()
+  } catch {
+    // The popup may already be navigating away.
+  }
+}
+
 const allowedPopupMessageOrigins = (bridgeOrigin) => {
   const origins = new Set()
   if (bridgeOrigin) origins.add(bridgeOrigin)
@@ -160,11 +209,12 @@ export const openGoogleAuthPopup = ({
   }
 
   const state = createStateToken()
+  const popupName = buildPopupName(state)
   const popupUrl = buildOAuthLaunchUrl({ mode: normalizedMode, state })
 
   const popup = window.open(
-    popupUrl.toString(),
-    GOOGLE_POPUP_NAME,
+    'about:blank',
+    popupName,
     popupFeatures()
   )
 
@@ -173,9 +223,11 @@ export const openGoogleAuthPopup = ({
   }
 
   popup.focus()
+  writePopupLaunchDocument(popup, normalizedMode)
 
   return new Promise((resolve, reject) => {
     let settled = false
+    let relaunchedFromPopupRequest = false
     let closeTimer = null
     let closeGraceTimer = null
     let timeoutTimer = null
@@ -200,6 +252,23 @@ export const openGoogleAuthPopup = ({
 
       const payload = event.data || {}
       if (payload?.source !== 'edusmart-google-popup') return
+
+      if (payload?.type === 'edusmart-google-launch-request') {
+        if (event.source !== popup || relaunchedFromPopupRequest || settled) return
+        relaunchedFromPopupRequest = true
+
+        try {
+          event.source.location.replace(popupUrl.toString())
+        } catch {
+          try {
+            popup.location.replace(popupUrl.toString())
+          } catch {
+            // Let the normal timeout/error path handle this.
+          }
+        }
+        return
+      }
+
       if (payload?.state !== state) return
 
       if (payload?.type === 'edusmart-google-credential') {
@@ -237,6 +306,15 @@ export const openGoogleAuthPopup = ({
     }
 
     window.addEventListener('message', handleMessage)
+
+    window.setTimeout(() => {
+      if (settled) return
+      try {
+        popup.location.replace(popupUrl.toString())
+      } catch {
+        // If navigation is blocked here, the timeout below will surface it.
+      }
+    }, 80)
 
     if (launchOrigin === window.location.origin) {
       closeTimer = window.setInterval(() => {
