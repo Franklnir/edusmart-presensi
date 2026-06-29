@@ -561,6 +561,17 @@ export default function AHome() {
   const [addMemberClass, setAddMemberClass] = useState('')
   const [loadingEskul, setLoadingEskul] = useState(false)
 
+  const registrationDeadlineIso = toIsoFromDateTimeLocal(
+    eskulForm.registration_deadline_at
+  )
+  const registrationDeadlineLabel = formatDateTimeLabel(registrationDeadlineIso)
+  const registrationDeadlineClosed = registrationDeadlineIso
+    ? Date.now() > new Date(registrationDeadlineIso).getTime()
+    : false
+  const registrationDeadlinePastPeriod = isAfterPeriodEnd(registrationDeadlineIso, activeEskulPeriod)
+  const activePeriodEndInput = getPeriodEndDateTimeLocal(activeEskulPeriod)
+  const addMemberLocked = isViewingArchivePeriod || !registrationDeadlineIso || registrationDeadlineClosed || registrationDeadlinePastPeriod
+
   const loadEskulList = useCallback(async () => {
     try {
       let query = supabase
@@ -964,17 +975,6 @@ export default function AHome() {
       pushToast('error', 'Gagal menghapus eskul')
     }
   }, [eskulSel, eskulForm.nama, isViewingArchivePeriod, loadEskulList, loadStatistics, pushToast])
-
-  const registrationDeadlineIso = toIsoFromDateTimeLocal(
-    eskulForm.registration_deadline_at
-  )
-  const registrationDeadlineLabel = formatDateTimeLabel(registrationDeadlineIso)
-  const registrationDeadlineClosed = registrationDeadlineIso
-    ? Date.now() > new Date(registrationDeadlineIso).getTime()
-    : false
-  const registrationDeadlinePastPeriod = isAfterPeriodEnd(registrationDeadlineIso, activeEskulPeriod)
-  const activePeriodEndInput = getPeriodEndDateTimeLocal(activeEskulPeriod)
-  const addMemberLocked = isViewingArchivePeriod || !registrationDeadlineIso || registrationDeadlineClosed || registrationDeadlinePastPeriod
 
   const normalizeStudentRows = useCallback((rows = []) => (
     (rows || [])
