@@ -90,6 +90,14 @@ const normalizeGooglePopupMode = (value) => (
   String(value || '').trim().toLowerCase() === 'link' ? 'link' : 'login'
 )
 
+const createGooglePopupStateToken = () => {
+  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID()
+  }
+
+  return `google_${Date.now()}_${Math.random().toString(36).slice(2)}`
+}
+
 const readPopupLaunchFromWindowName = () => {
   if (typeof window === 'undefined') {
     return {
@@ -136,6 +144,7 @@ const readPopupLaunchFromWindowName = () => {
 }
 
 const popupResumeStorageKey = (state) => `edusmart_google_popup_resume:${state}`
+const popupSelfRedirectStorageKey = (state) => `edusmart_google_popup_self_redirect:${state}`
 
 const canResumeGooglePopupState = (state) => {
   const safeState = String(state || '').trim()
@@ -148,6 +157,22 @@ const canResumeGooglePopupState = (state) => {
     window.sessionStorage?.setItem(key, String((Number.isFinite(attempts) ? attempts : 0) + 1))
   } catch {
     // If storage is blocked, still allow the recovery once in memory-less mode.
+  }
+
+  return true
+}
+
+const canSelfRedirectGooglePopupState = (state) => {
+  const safeState = String(state || '').trim()
+  if (!safeState || typeof window === 'undefined') return false
+
+  try {
+    const key = popupSelfRedirectStorageKey(safeState)
+    const attempts = Number(window.sessionStorage?.getItem(key) || '0')
+    if (Number.isFinite(attempts) && attempts >= 1) return false
+    window.sessionStorage?.setItem(key, String((Number.isFinite(attempts) ? attempts : 0) + 1))
+  } catch {
+    // Storage may be unavailable in hardened browsers; still allow one direct redirect.
   }
 
   return true
@@ -211,6 +236,17 @@ const buildPopupResumeOAuthUrl = ({ state, mode }) => {
   oauthUrl.searchParams.set('redirect', returnUrl.toString())
 
   return oauthUrl
+}
+
+const assignPopupWindowName = ({ state, mode }) => {
+  if (typeof window === 'undefined') return
+
+  const safeState = String(state || '')
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .slice(0, 96)
+  if (!safeState) return
+
+  window.name = `${GOOGLE_POPUP_NAME_PREFIX}_${normalizeGooglePopupMode(mode)}_${safeState}`
 }
 
 const Login = () => {
@@ -465,14 +501,32 @@ const Login = () => {
       return undefined
     }
 
-    if (!window.opener) {
-      setGooglePopupRecoveryFailed(true)
-      return undefined
-    }
-
     let attempts = 0
     let stopped = false
     setGooglePopupRecoveryFailed(false)
+
+    const redirectPopupDirectlyToGoogle = () => {
+      const state = googlePopupRuntime.state || createGooglePopupStateToken()
+      const mode = normalizeGooglePopupMode(googlePopupRuntime.mode)
+
+      if (!canSelfRedirectGooglePopupState(state)) {
+        setGooglePopupRecoveryFailed(true)
+        return
+      }
+
+      try {
+        assignPopupWindowName({ state, mode })
+        const oauthUrl = buildPopupResumeOAuthUrl({ state, mode })
+        window.location.replace(oauthUrl.toString())
+      } catch {
+        setGooglePopupRecoveryFailed(true)
+      }
+    }
+
+    if (!window.opener) {
+      redirectPopupDirectlyToGoogle()
+      return undefined
+    }
 
     const askOpenerToRelaunch = () => {
       if (stopped || attempts >= 8) return
@@ -492,12 +546,12 @@ const Login = () => {
     }
 
     askOpenerToRelaunch()
-    const interval = window.setInterval(askOpenerToRelaunch, 450)
+    const interval = window.setInterval(askOpenerToRelaunch, 300)
     const timeout = window.setTimeout(() => {
       stopped = true
-      setGooglePopupRecoveryFailed(true)
       window.clearInterval(interval)
-    }, 4200)
+      redirectPopupDirectlyToGoogle()
+    }, 1500)
 
     return () => {
       stopped = true
@@ -508,7 +562,9 @@ const Login = () => {
     googlePopupRuntime.hasGoogleStatus,
     googlePopupRuntime.hasPopupState,
     googlePopupRuntime.isPopupWindow,
-    googlePopupRuntime.isRedirectingToGoogle
+    googlePopupRuntime.isRedirectingToGoogle,
+    googlePopupRuntime.mode,
+    googlePopupRuntime.state
   ])
 
   // Realtime update settings jika ada perubahan
