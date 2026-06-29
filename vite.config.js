@@ -10,6 +10,15 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['pwa-192x192.png', 'pwa-512x512.png', 'apple-touch-icon.png'],
+      workbox: {
+        navigateFallbackDenylist: [
+          /^\/api(?:\/|$)/,
+          /^\/sanctum(?:\/|$)/,
+          /^\/auth(?:\/|$)/,
+          /^\/login(?:\/|$|\?)/,
+          /^\/logout(?:\/|$)/
+        ]
+      },
       manifest: {
         name: 'Edusmart Presensi',
         short_name: 'Edusmart',

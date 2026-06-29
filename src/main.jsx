@@ -11,6 +11,9 @@ import { queryClient } from './lib/queryClient'
 import { registerSW } from 'virtual:pwa-register'
 const updateSW = registerSW({
   immediate: true,
+  onRegisteredSW(_swUrl, registration) {
+    registration?.update?.().catch(() => {})
+  },
   onNeedRefresh() {
     updateSW(true)
   }
