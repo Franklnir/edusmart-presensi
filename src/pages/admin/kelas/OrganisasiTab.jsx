@@ -36,32 +36,7 @@ export default function OrganisasiTab({
     nama: siswa.nama || siswa.email || siswa.id
   })), [])
 
-  const loadPeriodStudentMap = useCallback(async () => {
-    const params = {
-      all: true,
-      per_page: 10000,
-      status: 'active'
-    }
-    if (academicPeriod?.tahunAjaran) {
-      params.tahun_ajaran = academicPeriod.tahunAjaran
-    }
 
-    const data = await queryClient.fetchQuery({
-      queryKey: queryKeys.admin.studentOptions(params),
-      queryFn: async () => {
-        const { data, error } = await supabase.admin.studentOptions(params)
-        if (error) throw error
-        return data
-      },
-      staleTime: 60 * 1000,
-    })
-
-    return new Map(
-      mapStudentOptions(data?.rows || [])
-        .filter((siswa) => siswa.uid)
-        .map((siswa) => [String(siswa.uid), siswa])
-    )
-  }, [academicPeriod?.tahunAjaran, mapStudentOptions])
 
   const loadMemberOptions = useCallback(async (query = '') => {
     setMemberOptionsLoading(true)
@@ -175,23 +150,39 @@ export default function OrganisasiTab({
     try {
       setLoading(true)
 
-      const [anggotaResult, periodStudentMap] = await Promise.all([
-        supabase
-          .from('organisasi_anggota')
-          .select('*')
-          .eq('organisasi_id', orgSel)
-          .order('jabatan', { ascending: false })
-          .order('nama'),
-        loadPeriodStudentMap()
-      ])
+      const { data, error } = await supabase
+        .from('organisasi_anggota')
+        .select('*')
+        .eq('organisasi_id', orgSel)
+        .order('jabatan', { ascending: false })
+        .order('nama')
 
-      const { data, error } = anggotaResult
       if (error) throw error
 
-      const rows = (data || [])
+      if (!data || data.length === 0) {
+        setOrgAnggota([])
+        return
+      }
+
+      const siswaIds = [...new Set(data.map((r) => r.siswa_id).filter(Boolean))]
+
+      let activeMap = new Map()
+      if (siswaIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, nama, kelas')
+          .in('id', siswaIds)
+          .eq('status', 'active')
+          
+        if (profiles) {
+          activeMap = new Map(profiles.map(p => [String(p.id), p]))
+        }
+      }
+
+      const rows = data
         .map((row) => {
-          const siswa = periodStudentMap.get(String(row.siswa_id || ''))
-          if (!siswa) return null
+          const siswa = activeMap.get(String(row.siswa_id || ''))
+          if (!siswa) return null // Filter out inactive/deleted students
           return {
             ...row,
             nama: siswa.nama || row.nama,
