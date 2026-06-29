@@ -10,6 +10,7 @@ import {
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
+import { FixedSizeList as List } from 'react-window'
 
 // ================== KONFIGURASI BUCKET ==================
 const CERT_BUCKET = APP_CERT_BUCKET
@@ -1264,7 +1265,8 @@ const GeneratorSection = ({ templateVersion }) => {
               onClick={() => handleProcess(true)}
               disabled={isProcessing || !eventName?.trim() || !selectedTemplate}
               className="w-full py-2.5 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors mt-2 flex items-center justify-center gap-2"
-            >              Preview {getOutputFormat(outputFormat).label}
+            >
+              Preview {getOutputFormat(outputFormat).label}
             </button>
 
             <p className="text-xs text-gray-500 leading-relaxed">
@@ -1346,54 +1348,61 @@ const GeneratorSection = ({ templateVersion }) => {
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto rounded-lg border border-gray-200 mb-4">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 sticky top-0 z-10">
-              <tr>
-                <th className="p-3 w-12 text-center border-b">
-                  <input
-                    type="checkbox"
-                    className="rounded text-blue-600 focus:ring-blue-500"
-                    onChange={() =>
-                      setSelectedIds(selectedIds.length === peserta.length ? [] : peserta.map((p) => p.id))
-                    }
-                    checked={peserta.length > 0 && selectedIds.length === peserta.length}
-                  />
-                </th>
-                <th className="p-3 text-left font-semibold text-gray-700 border-b">Nama Lengkap</th>
-                <th className="p-3 text-left font-semibold text-gray-700 border-b">Info / Kelas</th>
-                <th className="p-3 text-left font-semibold text-gray-700 border-b">Email</th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-gray-100">
-              {peserta.map((p) => (
-                <tr key={p.id} className="hover:bg-blue-50/60 transition-colors">
-                  <td className="p-3 text-center">
-                    <input
-                      type="checkbox"
-                      className="rounded text-blue-600 focus:ring-blue-500"
-                      checked={selectedIds.includes(p.id)}
-                      onChange={() =>
-                        setSelectedIds((prev) => (prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id]))
-                      }
-                    />
-                  </td>
-                  <td className="p-3 font-medium text-gray-900">{p.nama}</td>
-                  <td className="p-3 text-gray-500">{p.kelas || p.jabatan || p.__recipientInfo || '-'}</td>
-                  <td className="p-3 text-gray-400">{p.email}</td>
-                </tr>
-              ))}
-
-              {peserta.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="p-12 text-center text-gray-400 italic">
-                    Klik tombol &quot;Muat Data&quot; untuk menampilkan daftar peserta
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="flex-1 overflow-auto rounded-lg border border-gray-200 mb-4 flex flex-col min-h-[400px]">
+          <div className="bg-gray-50 flex border-b sticky top-0 z-10">
+            <div className="p-3 w-12 flex-shrink-0 text-center border-r">
+              <input
+                type="checkbox"
+                className="rounded text-blue-600 focus:ring-blue-500"
+                onChange={() =>
+                  setSelectedIds(selectedIds.length === peserta.length ? [] : peserta.map((p) => p.id))
+                }
+                checked={peserta.length > 0 && selectedIds.length === peserta.length}
+              />
+            </div>
+            <div className="p-3 flex-1 font-semibold text-gray-700">Nama Lengkap</div>
+            <div className="p-3 flex-1 font-semibold text-gray-700 hidden sm:block">Info / Kelas</div>
+            <div className="p-3 flex-1 font-semibold text-gray-700 hidden md:block">Email</div>
+          </div>
+          
+          <div className="flex-1 relative">
+            {peserta.length === 0 ? (
+              <div className="p-12 text-center text-gray-400 italic">
+                Klik tombol "Muat Data" untuk menampilkan daftar peserta
+              </div>
+            ) : (
+              <div className="absolute inset-0">
+                <List
+                  height={400}
+                  itemCount={peserta.length}
+                  itemSize={50}
+                  width="100%"
+                  itemData={peserta}
+                >
+                  {({ index, style, data }) => {
+                    const p = data[index]
+                    return (
+                      <div style={style} className={`flex items-center border-b border-gray-100 hover:bg-blue-50/60 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+                        <div className="p-3 w-12 flex-shrink-0 text-center border-r">
+                          <input
+                            type="checkbox"
+                            className="rounded text-blue-600 focus:ring-blue-500"
+                            checked={selectedIds.includes(p.id)}
+                            onChange={() =>
+                              setSelectedIds((prev) => (prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id]))
+                            }
+                          />
+                        </div>
+                        <div className="p-3 flex-1 font-medium text-gray-900 truncate" title={p.nama}>{p.nama}</div>
+                        <div className="p-3 flex-1 text-gray-500 hidden sm:block truncate" title={p.kelas || p.jabatan || p.__recipientInfo || '-'}>{p.kelas || p.jabatan || p.__recipientInfo || '-'}</div>
+                        <div className="p-3 flex-1 text-gray-400 hidden md:block truncate" title={p.email}>{p.email}</div>
+                      </div>
+                    )
+                  }}
+                </List>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-col gap-3">
