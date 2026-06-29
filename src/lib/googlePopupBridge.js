@@ -70,6 +70,24 @@ export const getGoogleAuthLaunchUrl = (mode = 'login') => {
   }
 }
 
+const getGoogleAuthBridgeLaunchUrl = ({ mode, state }) => {
+  const bridgeUrl = getGoogleAuthBridgeUrl()
+  if (!bridgeUrl) return ''
+
+  try {
+    const normalizedMode = mode === 'link' ? 'link' : 'login'
+    const url = new URL(bridgeUrl)
+    url.searchParams.set('origin', window.location.origin)
+    url.searchParams.set('state', state)
+    url.searchParams.set('mode', normalizedMode)
+    url.searchParams.set('return_to', buildReturnUrl(normalizedMode, state).toString())
+
+    return url
+  } catch {
+    return ''
+  }
+}
+
 export const getGoogleAuthBridgeOrigin = () => {
   const bridgeUrl = buildBridgeUrl()
   if (!bridgeUrl) return ''
@@ -150,9 +168,12 @@ const buildPopupName = (mode, state) => {
     : `${GOOGLE_POPUP_NAME_PREFIX}_${safeMode}_${Date.now()}`
 }
 
-const allowedPopupMessageOrigins = (bridgeOrigin) => {
+const allowedPopupMessageOrigins = (...bridgeOrigins) => {
   const origins = new Set()
-  if (bridgeOrigin) origins.add(bridgeOrigin)
+  bridgeOrigins.forEach((origin) => {
+    const safeOrigin = String(origin || '').trim()
+    if (safeOrigin) origins.add(safeOrigin)
+  })
 
   if (typeof window !== 'undefined' && window.location?.origin) {
     origins.add(window.location.origin)
@@ -178,7 +199,11 @@ export const openGoogleAuthPopup = ({
 
   const state = createStateToken()
   const popupName = buildPopupName(normalizedMode, state)
-  const popupUrl = buildOAuthLaunchUrl({ mode: normalizedMode, state })
+  const fallbackOAuthUrl = buildOAuthLaunchUrl({ mode: normalizedMode, state })
+  const popupUrl = getGoogleAuthBridgeLaunchUrl({
+    mode: normalizedMode,
+    state
+  }) || fallbackOAuthUrl
 
   const popup = window.open(
     popupUrl.toString(),
@@ -198,7 +223,11 @@ export const openGoogleAuthPopup = ({
     let closeTimer = null
     let closeGraceTimer = null
     let timeoutTimer = null
-    const allowedOrigins = allowedPopupMessageOrigins(launchOrigin)
+    const allowedOrigins = allowedPopupMessageOrigins(
+      launchOrigin,
+      popupUrl.origin,
+      fallbackOAuthUrl.origin
+    )
 
     const cleanup = () => {
       if (closeTimer) window.clearInterval(closeTimer)
@@ -225,10 +254,10 @@ export const openGoogleAuthPopup = ({
         relaunchedFromPopupRequest = true
 
         try {
-          event.source.location.replace(popupUrl.toString())
+          event.source.location.replace(fallbackOAuthUrl.toString())
         } catch {
           try {
-            popup.location.replace(popupUrl.toString())
+            popup.location.replace(fallbackOAuthUrl.toString())
           } catch {
             // Let the normal timeout/error path handle this.
           }

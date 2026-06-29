@@ -90,14 +90,6 @@ const normalizeGooglePopupMode = (value) => (
   String(value || '').trim().toLowerCase() === 'link' ? 'link' : 'login'
 )
 
-const createGooglePopupStateToken = () => {
-  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
-    return window.crypto.randomUUID()
-  }
-
-  return `google_${Date.now()}_${Math.random().toString(36).slice(2)}`
-}
-
 const readPopupLaunchFromWindowName = () => {
   if (typeof window === 'undefined') {
     return {
@@ -343,15 +335,6 @@ const Login = () => {
         (window.opener != null && hasPopupMarker)
       const normalizedPopupMode = googlePopupMode
 
-      if (openedAsPopup && !googlePopupState && !googleStatus && !loginReason) {
-        // Popup opened but no state/status found — this happens when backend
-        // redirected popup to /login?google=disabled but URL was already cleaned,
-        // or when the popup opened directly to /login without proper params.
-        // Generate a transient state so the popup UI renders, but mark that
-        // it should NOT attempt a recovery re-launch to backend.
-        googlePopupState = createGooglePopupStateToken()
-      }
-
       const shouldResumeGooglePopup = openedAsPopup &&
         googlePopupState &&
         !googleStatus &&
@@ -382,8 +365,6 @@ const Login = () => {
           if (redirectTimer) window.clearTimeout(redirectTimer)
         }
       } else if (openedAsPopup && googlePopupState && !googleStatus && !loginReason) {
-        setError('Sesi login Google tidak dapat dilanjutkan (batas percobaan terlampaui atau diblokir). Silakan tutup jendela ini dan coba lagi dari halaman utama.')
-        
         url.searchParams.delete('google_popup_state')
         url.searchParams.delete('google_popup_mode')
         const cleaned = `${url.pathname}${url.search}${url.hash}`
@@ -476,11 +457,10 @@ const Login = () => {
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
     if (!googlePopupRuntime.isPopupWindow) return undefined
-    if (
-      googlePopupRuntime.hasGoogleStatus ||
-      googlePopupRuntime.hasPopupState ||
-      googlePopupRuntime.isRedirectingToGoogle
-    ) {
+    const shouldAskOpenerToRelaunch = !googlePopupRuntime.hasGoogleStatus &&
+      !googlePopupRuntime.isRedirectingToGoogle
+
+    if (!shouldAskOpenerToRelaunch) {
       setGooglePopupRecoveryFailed(false)
       return undefined
     }
@@ -790,12 +770,12 @@ const Login = () => {
   // tampilkan versi minimalis yang bersih
   if (googlePopupRuntime.isPopupWindow) {
     const hasLiveOpener = typeof window !== 'undefined' && window.opener != null
-    const popupMissingState = !googlePopupRuntime.hasGoogleStatus &&
-      !googlePopupRuntime.hasPopupState &&
+    const popupAwaitingGoogle = !googlePopupRuntime.hasGoogleStatus &&
       !googlePopupRuntime.isRedirectingToGoogle
-    const popupRecoveringState = popupMissingState && hasLiveOpener && !googlePopupRecoveryFailed
-    const popupErrorMessage = popupMissingState
-      ? 'Sesi popup Google tidak lengkap. Tutup jendela ini, lalu klik Masuk dengan Google sekali lagi dari halaman utama.'
+    const popupRecoveringState = popupAwaitingGoogle && hasLiveOpener && !googlePopupRecoveryFailed
+    const popupManualRetryNeeded = popupAwaitingGoogle && !popupRecoveringState
+    const popupErrorMessage = popupManualRetryNeeded
+      ? 'Jendela login Google belum bisa diarahkan otomatis. Tutup jendela ini, refresh halaman login, lalu klik Masuk dengan Google sekali lagi.'
       : error
     const popupHasError = Boolean(!popupRecoveringState && popupErrorMessage)
     const popupHasSuccess = Boolean(info && !popupHasError)
@@ -807,7 +787,7 @@ const Login = () => {
           ? 'Membuka pilihan akun Google'
           : 'Menyelesaikan login Google'
     const popupDescription = popupHasError
-      ? 'Tutup jendela ini, lalu coba login Google sekali lagi dari halaman utama.'
+      ? 'Browser belum memberi izin alur popup ini untuk lanjut ke Google.'
       : popupHasSuccess
         ? 'Sesi sedang disiapkan di halaman utama. Jendela ini akan tertutup otomatis.'
         : googlePopupRuntime.isRedirectingToGoogle || popupRecoveringState
