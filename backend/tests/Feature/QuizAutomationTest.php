@@ -19,6 +19,13 @@ class QuizAutomationTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
+
     public function test_siswa_cannot_start_quiz_before_starts_at(): void
     {
         $tenantId = $this->defaultTenantId();
@@ -612,6 +619,8 @@ class QuizAutomationTest extends TestCase
 
     public function test_guru_uts_schedule_deadline_is_derived_from_duration(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-06-20 09:00:00', 'Asia/Jakarta'));
+
         $tenantId = $this->defaultTenantId();
         [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
         $this->seedGuruTeachingMapel($tenantId, $guru->id, 'X-1', 'Matematika');

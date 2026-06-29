@@ -84,6 +84,36 @@ const GoogleLogo = () => (
   </svg>
 )
 
+const readGooglePopupRuntime = () => {
+  const fallback = {
+    isPopupWindow: false,
+    hasGoogleStatus: false,
+    status: '',
+    state: '',
+    mode: 'login'
+  }
+
+  if (typeof window === 'undefined') return fallback
+
+  try {
+    const url = new URL(window.location.href)
+    const status = String(url.searchParams.get('google') || '').trim()
+    const mode = String(url.searchParams.get('google_popup_mode') || 'login')
+      .trim()
+      .toLowerCase()
+
+    return {
+      isPopupWindow: window.opener != null || window.name === 'edusmart_google_auth_popup',
+      hasGoogleStatus: status !== '',
+      status,
+      state: String(url.searchParams.get('google_popup_state') || '').trim(),
+      mode: mode === 'link' ? 'link' : 'login'
+    }
+  } catch {
+    return fallback
+  }
+}
+
 const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -97,6 +127,7 @@ const Login = () => {
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [info, setInfo] = useState('');
   const [error, setError] = useState('');
+  const [googlePopupRuntime, setGooglePopupRuntime] = useState(readGooglePopupRuntime);
   const [showPassword, setShowPassword] = useState(false);
 
   // Rate limiting state
@@ -182,11 +213,32 @@ const Login = () => {
       const googleStatus = String(url.searchParams.get('google') || '').trim()
       const googleError = String(url.searchParams.get('google_error') || '').trim()
       const googlePopupState = String(url.searchParams.get('google_popup_state') || '').trim()
+      const hasGooglePopupStateParam = url.searchParams.has('google_popup_state')
+      const hasGooglePopupModeParam = url.searchParams.has('google_popup_mode')
       const googlePopupMode = String(url.searchParams.get('google_popup_mode') || 'login')
         .trim()
         .toLowerCase()
       const loginReason = String(url.searchParams.get('reason') || '').trim()
-      if (!googleStatus && !loginReason) return
+      const openedAsPopup = window.opener != null || window.name === 'edusmart_google_auth_popup'
+      const normalizedPopupMode = googlePopupMode === 'link' ? 'link' : 'login'
+
+      setGooglePopupRuntime({
+        isPopupWindow: openedAsPopup,
+        hasGoogleStatus: googleStatus !== '',
+        status: googleStatus,
+        state: googlePopupState,
+        mode: normalizedPopupMode
+      })
+
+      if (!googleStatus && !loginReason) {
+        if (hasGooglePopupStateParam || hasGooglePopupModeParam) {
+          url.searchParams.delete('google_popup_state')
+          url.searchParams.delete('google_popup_mode')
+          const cleaned = `${url.pathname}${url.search}${url.hash}`
+          window.history.replaceState({}, '', cleaned)
+        }
+        return
+      }
 
       let nextError = ''
       let nextInfo = ''
@@ -210,14 +262,12 @@ const Login = () => {
         nextInfo = 'Akun Google berhasil ditautkan.'
       }
 
-      const openedAsPopup = window.opener != null || window.name === 'edusmart_google_auth_popup'
       if (openedAsPopup && googlePopupState && googleStatus) {
-        const mode = googlePopupMode === 'link' ? 'link' : 'login'
         const payload = {
           source: 'edusmart-google-popup',
           type: nextError ? 'edusmart-google-error' : 'edusmart-google-oauth-success',
           state: googlePopupState,
-          mode,
+          mode: normalizedPopupMode,
           status: googleStatus || 'success'
         }
 
@@ -513,14 +563,9 @@ const Login = () => {
     }
   }, [completeGooglePopupLogin, setCooldownEnd, setFailCount])
 
-  // Deteksi jika halaman login dibuka di dalam popup window (misalnya setelah Google OAuth callback)
-  const isPopupWindow = typeof window !== 'undefined' && (
-    window.opener != null || window.name === 'edusmart_google_auth_popup'
-  )
-
-  // Jika dibuka di popup window (Google OAuth redirect kembali ke /login di popup),
+  // Jika callback Google kembali ke /login di popup,
   // tampilkan versi minimalis yang bersih
-  if (isPopupWindow) {
+  if (googlePopupRuntime.isPopupWindow && googlePopupRuntime.hasGoogleStatus) {
     const popupHasError = Boolean(error)
     const popupHasSuccess = Boolean(info && !popupHasError)
     const popupTitle = popupHasError

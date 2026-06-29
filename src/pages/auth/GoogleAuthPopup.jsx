@@ -46,7 +46,7 @@ export default function GoogleAuthPopup() {
 
   const [mode, setMode] = useState(initialMode)
   const [status, setStatus] = useState(
-    initialMode === 'link' ? 'Menyiapkan tautan Google...' : 'Menyiapkan login Google...'
+    initialMode === 'link' ? 'Menyiapkan pilihan akun Google...' : 'Menyiapkan pilihan akun Google...'
   )
   const [error, setError] = useState('')
   const [phase, setPhase] = useState('loading') // loading | redirecting | error
@@ -115,8 +115,8 @@ export default function GoogleAuthPopup() {
         setPhase('redirecting')
         setStatus(
           modeRef.current === 'link'
-            ? 'Mengarahkan ke Google...'
-            : 'Mengarahkan ke Google...'
+            ? 'Membuka pilihan akun Google untuk ditautkan...'
+            : 'Membuka pilihan akun Google...'
         )
 
         const endpoint = modeRef.current === 'link'
@@ -159,8 +159,8 @@ export default function GoogleAuthPopup() {
   const title = error
     ? 'Tidak bisa melanjutkan'
     : isLinkMode
-      ? 'Membuka tautan Google'
-      : 'Membuka login Google'
+      ? 'Membuka pilihan akun Google'
+      : 'Membuka pilihan akun Google'
   const description = error
     ? 'Kami belum bisa menyiapkan jendela Google. Tutup jendela ini lalu coba lagi dari aplikasi.'
     : isLinkMode

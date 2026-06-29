@@ -61,8 +61,8 @@ export const getGoogleAuthBridgeOrigin = () => {
 }
 
 const popupFeatures = () => {
-  const width = 460
-  const height = 520
+  const width = 520
+  const height = 640
   const left =
     typeof window !== 'undefined'
       ? Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2))
