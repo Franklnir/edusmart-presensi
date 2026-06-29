@@ -33,6 +33,27 @@ $defaultStateful = array_values(array_unique(array_filter([
     $normalizeHost((string) Sanctum::currentApplicationUrlWithPort()),
 ])));
 
+$rootDomain = trim((string) env('TENANT_ROOT_DOMAIN', ''));
+if ($rootDomain === '') {
+    $rootDomain = (string) parse_url((string) env('APP_URL', ''), PHP_URL_HOST);
+}
+$rootDomain = trim(strtolower($rootDomain), '.');
+if ($rootDomain !== '') {
+    $defaultStateful[] = $rootDomain;
+    $defaultStateful[] = '*.'.$rootDomain;
+}
+
+$adminSubdomain = trim(strtolower((string) env('TENANT_ADMIN_SUBDOMAIN', '')));
+if ($rootDomain !== '' && $adminSubdomain !== '') {
+    $defaultStateful[] = $adminSubdomain.'.'.$rootDomain;
+}
+
+foreach (array_map('trim', explode(',', (string) env('TENANT_ADMIN_HOSTS', ''))) as $adminHost) {
+    if ($adminHost !== '') {
+        $defaultStateful[] = $normalizeHost($adminHost) ?: $adminHost;
+    }
+}
+
 if (! $isProduction) {
     $defaultStateful = array_values(array_unique(array_filter(array_merge($defaultStateful, [
         'localhost',

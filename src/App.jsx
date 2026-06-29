@@ -35,6 +35,9 @@ const App = () => {
   const isAuthPage = AUTH_PATHS.some((p) => location.pathname.startsWith(p))
   const isMarketingPage = isMarketingLandingPath(location.pathname)
   const isQuizSessionPage = location.pathname.startsWith('/siswa/quiz/session/')
+  const hasGoogleAuthCallback = new URLSearchParams(location.search).has('google')
+  const shouldInitAuth = !isMarketingPage &&
+    (!isAuthPage || hasAuthSessionHint() || hasGoogleAuthCallback)
   const shouldShowBootShell =
     !initialized &&
     !user &&
@@ -84,11 +87,11 @@ const App = () => {
   }, [activeTheme, canApplyUserTheme, role])
 
   useEffect(() => {
-    if (isMarketingPage) return
+    if (!shouldInitAuth) return
     if (!initialized) {
       init()
     }
-  }, [initialized, init, isMarketingPage])
+  }, [initialized, init, shouldInitAuth])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined

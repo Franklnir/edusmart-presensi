@@ -13,11 +13,20 @@ $mergeLocalDefaults = static fn (string $envValue, string $defaultValue): array 
     ? $parseCsv($envValue)
     : array_values(array_unique(array_merge($parseCsv($envValue), $parseCsv($defaultValue))));
 
+$rootDomain = trim(strtolower((string) env('TENANT_ROOT_DOMAIN', '')), '.');
+$productionRootPattern = '';
+if ($isProduction && $rootDomain !== '') {
+    $productionRootPattern = '#^https://([a-z0-9-]+\\.)?'.preg_quote($rootDomain, '#').'$#';
+}
+
 return [
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
     'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     'allowed_origins' => $mergeLocalDefaults((string) env('CORS_ALLOWED_ORIGINS', ''), $defaultOrigins),
-    'allowed_origins_patterns' => $mergeLocalDefaults((string) env('CORS_ALLOWED_ORIGIN_PATTERNS', ''), $defaultPatterns),
+    'allowed_origins_patterns' => array_values(array_unique(array_filter(array_merge(
+        $mergeLocalDefaults((string) env('CORS_ALLOWED_ORIGIN_PATTERNS', ''), $defaultPatterns),
+        $productionRootPattern !== '' ? [$productionRootPattern] : []
+    )))),
     'allowed_headers' => ['Accept', 'Authorization', 'Content-Type', 'Origin', 'X-Requested-With', 'X-Tenant', 'X-CSRF-TOKEN', 'X-XSRF-TOKEN'],
     'exposed_headers' => [],
     'max_age' => 3600,
