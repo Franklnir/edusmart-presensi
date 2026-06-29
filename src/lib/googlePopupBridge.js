@@ -4,6 +4,7 @@ const ROOT_DOMAIN = String(import.meta.env.VITE_ROOT_DOMAIN || '')
 const EXPLICIT_BRIDGE_URL = String(import.meta.env.VITE_GOOGLE_AUTH_BRIDGE_URL || '').trim()
 const DEFAULT_BRIDGE_PATH = '/auth/google/popup'
 const POPUP_CLOSED_SUCCESS_GRACE_MS = 2500
+const GOOGLE_POPUP_NAME = 'edusmart_google_auth_popup'
 
 const isLocalHost = (host) => {
   const normalized = String(host || '').trim().toLowerCase()
@@ -49,6 +50,20 @@ const buildBridgeUrl = () => {
 
 export const getGoogleAuthBridgeUrl = () => buildBridgeUrl()
 
+export const getGoogleAuthLaunchUrl = (mode = 'login') => {
+  if (typeof window === 'undefined' || !window.location?.origin) return ''
+
+  try {
+    const endpoint = mode === 'link'
+      ? '/api/auth/google/link'
+      : '/api/auth/google/redirect'
+
+    return new URL(endpoint, window.location.origin).toString()
+  } catch {
+    return ''
+  }
+}
+
 export const getGoogleAuthBridgeOrigin = () => {
   const bridgeUrl = buildBridgeUrl()
   if (!bridgeUrl) return ''
@@ -91,6 +106,33 @@ const createStateToken = () => {
   return `google_${Date.now()}_${Math.random().toString(36).slice(2)}`
 }
 
+const buildReturnUrl = (mode, state) => {
+  const targetPath = mode === 'link'
+    ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+    : '/login'
+  const returnUrl = new URL(`${window.location.origin}${targetPath}`)
+
+  returnUrl.searchParams.delete('google')
+  returnUrl.searchParams.delete('google_error')
+  returnUrl.searchParams.delete('google_popup_state')
+  returnUrl.searchParams.delete('google_popup_mode')
+  returnUrl.searchParams.set('google_popup_state', state)
+  returnUrl.searchParams.set('google_popup_mode', mode)
+
+  return returnUrl
+}
+
+const buildOAuthLaunchUrl = ({ mode, state }) => {
+  const launchUrl = new URL(getGoogleAuthLaunchUrl(mode))
+  launchUrl.searchParams.set('popup', '1')
+  launchUrl.searchParams.set('origin', window.location.origin)
+  launchUrl.searchParams.set('popup_state', state)
+  launchUrl.searchParams.set('mode', mode)
+  launchUrl.searchParams.set('redirect', buildReturnUrl(mode, state).toString())
+
+  return launchUrl
+}
+
 const allowedPopupMessageOrigins = (bridgeOrigin) => {
   const origins = new Set()
   if (bridgeOrigin) origins.add(bridgeOrigin)
@@ -110,28 +152,19 @@ export const openGoogleAuthPopup = ({
     return Promise.reject(new Error('Popup Google hanya tersedia di browser.'))
   }
 
-  const bridgeUrl = getGoogleAuthBridgeUrl()
-  const bridgeOrigin = getGoogleAuthBridgeOrigin()
-  if (!bridgeUrl || !bridgeOrigin) {
+  const normalizedMode = mode === 'link' ? 'link' : 'login'
+  const launchUrl = getGoogleAuthLaunchUrl(normalizedMode)
+  const launchOrigin = window.location.origin
+  if (!launchUrl || !launchOrigin) {
     return Promise.reject(new Error('URL auth Google pusat belum valid.'))
   }
 
   const state = createStateToken()
-  const popupUrl = new URL(bridgeUrl, window.location.origin)
-  const returnUrl = new URL(
-    `${window.location.origin}${window.location.pathname}${window.location.search}${window.location.hash}`
-  )
-  returnUrl.searchParams.set('google_popup_state', state)
-  returnUrl.searchParams.set('google_popup_mode', mode)
-
-  popupUrl.searchParams.set('mode', mode)
-  popupUrl.searchParams.set('origin', window.location.origin)
-  popupUrl.searchParams.set('state', state)
-  popupUrl.searchParams.set('return_to', returnUrl.toString())
+  const popupUrl = buildOAuthLaunchUrl({ mode: normalizedMode, state })
 
   const popup = window.open(
     popupUrl.toString(),
-    'edusmart_google_auth_popup',
+    GOOGLE_POPUP_NAME,
     popupFeatures()
   )
 
@@ -146,7 +179,7 @@ export const openGoogleAuthPopup = ({
     let closeTimer = null
     let closeGraceTimer = null
     let timeoutTimer = null
-    const allowedOrigins = allowedPopupMessageOrigins(bridgeOrigin)
+    const allowedOrigins = allowedPopupMessageOrigins(launchOrigin)
 
     const cleanup = () => {
       if (closeTimer) window.clearInterval(closeTimer)
@@ -172,7 +205,7 @@ export const openGoogleAuthPopup = ({
       if (payload?.type === 'edusmart-google-credential') {
         finalize(() => resolve({
           credential: String(payload.credential || ''),
-          mode: String(payload.mode || mode)
+          mode: String(payload.mode || normalizedMode)
         }))
         return
       }
@@ -181,7 +214,7 @@ export const openGoogleAuthPopup = ({
         finalize(() => resolve({
           oauth: true,
           status: String(payload.status || 'success'),
-          mode: String(payload.mode || mode)
+          mode: String(payload.mode || normalizedMode)
         }))
         return
       }
@@ -198,14 +231,14 @@ export const openGoogleAuthPopup = ({
           oauth: true,
           status: 'popup_closed',
           popupClosed: true,
-          mode
+          mode: normalizedMode
         }))
       }, POPUP_CLOSED_SUCCESS_GRACE_MS)
     }
 
     window.addEventListener('message', handleMessage)
 
-    if (bridgeOrigin === window.location.origin) {
+    if (launchOrigin === window.location.origin) {
       closeTimer = window.setInterval(() => {
         let isClosed = false
         try {

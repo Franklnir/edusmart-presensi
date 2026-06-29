@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { openGoogleAuthPopup, getGoogleAuthBridgeUrl } from '../lib/googlePopupBridge'
+import { openGoogleAuthPopup, getGoogleAuthLaunchUrl } from '../lib/googlePopupBridge'
 import { useUIStore } from '../store/useUIStore'
 
 const normalizeMessage = (value = '') => String(value || '').trim()
@@ -178,7 +178,7 @@ export default function GoogleCredentialButton({
   const [statusOverlay, setStatusOverlay] = useState(null)
   const pushToast = useUIStore((state) => state.pushToast)
 
-  const bridgeUrl = String(getGoogleAuthBridgeUrl() || '').trim()
+  const launchUrl = String(getGoogleAuthLaunchUrl(mode) || '').trim()
 
   const resolvedLabel = label || (mode === 'link' ? 'Tautkan Google' : 'Masuk dengan Google')
   const resolvedBusyLabel =
@@ -191,9 +191,9 @@ export default function GoogleCredentialButton({
   const resolvedIconClassName = iconClassName || 'inline-flex h-5 w-5 items-center justify-center'
 
   const availabilityMessage = useMemo(() => {
-    if (!bridgeUrl) return 'URL auth Google pusat belum valid.'
+    if (!launchUrl) return 'URL auth Google pusat belum valid.'
     return ''
-  }, [bridgeUrl])
+  }, [launchUrl])
 
   const disabled = busy || isLaunching || availabilityMessage !== ''
 

@@ -88,6 +88,8 @@ const readGooglePopupRuntime = () => {
   const fallback = {
     isPopupWindow: false,
     hasGoogleStatus: false,
+    hasPopupState: false,
+    isRedirectingToGoogle: false,
     status: '',
     state: '',
     mode: 'login'
@@ -98,6 +100,7 @@ const readGooglePopupRuntime = () => {
   try {
     const url = new URL(window.location.href)
     const status = String(url.searchParams.get('google') || '').trim()
+    const state = String(url.searchParams.get('google_popup_state') || '').trim()
     const mode = String(url.searchParams.get('google_popup_mode') || 'login')
       .trim()
       .toLowerCase()
@@ -105,13 +108,34 @@ const readGooglePopupRuntime = () => {
     return {
       isPopupWindow: window.opener != null || window.name === 'edusmart_google_auth_popup',
       hasGoogleStatus: status !== '',
+      hasPopupState: state !== '',
+      isRedirectingToGoogle: false,
       status,
-      state: String(url.searchParams.get('google_popup_state') || '').trim(),
+      state,
       mode: mode === 'link' ? 'link' : 'login'
     }
   } catch {
     return fallback
   }
+}
+
+const buildPopupResumeOAuthUrl = ({ state, mode }) => {
+  const endpoint = mode === 'link'
+    ? '/api/auth/google/link'
+    : '/api/auth/google/redirect'
+  const returnUrl = new URL(`${window.location.origin}/login`)
+
+  returnUrl.searchParams.set('google_popup_state', state)
+  returnUrl.searchParams.set('google_popup_mode', mode)
+
+  const oauthUrl = new URL(endpoint, window.location.origin)
+  oauthUrl.searchParams.set('popup', '1')
+  oauthUrl.searchParams.set('origin', window.location.origin)
+  oauthUrl.searchParams.set('popup_state', state)
+  oauthUrl.searchParams.set('mode', mode)
+  oauthUrl.searchParams.set('redirect', returnUrl.toString())
+
+  return oauthUrl
 }
 
 const Login = () => {
@@ -206,7 +230,9 @@ const Login = () => {
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
+    if (typeof window === 'undefined') return undefined
+
+    let redirectTimer = null
 
     try {
       const url = new URL(window.location.href)
@@ -221,17 +247,35 @@ const Login = () => {
       const loginReason = String(url.searchParams.get('reason') || '').trim()
       const openedAsPopup = window.opener != null || window.name === 'edusmart_google_auth_popup'
       const normalizedPopupMode = googlePopupMode === 'link' ? 'link' : 'login'
+      const shouldResumeGooglePopup = openedAsPopup && googlePopupState && !googleStatus && !loginReason
 
       setGooglePopupRuntime({
         isPopupWindow: openedAsPopup,
         hasGoogleStatus: googleStatus !== '',
+        hasPopupState: googlePopupState !== '',
+        isRedirectingToGoogle: shouldResumeGooglePopup,
         status: googleStatus,
         state: googlePopupState,
         mode: normalizedPopupMode
       })
 
+      if (shouldResumeGooglePopup) {
+        const oauthUrl = buildPopupResumeOAuthUrl({
+          state: googlePopupState,
+          mode: normalizedPopupMode
+        })
+
+        redirectTimer = window.setTimeout(() => {
+          window.location.replace(oauthUrl.toString())
+        }, 250)
+
+        return () => {
+          if (redirectTimer) window.clearTimeout(redirectTimer)
+        }
+      }
+
       if (!googleStatus && !loginReason) {
-        if (hasGooglePopupStateParam || hasGooglePopupModeParam) {
+        if (!openedAsPopup && (hasGooglePopupStateParam || hasGooglePopupModeParam)) {
           url.searchParams.delete('google_popup_state')
           url.searchParams.delete('google_popup_mode')
           const cleaned = `${url.pathname}${url.search}${url.hash}`
@@ -305,6 +349,10 @@ const Login = () => {
       window.history.replaceState({}, '', cleaned)
     } catch {
       // ignore malformed URL
+    }
+
+    return () => {
+      if (redirectTimer) window.clearTimeout(redirectTimer)
     }
   }, [])
 
@@ -565,19 +613,29 @@ const Login = () => {
 
   // Jika callback Google kembali ke /login di popup,
   // tampilkan versi minimalis yang bersih
-  if (googlePopupRuntime.isPopupWindow && googlePopupRuntime.hasGoogleStatus) {
-    const popupHasError = Boolean(error)
+  if (googlePopupRuntime.isPopupWindow) {
+    const popupMissingState = !googlePopupRuntime.hasGoogleStatus &&
+      !googlePopupRuntime.hasPopupState &&
+      !googlePopupRuntime.isRedirectingToGoogle
+    const popupErrorMessage = popupMissingState
+      ? 'Sesi popup Google tidak lengkap. Tutup jendela ini, lalu klik Masuk dengan Google sekali lagi dari halaman utama.'
+      : error
+    const popupHasError = Boolean(popupErrorMessage)
     const popupHasSuccess = Boolean(info && !popupHasError)
     const popupTitle = popupHasError
-      ? 'Login Google belum selesai'
+      ? 'Login Google belum siap'
       : popupHasSuccess
         ? 'Login Google berhasil'
-        : 'Menyelesaikan login Google'
+        : googlePopupRuntime.isRedirectingToGoogle
+          ? 'Membuka pilihan akun Google'
+          : 'Menyelesaikan login Google'
     const popupDescription = popupHasError
       ? 'Tutup jendela ini, lalu coba login Google sekali lagi dari halaman utama.'
       : popupHasSuccess
         ? 'Sesi sedang disiapkan di halaman utama. Jendela ini akan tertutup otomatis.'
-        : 'Mohon tunggu sebentar saat kami menyiapkan sesi akun Anda.'
+        : googlePopupRuntime.isRedirectingToGoogle
+          ? 'Jendela ini akan diarahkan ke halaman resmi Google untuk memilih akun.'
+          : 'Mohon tunggu sebentar saat kami menyiapkan sesi akun Anda.'
 
     return (
       <div className="google-popup-page">
@@ -590,23 +648,27 @@ const Login = () => {
             <h1 className="google-popup-title">{popupTitle}</h1>
             <p className="google-popup-description">{popupDescription}</p>
 
-            {error && (
+            {popupHasError && (
               <div className="google-popup-status google-popup-status--error">
-                <span>{error}</span>
+                <span>{popupErrorMessage}</span>
               </div>
             )}
 
-            {info && !error && (
+            {info && !popupHasError && (
               <div className="google-popup-status google-popup-status--success">
                 <span className="google-popup-check" aria-hidden="true" />
                 <span>{info}</span>
               </div>
             )}
 
-            {!error && !info && (
+            {!popupHasError && !info && (
               <div className="google-popup-status">
                 <span className="google-popup-spinner" aria-hidden="true" />
-                <span>Memproses akun Google...</span>
+                <span>
+                  {googlePopupRuntime.isRedirectingToGoogle
+                    ? 'Membuka daftar akun Google...'
+                    : 'Memproses akun Google...'}
+                </span>
               </div>
             )}
 
