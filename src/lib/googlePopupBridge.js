@@ -5,6 +5,11 @@ const EXPLICIT_BRIDGE_URL = String(import.meta.env.VITE_GOOGLE_AUTH_BRIDGE_URL |
 const DEFAULT_BRIDGE_PATH = '/auth/google/popup'
 const POPUP_CLOSED_SUCCESS_GRACE_MS = 2500
 const GOOGLE_POPUP_NAME_PREFIX = 'edusmart_google_auth_popup'
+const GOOGLE_AUTH_ENABLED = String(import.meta.env.VITE_GOOGLE_AUTH_ENABLED || 'false')
+  .trim()
+  .toLowerCase() === 'true'
+
+export const isGoogleAuthEnabled = () => GOOGLE_AUTH_ENABLED
 
 const isLocalHost = (host) => {
   const normalized = String(host || '').trim().toLowerCase()
@@ -51,6 +56,7 @@ const buildBridgeUrl = () => {
 export const getGoogleAuthBridgeUrl = () => buildBridgeUrl()
 
 export const getGoogleAuthLaunchUrl = (mode = 'login') => {
+  if (!GOOGLE_AUTH_ENABLED) return ''
   if (typeof window === 'undefined' || !window.location?.origin) return ''
 
   try {

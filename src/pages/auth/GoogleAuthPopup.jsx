@@ -74,7 +74,7 @@ export default function GoogleAuthPopup() {
 
     const bootstrap = async () => {
       if (!window.opener) {
-        setError('Popup ini harus dibuka dari halaman login EduSmart.')
+        setError('Popup ini harus dibuka dari halaman login SISMU.')
         setStatus('')
         setPhase('error')
         return
@@ -95,7 +95,7 @@ export default function GoogleAuthPopup() {
         modeRef.current = VALID_MODES.has(requestedMode) ? requestedMode : 'login'
         setMode(modeRef.current)
         document.title =
-          modeRef.current === 'link' ? 'Tautkan Google — EduSmart' : 'Masuk dengan Google — EduSmart'
+          modeRef.current === 'link' ? 'Tautkan Google — SISMU' : 'Masuk dengan Google — SISMU'
 
         const popupContext = await apiFetch(
           `/api/auth/google/popup-context?origin=${encodeURIComponent(requestedOrigin)}&mode=${encodeURIComponent(modeRef.current)}`,
@@ -164,8 +164,8 @@ export default function GoogleAuthPopup() {
   const description = error
     ? 'Kami belum bisa menyiapkan jendela Google. Tutup jendela ini lalu coba lagi dari aplikasi.'
     : isLinkMode
-      ? 'Pilih akun Google yang akan ditautkan ke akun EduSmart Anda.'
-      : 'Pilih akun Google yang sesuai dengan akun EduSmart Anda.'
+      ? 'Pilih akun Google yang akan ditautkan ke akun SISMU Anda.'
+      : 'Pilih akun Google yang sesuai dengan akun SISMU Anda.'
 
   return (
     <div className={`google-popup-page ${error ? 'google-popup-page--error' : ''}`}>
@@ -203,7 +203,7 @@ export default function GoogleAuthPopup() {
           </div>
 
           <p className="google-popup-secure">
-            Koneksi aman. EduSmart tidak menyimpan password Google Anda.
+            Koneksi aman. SISMU tidak menyimpan password Google Anda.
           </p>
         </section>
       </main>

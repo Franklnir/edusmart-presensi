@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { openGoogleAuthPopup, getGoogleAuthLaunchUrl } from '../lib/googlePopupBridge'
+import { openGoogleAuthPopup, getGoogleAuthLaunchUrl, isGoogleAuthEnabled } from '../lib/googlePopupBridge'
 import { useUIStore } from '../store/useUIStore'
 
 const normalizeMessage = (value = '') => String(value || '').trim()
@@ -191,9 +191,10 @@ export default function GoogleCredentialButton({
   const resolvedIconClassName = iconClassName || 'inline-flex h-5 w-5 items-center justify-center'
 
   const availabilityMessage = useMemo(() => {
+    if (!isGoogleAuthEnabled()) return unavailableLabel || 'Login Google belum diaktifkan.'
     if (!launchUrl) return 'URL auth Google pusat belum valid.'
     return ''
-  }, [launchUrl])
+  }, [launchUrl, unavailableLabel])
 
   const disabled = busy || isLaunching || availabilityMessage !== ''
 

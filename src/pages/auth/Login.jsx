@@ -340,6 +340,11 @@ const Login = () => {
       const normalizedPopupMode = googlePopupMode
 
       if (openedAsPopup && !googlePopupState && !googleStatus && !loginReason) {
+        // Popup opened but no state/status found — this happens when backend
+        // redirected popup to /login?google=disabled but URL was already cleaned,
+        // or when the popup opened directly to /login without proper params.
+        // Generate a transient state so the popup UI renders, but mark that
+        // it should NOT attempt a recovery re-launch to backend.
         googlePopupState = createGooglePopupStateToken()
       }
 
@@ -846,7 +851,7 @@ const Login = () => {
             </div>
 
             <p className="google-popup-secure">
-              Koneksi aman. EduSmart tidak menyimpan password Google Anda.
+              Koneksi aman. SISMU tidak menyimpan password Google Anda.
             </p>
           </section>
         </main>
