@@ -9,7 +9,12 @@ import { queryClient } from './lib/queryClient'
 
 // Register PWA Service Worker
 import { registerSW } from 'virtual:pwa-register'
-registerSW({ immediate: true })
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    updateSW(true)
+  }
+})
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

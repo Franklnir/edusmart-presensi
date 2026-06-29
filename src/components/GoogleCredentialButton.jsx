@@ -157,10 +157,30 @@ const GoogleIcon = ({ className = '' }) => (
   </span>
 )
 
+const buildGoogleRedirectLaunchUrl = (mode) => {
+  const launchUrl = String(getGoogleAuthLaunchUrl(mode) || '').trim()
+  if (!launchUrl || typeof window === 'undefined') return ''
+
+  try {
+    const returnUrl = new URL(window.location.href)
+    returnUrl.searchParams.delete('google')
+    returnUrl.searchParams.delete('google_error')
+    returnUrl.searchParams.delete('google_popup_state')
+    returnUrl.searchParams.delete('google_popup_mode')
+
+    const url = new URL(launchUrl)
+    url.searchParams.set('redirect', returnUrl.toString())
+    return url.toString()
+  } catch {
+    return launchUrl
+  }
+}
+
 export default function GoogleCredentialButton({
   mode = 'login',
   onCredential,
   onOAuthSuccess,
+  launchStrategy = 'popup',
   busy = false,
   className = '',
   buttonClassName = '',
@@ -205,6 +225,16 @@ export default function GoogleCredentialButton({
     setIsLaunching(true)
 
     try {
+      if (launchStrategy === 'redirect') {
+        const redirectUrl = buildGoogleRedirectLaunchUrl(mode)
+        if (!redirectUrl) {
+          throw new Error('URL auth Google pusat belum valid.')
+        }
+
+        window.location.assign(redirectUrl)
+        return
+      }
+
       const result = await openGoogleAuthPopup({ mode })
       let callbackResult = null
       if (result?.oauth) {

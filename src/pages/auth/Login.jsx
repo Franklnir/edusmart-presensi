@@ -468,6 +468,17 @@ const Login = () => {
         }, nextError ? 1800 : 700)
       }
 
+      if (!openedAsPopup && googleStatus === 'success') {
+        setIsGoogleSubmitting(true)
+        completeGooglePopupLogin()
+          .then((result) => {
+            if (result?.error) {
+              setError(result.error)
+            }
+          })
+          .finally(() => setIsGoogleSubmitting(false))
+      }
+
       setInfo(nextInfo)
       if (nextError) {
         setError(nextError)
@@ -488,7 +499,7 @@ const Login = () => {
     return () => {
       if (redirectTimer) window.clearTimeout(redirectTimer)
     }
-  }, [])
+  }, [completeGooglePopupLogin])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
@@ -1135,6 +1146,7 @@ const Login = () => {
                 <GoogleCredentialButton
                   onCredential={handleGoogleCredential}
                   onOAuthSuccess={handleGoogleOAuthSuccess}
+                  launchStrategy="redirect"
                   busy={isGoogleSubmitting}
                   className="w-full"
                   buttonClassName="login__google-btn"
