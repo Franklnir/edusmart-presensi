@@ -4,12 +4,6 @@ import { buildNavigationMenu } from '../../navigation/menu.utils'
 
 const isHttpUrl = (value = '') => /^https?:\/\//i.test(String(value || ''))
 
-const addCacheBuster = (url) => {
-  if (!url) return ''
-  const joiner = url.includes('?') ? '&' : '?'
-  return `${url}${joiner}t=${Date.now()}`
-}
-
 export const useNavbarSettings = (authSettings) => {
   const [settings, setSettings] = useState(authSettings || {})
   const [settingsId, setSettingsId] = useState(authSettings?.id || null)
@@ -105,9 +99,9 @@ export const useAvatarUrl = (profile) => {
 
       try {
         const signed = await getSignedUrlForValue(PROFILE_BUCKET, raw, 60 * 60)
-        if (!cancelled) setAvatarUrl(addCacheBuster(signed))
+        if (!cancelled) setAvatarUrl(signed || '')
       } catch {
-        if (!cancelled) setAvatarUrl(isHttpUrl(raw) ? addCacheBuster(raw) : '')
+        if (!cancelled) setAvatarUrl(isHttpUrl(raw) ? raw : '')
       }
     }
 
@@ -140,9 +134,9 @@ export const useSchoolLogoUrl = (settings) => {
 
       try {
         const signed = await getSignedUrlForValue(PROFILE_BUCKET, raw, 60 * 60)
-        if (!cancelled) setLogoUrl(addCacheBuster(signed))
+        if (!cancelled) setLogoUrl(signed || '')
       } catch {
-        if (!cancelled) setLogoUrl(isHttpUrl(raw) ? addCacheBuster(raw) : '')
+        if (!cancelled) setLogoUrl(isHttpUrl(raw) ? raw : '')
       }
     }
 

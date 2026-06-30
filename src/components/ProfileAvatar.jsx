@@ -6,12 +6,6 @@ const signedCache = new Map()
 
 const isHttpUrl = (value = '') => /^https?:\/\//i.test(String(value || ''))
 
-const addCacheBuster = (url) => {
-  if (!url) return ''
-  const joiner = url.includes('?') ? '&' : '?'
-  return `${url}${joiner}t=${Date.now()}`
-}
-
 const getInitials = (name = '?') => {
   const parts = (name || '').trim().split(/\s+/).slice(0, 2)
   return parts.map((p) => p[0]?.toUpperCase() || '').join('') || '?'
@@ -27,9 +21,9 @@ const resolveProfilePhoto = async (raw) => {
   let url = ''
   try {
     const signed = await getSignedUrlForValue(PROFILE_BUCKET, raw, 60 * 60)
-    url = addCacheBuster(signed)
+    url = signed || ''
   } catch {
-    if (isHttpUrl(raw)) url = addCacheBuster(raw)
+    if (isHttpUrl(raw)) url = raw
   }
 
   if (url) {

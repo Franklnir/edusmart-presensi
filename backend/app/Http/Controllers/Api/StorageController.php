@@ -904,7 +904,7 @@ class StorageController extends ApiController
         $filename = str_replace('"', '', basename($path));
         $dispositionType = $this->isInlineRenderableMime($mime) ? 'inline' : 'attachment';
         $cacheControl = $request->user()
-            ? 'no-store, private'
+            ? 'private, max-age=86400, stale-while-revalidate=3600'
             : 'public, max-age=300, stale-while-revalidate=60';
 
         $headers = [

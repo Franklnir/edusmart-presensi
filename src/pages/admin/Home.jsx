@@ -62,6 +62,56 @@ const SETTINGS_PERIOD_COLUMNS = 'id, tahun_ajaran, semester_aktif, periode_mulai
 const DEFAULT_MAX_ESKUL_PER_SISWA = 3
 const normalizeEskulLimit = (value) => Math.max(1, Math.min(99, Number.parseInt(value, 10) || DEFAULT_MAX_ESKUL_PER_SISWA))
 
+function EskulMemberRow({
+  index,
+  style,
+  ariaAttributes,
+  items,
+  isArchive,
+  onRemove
+}) {
+  const a = items[index] || {}
+
+  return (
+    <div style={style} {...ariaAttributes} className="pr-2 pb-2">
+      <div className="flex h-full flex-col gap-4 rounded-xl border-2 border-gray-200 p-4 transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-50 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <div className="hidden rounded-lg bg-emerald-100 p-3 text-emerald-600 sm:block">
+            👤
+          </div>
+          <div>
+            <div className="max-w-[200px] truncate font-semibold text-gray-900 sm:max-w-[400px]">
+              {a.nama || '-'}
+            </div>
+            <div className="mt-1 text-sm text-gray-500">
+              Kelas: <span className="font-medium">{a.kelas || '-'}</span>
+              <span className="mx-1">•</span>
+              Angkatan: <span className="font-medium">{a.angkatan || '-'}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">
+                ✅ Hadir:
+                <span className="ml-1">{a.hadirCount || 0}</span>
+              </span>
+              <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-700">
+                📝 Izin:
+                <span className="ml-1">{a.izinCount || 0}</span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <button
+          className="rounded-lg bg-red-50 px-4 py-2 text-xs font-semibold text-red-600 transition-all duration-200 hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => onRemove(a.id)}
+          disabled={isArchive || !a.id}
+        >
+          🗑️ Hapus
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const getPeriodEndDateTime = (period) => {
   const raw = period?.endsAt || period?.periodeSelesai || ''
   if (!raw) return null
@@ -1804,54 +1854,16 @@ export default function AHome() {
                               ) : (
                                 <div className="absolute inset-0">
                                   <List
-                                    height={400}
-                                    itemCount={anggotaDisplay.length}
-                                    itemSize={104}
-                                    width="100%"
-                                    itemData={anggotaDisplay}
-                                  >
-                                    {({ index, style, data }) => {
-                                      const a = data[index]
-                                      return (
-                                        <div style={style} className="pr-2 pb-2">
-                                          <div className="flex flex-col gap-4 rounded-xl border-2 border-gray-200 p-4 transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-50 h-full sm:flex-row sm:items-center sm:justify-between">
-                                            <div className="flex items-center gap-4">
-                                              <div className="rounded-lg bg-emerald-100 p-3 text-emerald-600 hidden sm:block">
-                                                👤
-                                              </div>
-                                              <div>
-                                                <div className="font-semibold text-gray-900 truncate max-w-[200px] sm:max-w-[400px]">
-                                                  {a.nama}
-                                                </div>
-                                                <div className="mt-1 text-sm text-gray-500">
-                                                  Kelas: <span className="font-medium">{a.kelas}</span>
-                                                  <span className="mx-1">•</span>
-                                                  Angkatan: <span className="font-medium">{a.angkatan}</span>
-                                                </div>
-                                                <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                                                  <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">
-                                                    ✅ Hadir:
-                                                    <span className="ml-1">{a.hadirCount}</span>
-                                                  </span>
-                                                  <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-700">
-                                                    📝 Izin:
-                                                    <span className="ml-1">{a.izinCount}</span>
-                                                  </span>
-                                                </div>
-                                              </div>
-                                            </div>
-                                            <button
-                                              className="rounded-lg bg-red-50 px-4 py-2 text-xs font-semibold text-red-600 transition-all duration-200 hover:bg-red-100 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                                              onClick={() => hapusAnggotaEskul(a.id)}
-                                              disabled={isViewingArchivePeriod}
-                                            >
-                                              🗑️ Hapus
-                                            </button>
-                                          </div>
-                                        </div>
-                                      )
+                                    rowComponent={EskulMemberRow}
+                                    rowCount={anggotaDisplay.length}
+                                    rowHeight={104}
+                                    rowProps={{
+                                      items: anggotaDisplay,
+                                      isArchive: isViewingArchivePeriod,
+                                      onRemove: hapusAnggotaEskul
                                     }}
-                                  </List>
+                                    style={{ height: 400, width: '100%' }}
+                                  />
                                 </div>
                               )}
                             </div>

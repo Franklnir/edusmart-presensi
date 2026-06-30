@@ -53,6 +53,44 @@ const OUTPUT_FORMATS = [
 ]
 const IMAGE_OUTPUT_SCALE = 2
 
+function CertificateParticipantRow({
+  index,
+  style,
+  ariaAttributes,
+  items,
+  selectedIds,
+  onToggle
+}) {
+  const p = items[index] || {}
+  const id = p.id || ''
+
+  return (
+    <div
+      style={style}
+      {...ariaAttributes}
+      className={`flex items-center border-b border-gray-100 transition-colors hover:bg-blue-50/60 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}
+    >
+      <div className="w-12 flex-shrink-0 border-r p-3 text-center">
+        <input
+          type="checkbox"
+          className="rounded text-blue-600 focus:ring-blue-500"
+          checked={Boolean(id && selectedIds.includes(id))}
+          onChange={() => id && onToggle(id)}
+        />
+      </div>
+      <div className="flex-1 truncate p-3 font-medium text-gray-900" title={p.nama || '-'}>
+        {p.nama || '-'}
+      </div>
+      <div className="hidden flex-1 truncate p-3 text-gray-500 sm:block" title={p.kelas || p.jabatan || p.__recipientInfo || '-'}>
+        {p.kelas || p.jabatan || p.__recipientInfo || '-'}
+      </div>
+      <div className="hidden flex-1 truncate p-3 text-gray-400 md:block" title={p.email || '-'}>
+        {p.email || '-'}
+      </div>
+    </div>
+  )
+}
+
 /* ================== jsPDF Lazy Load ================== */
 let jsPDFInstance = null
 const loadJsPDF = async () => {
@@ -1373,33 +1411,16 @@ const GeneratorSection = ({ templateVersion }) => {
             ) : (
               <div className="absolute inset-0">
                 <List
-                  height={400}
-                  itemCount={peserta.length}
-                  itemSize={50}
-                  width="100%"
-                  itemData={peserta}
-                >
-                  {({ index, style, data }) => {
-                    const p = data[index]
-                    return (
-                      <div style={style} className={`flex items-center border-b border-gray-100 hover:bg-blue-50/60 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
-                        <div className="p-3 w-12 flex-shrink-0 text-center border-r">
-                          <input
-                            type="checkbox"
-                            className="rounded text-blue-600 focus:ring-blue-500"
-                            checked={selectedIds.includes(p.id)}
-                            onChange={() =>
-                              setSelectedIds((prev) => (prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id]))
-                            }
-                          />
-                        </div>
-                        <div className="p-3 flex-1 font-medium text-gray-900 truncate" title={p.nama}>{p.nama}</div>
-                        <div className="p-3 flex-1 text-gray-500 hidden sm:block truncate" title={p.kelas || p.jabatan || p.__recipientInfo || '-'}>{p.kelas || p.jabatan || p.__recipientInfo || '-'}</div>
-                        <div className="p-3 flex-1 text-gray-400 hidden md:block truncate" title={p.email}>{p.email}</div>
-                      </div>
-                    )
+                  rowComponent={CertificateParticipantRow}
+                  rowCount={peserta.length}
+                  rowHeight={50}
+                  rowProps={{
+                    items: peserta,
+                    selectedIds,
+                    onToggle: (id) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
                   }}
-                </List>
+                  style={{ height: 400, width: '100%' }}
+                />
               </div>
             )}
           </div>

@@ -55,6 +55,38 @@ import {
 } from '../../features/classes/utils/classUtils'
 import SchedulePreviewTable from '../../features/classes/components/SchedulePreviewTable'
 
+function RolloverExceptionStudentRow({
+  index,
+  style,
+  ariaAttributes,
+  items,
+  selectedIds,
+  onToggle,
+  getClassName
+}) {
+  const siswa = items[index] || {}
+  const uid = siswa.uid || siswa.id || ''
+
+  return (
+    <div style={style} {...ariaAttributes}>
+      <label className="flex h-full cursor-pointer items-center gap-3 border-b border-gray-100 px-4 py-3 hover:bg-gray-50">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+          checked={Boolean(uid && selectedIds.includes(uid))}
+          onChange={() => uid && onToggle(uid)}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-gray-900">{siswa.nama || '-'}</span>
+          <span className="block truncate text-xs text-gray-500">
+            {getClassName(siswa.kelas)} • Angkatan {siswa.angkatan || '-'} • {siswa.email || '-'}
+          </span>
+        </span>
+      </label>
+    </div>
+  )
+}
+
 /* ===== Password Modal Component (Akses Halaman) ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
   const [password, setPassword] = useState('')
@@ -3650,34 +3682,17 @@ export default function AKelas({ initialTab = 'kelas' }) {
                           ) : promotionCandidateSiswa.length ? (
                             <div className="absolute inset-0">
                               <List
-                                height={288}
-                                itemCount={promotionCandidateSiswa.length}
-                                itemSize={64}
-                                width="100%"
-                                itemData={promotionCandidateSiswa}
-                              >
-                                {({ index, style, data }) => {
-                                  const siswa = data[index]
-                                  return (
-                                    <div style={style}>
-                                      <label className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-100 h-full cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
-                                          checked={promotionSelectedIds.includes(siswa.uid)}
-                                          onChange={() => togglePromotionSelect(siswa.uid)}
-                                        />
-                                        <span className="flex-1 min-w-0">
-                                          <span className="block text-sm font-medium text-gray-900 truncate">{siswa.nama}</span>
-                                          <span className="block text-xs text-gray-500 truncate">
-                                            {getKelasName(siswa.kelas)} • Angkatan {siswa.angkatan || '-'} • {siswa.email}
-                                          </span>
-                                        </span>
-                                      </label>
-                                    </div>
-                                  )
+                                rowComponent={RolloverExceptionStudentRow}
+                                rowCount={promotionCandidateSiswa.length}
+                                rowHeight={64}
+                                rowProps={{
+                                  items: promotionCandidateSiswa,
+                                  selectedIds: promotionSelectedIds,
+                                  onToggle: togglePromotionSelect,
+                                  getClassName: getKelasName
                                 }}
-                              </List>
+                                style={{ height: 288, width: '100%' }}
+                              />
                             </div>
                           ) : (
                             <div className="px-4 py-8 text-center text-sm text-gray-500">

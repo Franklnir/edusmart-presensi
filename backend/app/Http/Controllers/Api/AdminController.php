@@ -3912,7 +3912,12 @@ class AdminController extends ApiController
         }
 
         if (Schema::hasColumn('profiles', 'status')) {
-            $query->where('status', 'active');
+            $query->where(function ($statusQuery) {
+                $statusQuery
+                    ->whereNull('status')
+                    ->orWhere('status', '')
+                    ->orWhereIn(DB::raw('LOWER(status)'), ['active', 'aktif']);
+            });
         }
 
         $validCount = $query
