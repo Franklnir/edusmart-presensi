@@ -692,8 +692,8 @@ function SuperWhatsAppCenter() {
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Aturan Kirim Alpha</h2>
             <p className="mt-1 text-sm text-slate-600">
-              Mulai bekerja setelah jam pelajaran atau scan pulang terakhir selesai. Jika pesan sedikit, dikirim tiap {settings.fast_interval_seconds || 15} detik sampai jam {settings.fast_max_send_hour || 23}.00. Jika banyak, disebar sampai jam {settings.batch_max_send_hour || 21}.00.
-              Gateway juga punya jeda global minimal {settings.send_min_interval_seconds || 10} detik per nomor pusat supaya antrean aman dan tidak menumpuk di Baileys.
+              Mulai bekerja tepat pada pukul 17.55 WIB. Jika pesan sedikit, dikirim tiap {settings.fast_interval_seconds || 15} detik sampai jam {settings.fast_max_send_hour || 23}.00. Jika banyak, disebar sampai jam {settings.batch_max_send_hour || 21}.00.
+              Gateway juga punya jeda global minimal {settings.send_min_interval_seconds || 6} detik per nomor pusat supaya antrean aman dan tidak menumpuk di Baileys.
             </p>
             <div className={`mt-3 rounded-2xl px-4 py-3 text-sm ${readiness.ready ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
               <b>{readiness.ready ? 'Siap diproses.' : 'Belum waktunya kirim.'}</b> {readiness.reason || '-'}

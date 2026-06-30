@@ -694,7 +694,22 @@ class WhatsAppNotificationService
 
         $this->applyTenantFilter($query, 'absensi', $tenantId);
 
-        return $query->get($columns)->all();
+        $rows = $query->get($columns)->all();
+
+        return array_values(array_filter($rows, function ($row) {
+            $waktu = $row->waktu ?? $row->created_at ?? null;
+            if (!$waktu) {
+                return false;
+            }
+            
+            try {
+                $time = \Carbon\Carbon::parse($waktu, self::SCHOOL_TIMEZONE)->setTimezone(self::SCHOOL_TIMEZONE);
+                $timeString = $time->format('H:i');
+                return $timeString >= '06:30' && $timeString <= '17:30';
+            } catch (\Throwable $e) {
+                return false;
+            }
+        }));
     }
 
     private function dailySendPlan(int $totalMessages): array
@@ -750,29 +765,22 @@ class WhatsAppNotificationService
             ];
         }
 
-        $lastActivity = $this->lastSchoolActivityAt($tenantIds, $targetDate);
-        if (! $lastActivity) {
-            $lastActivity = $this->dateTimeFromTime($targetDate, (string) config('services.whatsapp.daily_alpha_default_start_time', '16:00'))
-                ?: $now->copy()->setTime(16, 0, 0);
-        }
-
-        $bufferMinutes = max(0, min((int) config('services.whatsapp.daily_alpha_after_school_buffer_minutes', 10), 120));
-        $readyAt = $lastActivity->copy()->addMinutes($bufferMinutes);
+        $readyAt = $now->copy()->setTime(17, 55, 0);
 
         if ($now->lessThan($readyAt)) {
             return [
                 'ready' => false,
-                'reason' => 'Menunggu jam pelajaran/scan pulang terakhir selesai.',
+                'reason' => 'Menunggu jam 17:55 untuk eksekusi rekap Alpha harian.',
                 'next_run_at' => $readyAt->toIso8601String(),
-                'last_school_activity_at' => $lastActivity->toIso8601String(),
+                'last_school_activity_at' => $readyAt->toIso8601String(),
             ];
         }
 
         return [
             'ready' => true,
-            'reason' => 'Hari sekolah sudah selesai, rekap Alpha siap diproses.',
+            'reason' => 'Waktu (17:55) sudah tercapai, rekap Alpha harian siap diproses.',
             'next_run_at' => null,
-            'last_school_activity_at' => $lastActivity->toIso8601String(),
+            'last_school_activity_at' => $readyAt->toIso8601String(),
         ];
     }
 

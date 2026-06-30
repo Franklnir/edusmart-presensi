@@ -163,7 +163,7 @@ return [
         'daily_alpha_after_school_buffer_minutes' => (int) env('WHATSAPP_DAILY_ALPHA_AFTER_SCHOOL_BUFFER_MINUTES', 10),
         'retry_max_attempts' => (int) env('WHATSAPP_RETRY_MAX_ATTEMPTS', 3),
         'retry_batch_size' => (int) env('WHATSAPP_RETRY_BATCH_SIZE', 50),
-        'send_min_interval_seconds' => (int) env('WHATSAPP_SEND_MIN_INTERVAL_SECONDS', 10),
+        'send_min_interval_seconds' => (int) env('WHATSAPP_SEND_MIN_INTERVAL_SECONDS', 6),
         'send_throttle_release_max_seconds' => (int) env('WHATSAPP_SEND_THROTTLE_RELEASE_MAX_SECONDS', 120),
     ],
 

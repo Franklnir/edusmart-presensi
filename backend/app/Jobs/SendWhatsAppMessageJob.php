@@ -132,7 +132,7 @@ class SendWhatsAppMessageJob implements ShouldQueue
     private function reserveSendSlot(string $senderKey): int
     {
         $senderKey = preg_replace('/[^a-zA-Z0-9_.:-]+/', '-', trim($senderKey)) ?: 'central';
-        $intervalSeconds = max(3, min((int) config('services.whatsapp.send_min_interval_seconds', 10), 120));
+        $intervalSeconds = max(3, min((int) config('services.whatsapp.send_min_interval_seconds', 6), 120));
         $maxReleaseSeconds = max(10, min((int) config('services.whatsapp.send_throttle_release_max_seconds', 120), 600));
         $lock = Cache::lock('whatsapp-send-throttle-lock:'.$senderKey, 10);
 
