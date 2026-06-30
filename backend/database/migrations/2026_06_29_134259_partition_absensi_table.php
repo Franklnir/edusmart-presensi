@@ -19,7 +19,7 @@ return new class extends Migration
         // 1. Rename existing table
         if (Schema::hasTable('absensi')) {
             Schema::rename('absensi', 'absensi_old');
-            
+
             // Hapus constraint primary key lama agar tidak bentrok (biasanya bernama absensi_pkey)
             DB::statement('ALTER TABLE absensi_old DROP CONSTRAINT IF EXISTS absensi_pkey CASCADE');
         }
@@ -47,15 +47,15 @@ return new class extends Migration
         $years = range(2020, 2035);
         foreach ($years as $year) {
             for ($month = 1; $month <= 12; $month++) {
-                $monthStr = str_pad((string)$month, 2, "0", STR_PAD_LEFT);
+                $monthStr = str_pad((string) $month, 2, '0', STR_PAD_LEFT);
                 $nextMonth = $month == 12 ? 1 : $month + 1;
                 $nextYear = $month == 12 ? $year + 1 : $year;
-                $nextMonthStr = str_pad((string)$nextMonth, 2, "0", STR_PAD_LEFT);
-                
+                $nextMonthStr = str_pad((string) $nextMonth, 2, '0', STR_PAD_LEFT);
+
                 $partitionName = "absensi_{$year}_{$monthStr}";
                 $startDate = "{$year}-{$monthStr}-01";
                 $endDate = "{$nextYear}-{$nextMonthStr}-01";
-                
+
                 DB::statement("CREATE TABLE IF NOT EXISTS {$partitionName} PARTITION OF absensi FOR VALUES FROM ('{$startDate}') TO ('{$endDate}')");
             }
         }
@@ -71,7 +71,7 @@ return new class extends Migration
                 FROM absensi_old
                 ON CONFLICT DO NOTHING
             ');
-            
+
             // Set sequence agar id berlanjut dengan benar
             DB::statement("SELECT setval('absensi_id_seq', (SELECT COALESCE(MAX(id), 1) FROM absensi_old))");
         }
@@ -91,7 +91,7 @@ return new class extends Migration
         }
 
         Schema::dropIfExists('absensi');
-        
+
         if (Schema::hasTable('absensi_old')) {
             Schema::rename('absensi_old', 'absensi');
             DB::statement('ALTER TABLE absensi ADD PRIMARY KEY (id)');

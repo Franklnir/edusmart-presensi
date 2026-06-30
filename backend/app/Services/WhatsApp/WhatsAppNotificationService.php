@@ -698,13 +698,14 @@ class WhatsAppNotificationService
 
         return array_values(array_filter($rows, function ($row) {
             $waktu = $row->waktu ?? $row->created_at ?? null;
-            if (!$waktu) {
+            if (! $waktu) {
                 return false;
             }
-            
+
             try {
                 $time = \Carbon\Carbon::parse($waktu, self::SCHOOL_TIMEZONE)->setTimezone(self::SCHOOL_TIMEZONE);
                 $timeString = $time->format('H:i');
+
                 return $timeString >= '06:30' && $timeString <= '17:30';
             } catch (\Throwable $e) {
                 return false;
