@@ -10,12 +10,15 @@ export default function OrganisasiTab({
   siswaList,
   academicPeriod = null,
   pushToast,
-  showHeader = true
+  showHeader = true,
+  readOnly = false
 }) {
   const periodKey = useMemo(
     () => String(academicPeriod?.tahunAjaran || 'active').replace(/[^\w-]/g, '-'),
     [academicPeriod?.tahunAjaran]
   )
+  const periodYear = academicPeriod?.tahunAjaran || ''
+  const periodSemester = academicPeriod?.semester || ''
   const [orgList, setOrgList, hasOrgListCache] = useLocalCache(`admin_organisasi_list_${periodKey}`, [])
   const [orgSel, setOrgSel] = useState('')
   const [orgForm, setOrgForm] = useState({ nama: '', visi: '', misi: '', pembinaGuruId: '' })
@@ -39,6 +42,10 @@ export default function OrganisasiTab({
   const FORBIDDEN = /[.#$[\]]/
   const slug = (s = '') => s.toString().trim().toLowerCase()
     .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').slice(0, 80)
+  const periodScopedId = (name = '') => {
+    const year = String(periodYear || 'active').replace(/\D/g, '') || 'active'
+    return `${slug(name) || 'organisasi'}-${year}`.slice(0, 120)
+  }
 
   const mapStudentOptions = useCallback((rows = []) => (rows || []).map((siswa) => ({
     ...siswa,
@@ -125,10 +132,16 @@ export default function OrganisasiTab({
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.organizations({ tahun_ajaran: academicPeriod?.tahunAjaran || '' }),
         queryFn: async () => {
-          const { data, error } = await supabase
+          let query = supabase
             .from('organisasi')
             .select('*')
             .order('nama')
+
+          if (academicPeriod?.tahunAjaran) {
+            query = query.eq('tahun_ajaran', academicPeriod.tahunAjaran)
+          }
+
+          const { data, error } = await query
 
           if (error) throw error
           return data || []
@@ -149,12 +162,18 @@ export default function OrganisasiTab({
     try {
       setLoadingDetail(true)
       const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.admin.organizationDetail({ id: orgSel }),
+        queryKey: queryKeys.admin.organizationDetail({ id: orgSel, tahun_ajaran: academicPeriod?.tahunAjaran || '' }),
         queryFn: async () => {
-          const { data, error } = await supabase
+          let query = supabase
             .from('organisasi')
             .select('*')
             .eq('id', orgSel)
+
+          if (academicPeriod?.tahunAjaran) {
+            query = query.eq('tahun_ajaran', academicPeriod.tahunAjaran)
+          }
+
+          const { data, error } = await query
             .single()
 
           if (error) throw error
@@ -185,10 +204,16 @@ export default function OrganisasiTab({
       const rows = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.organizationMembers({ id: orgSel, tahun_ajaran: academicPeriod?.tahunAjaran || '' }),
         queryFn: async () => {
-          const { data, error } = await supabase
+          let query = supabase
             .from('organisasi_anggota')
             .select('*')
             .eq('organisasi_id', orgSel)
+
+          if (academicPeriod?.tahunAjaran) {
+            query = query.eq('tahun_ajaran', academicPeriod.tahunAjaran)
+          }
+
+          const { data, error } = await query
             .order('jabatan', { ascending: false })
             .order('nama')
 
@@ -236,6 +261,11 @@ export default function OrganisasiTab({
   }
 
   async function tambahOrganisasi() {
+    if (readOnly) {
+      pushToast('info', 'Riwayat periode hanya bisa dilihat.')
+      return
+    }
+
     const nama = (orgForm.nama || '').trim()
     if (!nama) {
       pushToast('error', 'Nama organisasi harus diisi')
@@ -252,7 +282,7 @@ export default function OrganisasiTab({
       return
     }
 
-    const id = slug(nama)
+    const id = periodScopedId(nama)
 
     try {
       setLoading(true)
@@ -261,7 +291,8 @@ export default function OrganisasiTab({
       const { data: existing } = await supabase
         .from('organisasi')
         .select('id')
-        .eq('id', id)
+        .eq('nama', nama)
+        .eq('tahun_ajaran', periodYear)
         .single()
 
       if (existing) {
@@ -281,6 +312,8 @@ export default function OrganisasiTab({
           misi: orgForm.misi || '',
           pembina_guru_id: pembinaId || null,
           pembina_guru_nama: pembinaNama,
+          tahun_ajaran: periodYear || null,
+          semester: periodSemester || null,
           created_at: new Date().toISOString()
         })
 
@@ -299,6 +332,11 @@ export default function OrganisasiTab({
   }
 
   async function simpanOrganisasi() {
+    if (readOnly) {
+      pushToast('info', 'Riwayat periode hanya bisa dilihat.')
+      return
+    }
+
     if (!orgSel) {
       pushToast('error', 'Pilih organisasi terlebih dahulu')
       return
@@ -317,6 +355,8 @@ export default function OrganisasiTab({
           misi: orgForm.misi || '',
           pembina_guru_id: pembinaId || null,
           pembina_guru_nama: pembinaNama,
+          tahun_ajaran: periodYear || null,
+          semester: periodSemester || null,
           updated_at: new Date().toISOString()
         })
         .eq('id', orgSel)
@@ -336,6 +376,11 @@ export default function OrganisasiTab({
   }
 
   async function hapusOrganisasi() {
+    if (readOnly) {
+      pushToast('info', 'Riwayat periode hanya bisa dilihat.')
+      return
+    }
+
     if (!orgSel) return
     if (!confirmDelete('Yakin mau hapus organisasi ini? Semua data anggota juga akan dihapus.')) return
 
@@ -347,6 +392,7 @@ export default function OrganisasiTab({
         .from('organisasi_anggota')
         .delete()
         .eq('organisasi_id', orgSel)
+        .eq('tahun_ajaran', periodYear)
 
       if (deleteAnggotaError) throw deleteAnggotaError
 
@@ -355,6 +401,7 @@ export default function OrganisasiTab({
         .from('organisasi')
         .delete()
         .eq('id', orgSel)
+        .eq('tahun_ajaran', periodYear)
 
       if (error) throw error
 
@@ -379,6 +426,11 @@ export default function OrganisasiTab({
   }
 
   async function tambahAnggota() {
+    if (readOnly) {
+      pushToast('info', 'Riwayat periode hanya bisa dilihat.')
+      return
+    }
+
     if (!orgSel) {
       pushToast('error', 'Pilih organisasi terlebih dahulu')
       return
@@ -404,6 +456,8 @@ export default function OrganisasiTab({
           nama: namaSiswa,
           kelas: siswa?.kelas || '',
           jabatan,
+          tahun_ajaran: periodYear || null,
+          semester: periodSemester || null,
           created_at: new Date().toISOString()
         })
 
@@ -423,6 +477,11 @@ export default function OrganisasiTab({
   }
 
   async function hapusAnggota(anggota) {
+    if (readOnly) {
+      pushToast('info', 'Riwayat periode hanya bisa dilihat.')
+      return
+    }
+
     if (!confirmDelete(`Hapus ${anggota.nama} dari organisasi?`)) return
 
     try {
@@ -456,6 +515,11 @@ export default function OrganisasiTab({
   }
 
   async function saveEditAnggota() {
+    if (readOnly) {
+      pushToast('info', 'Riwayat periode hanya bisa dilihat.')
+      return
+    }
+
     if (!editAnggotaId) return
 
     const jabatan = (editAnggotaData.jabatan || '').trim()
@@ -568,6 +632,11 @@ export default function OrganisasiTab({
 
       {/* Organisasi + Detail */}
       <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-200">
+        {readOnly && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+            Riwayat periode {periodYear || 'ini'} hanya bisa dilihat.
+          </div>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* List Organisasi */}
           <div className="lg:border-r lg:pr-6">
@@ -622,6 +691,7 @@ export default function OrganisasiTab({
             <button
               className="mt-4 w-full py-2.5 text-sm bg-gradient-to-r from-green-50 to-emerald-50 text-green-700 border border-green-200 rounded-lg hover:from-green-100 hover:to-emerald-100 hover:border-green-300 transition-all duration-200 font-medium flex items-center justify-center space-x-2"
               type="button"
+              disabled={readOnly}
               onClick={() => {
                 setOrgSel('')
                 setOrgForm({ nama: '', visi: '', misi: '', pembinaGuruId: '' })
@@ -665,6 +735,7 @@ export default function OrganisasiTab({
                   value={orgForm.nama}
                   onChange={e => setOrgForm(f => ({ ...f, nama: e.target.value }))}
                   placeholder="cth: OSIS, Pramuka, PMR"
+                  disabled={readOnly}
                 />
               </div>
               
@@ -678,6 +749,7 @@ export default function OrganisasiTab({
                     value={orgForm.visi}
                     onChange={e => setOrgForm(f => ({ ...f, visi: e.target.value }))}
                     placeholder="Tuliskan visi organisasi..."
+                    disabled={readOnly}
                   />
                 </div>
                 <div>
@@ -689,6 +761,7 @@ export default function OrganisasiTab({
                     value={orgForm.misi}
                     onChange={e => setOrgForm(f => ({ ...f, misi: e.target.value }))}
                     placeholder="Tuliskan misi organisasi..."
+                    disabled={readOnly}
                   />
                 </div>
               </div>
@@ -701,6 +774,7 @@ export default function OrganisasiTab({
                   className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm text-gray-900"
                   value={orgForm.pembinaGuruId}
                   onChange={e => setOrgForm(f => ({ ...f, pembinaGuruId: e.target.value }))}
+                  disabled={readOnly}
                 >
                   <option value="">Pilih guru pembina</option>
                   {guruList.map(g => (
@@ -716,7 +790,7 @@ export default function OrganisasiTab({
                       type="button"
                       className="px-4 py-2.5 text-sm border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium flex items-center space-x-2 transition-all duration-200"
                       onClick={hapusOrganisasi}
-                      disabled={loading}
+                      disabled={loading || readOnly}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -727,7 +801,7 @@ export default function OrganisasiTab({
                       type="button"
                       className="px-4 py-2.5 text-sm bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-medium flex items-center space-x-2 transition-all duration-200 shadow-md"
                       onClick={simpanOrganisasi}
-                      disabled={loading}
+                      disabled={loading || readOnly}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -740,7 +814,7 @@ export default function OrganisasiTab({
                     type="button"
                     className="w-full md:w-auto px-4 py-2.5 text-sm bg-gradient-to-r from-green-600 to-green-700 text-white rounded-lg hover:from-green-700 hover:to-green-800 font-medium flex items-center justify-center space-x-2 transition-all duration-200 shadow-md"
                     onClick={tambahOrganisasi}
-                    disabled={loading || !orgForm.nama.trim()}
+                    disabled={loading || readOnly || !orgForm.nama.trim()}
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
@@ -790,6 +864,7 @@ export default function OrganisasiTab({
                     setAddMemberUid('')
                   }}
                   placeholder="Cari nama, NIS, email, atau kelas"
+                  disabled={readOnly}
                 />
                 <select
                   className="block w-full px-3 py-2 text-sm border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
@@ -798,7 +873,7 @@ export default function OrganisasiTab({
                   onFocus={() => {
                     if (!memberOptionsTouched) loadMemberOptions(memberSearch)
                   }}
-                  disabled={memberOptionsLoading}
+                  disabled={memberOptionsLoading || readOnly}
                 >
                   <option value="">{memberOptionsLoading ? 'Memuat siswa...' : 'Pilih siswa'}</option>
                   {memberOptions.map(s => (
@@ -819,6 +894,7 @@ export default function OrganisasiTab({
                   className="block w-full px-3 py-2 text-sm border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
                   value={addMemberJabatan}
                   onChange={e => setAddMemberJabatan(e.target.value)}
+                  disabled={readOnly}
                 >
                   <option value="">Anggota</option>
                   {JABATAN_OPTS.map(j => (
@@ -831,7 +907,7 @@ export default function OrganisasiTab({
                   type="button"
                   className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-2.5 px-4 rounded-lg hover:from-blue-700 hover:to-blue-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-sm font-medium flex items-center justify-center space-x-2 disabled:opacity-50"
                   onClick={tambahAnggota}
-                  disabled={loading || memberOptionsLoading || !addMemberUid}
+                  disabled={loading || readOnly || memberOptionsLoading || !addMemberUid}
                 >
                   {loading ? (
                     <>
@@ -897,6 +973,7 @@ export default function OrganisasiTab({
                             className="px-2 py-1 border border-gray-300 rounded-lg text-sm bg-white"
                             value={editAnggotaData.jabatan || ''}
                             onChange={e => setEditAnggotaData(d => ({ ...d, jabatan: e.target.value }))}
+                            disabled={readOnly}
                           >
                             <option value="">Pilih jabatan</option>
                             {JABATAN_OPTS.map(j => (
@@ -922,6 +999,7 @@ export default function OrganisasiTab({
                           <button
                             className="text-green-600 hover:text-green-800 px-3 py-1.5 rounded-lg hover:bg-green-50 text-sm font-medium transition-colors duration-200"
                             onClick={saveEditAnggota}
+                            disabled={readOnly}
                           >
                             Simpan
                           </button>
@@ -938,6 +1016,7 @@ export default function OrganisasiTab({
                             className="text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium transition-colors duration-200"
                             onClick={() => startEditAnggota(a)}
                             title="Edit jabatan"
+                            disabled={readOnly}
                           >
                             Edit
                           </button>
@@ -945,6 +1024,7 @@ export default function OrganisasiTab({
                             className="text-red-600 hover:text-red-800 px-3 py-1.5 rounded-lg hover:bg-red-50 text-sm font-medium transition-colors duration-200"
                             onClick={() => hapusAnggota(a)}
                             title="Hapus anggota"
+                            disabled={readOnly}
                           >
                             Hapus
                           </button>

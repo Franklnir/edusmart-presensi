@@ -1,4 +1,4 @@
-import { apiFetch, buildQueryString, invalidateDbSelectCache } from './supabase'
+import { apiFetch, buildApiUrl, buildQueryString, invalidateDbSelectCache } from './supabase'
 
 const adminApi = {
     async provisionUser(payload = {}) {
@@ -113,6 +113,15 @@ const adminApi = {
       if (!res.error && payload?.apply) invalidateDbSelectCache()
       return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
     },
+    async copyAcademicStructure(payload = {}) {
+      const res = await apiFetch('/api/admin/academic-period/copy-structure', {
+        method: 'POST',
+        body: payload,
+        timeoutMs: 45000
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
+    },
     async studentOptions(params = {}) {
       const cacheKey = JSON.stringify(params || {})
       const res = await apiFetch(`/api/admin/student-options${buildQueryString(params)}`, {
@@ -168,6 +177,12 @@ const adminApi = {
         timeoutMs: 12000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    rfidEventsStreamUrl(cursor = 0) {
+      const params = new URLSearchParams()
+      if (Number(cursor) > 0) params.set('cursor', String(Math.trunc(Number(cursor))))
+      const query = params.toString() ? `?${params.toString()}` : ''
+      return buildApiUrl(`/api/admin/rfid-events/stream${query}`)
     },
     async featurePermissions() {
       const res = await apiFetch('/api/admin/feature-permissions', {

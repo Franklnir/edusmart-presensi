@@ -73,6 +73,10 @@ class DbController extends ApiController
         'ekskul',
         'ekskul_anggota',
         'anggota_ekskul',
+        'struktur_sekolah',
+        'kelas_struktur',
+        'organisasi',
+        'organisasi_anggota',
     ];
 
     private const ACADEMIC_DEFAULT_SCOPE_TABLES = [
@@ -86,6 +90,10 @@ class DbController extends ApiController
         'jam_kosong',
         'ekskul_anggota',
         'anggota_ekskul',
+        'struktur_sekolah',
+        'kelas_struktur',
+        'organisasi',
+        'organisasi_anggota',
     ];
 
     private const ACADEMIC_DATE_FILTER_COLUMNS = [
@@ -95,6 +103,13 @@ class DbController extends ApiController
         'absensi_ajuan' => ['tanggal', 'created_at', 'waktu_respon'],
         'absensi_settings' => ['tanggal', 'created_at'],
         'jam_kosong' => ['tanggal', 'created_at'],
+    ];
+
+    private const ACADEMIC_YEAR_SCOPE_TABLES = [
+        'struktur_sekolah',
+        'kelas_struktur',
+        'organisasi',
+        'organisasi_anggota',
     ];
 
     private const ACADEMIC_CHILD_SNAPSHOT_TABLES = [
@@ -3121,11 +3136,14 @@ class DbController extends ApiController
     {
         if ($table === 'kelas_struktur') {
             return [
+                'id',
                 'kelas_id',
                 'wali_guru_id',
                 'wali_guru_nama',
                 'ketua_siswa_id',
                 'ketua_siswa_nama',
+                'tahun_ajaran',
+                'semester',
                 'tenant_id',
                 'created_at',
                 'updated_at',
@@ -4228,7 +4246,10 @@ class DbController extends ApiController
 
         $period = $this->currentAcademicPeriodForTenant($tenantId);
         $query->where('tahun_ajaran', $period['tahun_ajaran']);
-        if ($this->isSelectableColumn($table, 'semester')) {
+        if (
+            ! in_array($table, self::ACADEMIC_YEAR_SCOPE_TABLES, true)
+            && $this->isSelectableColumn($table, 'semester')
+        ) {
             $query->where('semester', $period['semester']);
         }
     }

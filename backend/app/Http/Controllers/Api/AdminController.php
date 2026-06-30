@@ -71,6 +71,481 @@ class AdminController extends ApiController
         ]);
     }
 
+    public function copyAcademicStructure(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $validated = Validator::make($request->all(), [
+            'source_tahun_ajaran' => ['required', 'string', 'max:32'],
+            'target_tahun_ajaran' => ['nullable', 'string', 'max:32'],
+            'replace' => ['nullable', 'boolean'],
+            'include_organizations' => ['nullable', 'boolean'],
+        ])->validate();
+
+        $settings = $this->firstTenantRow('settings', $tenantId);
+        $activePeriod = AcademicPeriod::fromSettings($settings);
+        $sourceYear = AcademicPeriod::normalizeAcademicYear($validated['source_tahun_ajaran'] ?? null);
+        $targetYear = AcademicPeriod::normalizeAcademicYear($validated['target_tahun_ajaran'] ?? null)
+            ?: $activePeriod['tahun_ajaran'];
+
+        if (! $sourceYear || ! $targetYear) {
+            return $this->deny('Periode sumber atau target tidak valid.', 422);
+        }
+
+        if ($sourceYear === $targetYear) {
+            return $this->deny('Periode sumber dan target harus berbeda.', 422);
+        }
+
+        $targetSemester = (string) ($activePeriod['semester'] ?? AcademicPeriod::current()['semester']);
+        $replace = filter_var($validated['replace'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $includeOrganizations = filter_var($validated['include_organizations'] ?? true, FILTER_VALIDATE_BOOLEAN);
+
+        $summary = [
+            'struktur_sekolah' => $this->copySchoolStructureRows($tenantId, $sourceYear, $targetYear, $targetSemester, $replace),
+            'kelas_struktur' => $this->copyClassStructureRows($tenantId, $sourceYear, $targetYear, $targetSemester, $replace),
+            'organisasi' => 0,
+            'organisasi_anggota' => 0,
+        ];
+
+        if ($includeOrganizations) {
+            $organizationSummary = $this->copyOrganizationRows($tenantId, $sourceYear, $targetYear, $targetSemester, $replace);
+            $summary['organisasi'] = $organizationSummary['organisasi'];
+            $summary['organisasi_anggota'] = $organizationSummary['organisasi_anggota'];
+        }
+
+        return $this->ok([
+            'source_tahun_ajaran' => $sourceYear,
+            'target_tahun_ajaran' => $targetYear,
+            'replace' => $replace,
+            'summary' => $summary,
+        ]);
+    }
+
+    public function rfidEventsStream(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        if (! Schema::hasTable('rfid_device_events')) {
+            return response()->stream(function () {
+                echo "event: error\n";
+                echo 'data: '.json_encode(['message' => 'Tabel event RFID belum tersedia'])."\n\n";
+            }, 200, $this->eventStreamHeaders());
+        }
+
+        $cursor = max(0, (int) $request->query('cursor', 0));
+        if ($cursor <= 0) {
+            $cursor = (int) DB::table('rfid_device_events')
+                ->where('tenant_id', $tenantId)
+                ->max('id');
+        }
+
+        return response()->stream(function () use ($tenantId, $cursor) {
+            $lastId = $cursor;
+            $startedAt = microtime(true);
+            $lastPingAt = 0.0;
+
+            echo "event: ready\n";
+            echo 'data: '.json_encode(['cursor' => $lastId, 'server_time' => now()->toIso8601String()])."\n\n";
+            @ob_flush();
+            flush();
+
+            while (! connection_aborted() && (microtime(true) - $startedAt) < 55) {
+                $rows = $this->latestRfidEventRows($tenantId, $lastId);
+
+                foreach ($rows as $row) {
+                    $lastId = max($lastId, (int) $row->id);
+                    echo "event: scan\n";
+                    echo 'id: '.$lastId."\n";
+                    echo 'data: '.json_encode($this->formatRfidEventPayload($row), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n\n";
+                }
+
+                if ($rows->isNotEmpty()) {
+                    @ob_flush();
+                    flush();
+                    continue;
+                }
+
+                $now = microtime(true);
+                if (($now - $lastPingAt) >= 15) {
+                    $lastPingAt = $now;
+                    echo "event: ping\n";
+                    echo 'data: '.json_encode(['cursor' => $lastId, 'server_time' => now()->toIso8601String()])."\n\n";
+                    @ob_flush();
+                    flush();
+                }
+
+                usleep(250000);
+            }
+        }, 200, $this->eventStreamHeaders());
+    }
+
+    private function copySchoolStructureRows(
+        string $tenantId,
+        string $sourceYear,
+        string $targetYear,
+        string $targetSemester,
+        bool $replace
+    ): int {
+        if (! Schema::hasTable('struktur_sekolah')) {
+            return 0;
+        }
+
+        if ($replace && Schema::hasColumn('struktur_sekolah', 'tahun_ajaran')) {
+            $this->tenantQuery('struktur_sekolah', $tenantId)
+                ->where('tahun_ajaran', $targetYear)
+                ->delete();
+        }
+
+        $rows = $this->tenantQuery('struktur_sekolah', $tenantId)
+            ->select($this->existingColumns('struktur_sekolah', [
+                'id', 'jabatan', 'guru_id', 'guru_nama', 'tahun_ajaran', 'semester',
+            ]))
+            ->when(Schema::hasColumn('struktur_sekolah', 'tahun_ajaran'), fn ($query) => $query->where('tahun_ajaran', $sourceYear))
+            ->orderBy('jabatan')
+            ->get();
+
+        $copied = 0;
+        foreach ($rows as $row) {
+            $jabatan = trim((string) ($row->jabatan ?? ''));
+            if ($jabatan === '') {
+                continue;
+            }
+
+            $existing = $this->tenantQuery('struktur_sekolah', $tenantId)
+                ->whereRaw('lower(jabatan) = ?', [Str::lower($jabatan)])
+                ->when(Schema::hasColumn('struktur_sekolah', 'tahun_ajaran'), fn ($query) => $query->where('tahun_ajaran', $targetYear))
+                ->first(['id']);
+
+            $payload = $this->filterExistingPayload('struktur_sekolah', [
+                'id' => $existing->id ?? $this->periodScopedId('struktur', $jabatan, $targetYear),
+                'tenant_id' => $tenantId,
+                'jabatan' => $jabatan,
+                'guru_id' => $row->guru_id ?? null,
+                'guru_nama' => $row->guru_nama ?? null,
+                'tahun_ajaran' => $targetYear,
+                'semester' => $targetSemester,
+                'updated_at' => now(),
+                'created_at' => now(),
+            ]);
+
+            if ($existing) {
+                unset($payload['id'], $payload['tenant_id'], $payload['created_at']);
+                $this->tenantQuery('struktur_sekolah', $tenantId)
+                    ->where('id', $existing->id)
+                    ->update($payload);
+            } else {
+                DB::table('struktur_sekolah')->insert($payload);
+            }
+
+            $copied++;
+        }
+
+        return $copied;
+    }
+
+    private function copyClassStructureRows(
+        string $tenantId,
+        string $sourceYear,
+        string $targetYear,
+        string $targetSemester,
+        bool $replace
+    ): int {
+        if (! Schema::hasTable('kelas_struktur')) {
+            return 0;
+        }
+
+        if ($replace && Schema::hasColumn('kelas_struktur', 'tahun_ajaran')) {
+            $this->tenantQuery('kelas_struktur', $tenantId)
+                ->where('tahun_ajaran', $targetYear)
+                ->delete();
+        }
+
+        $rows = $this->tenantQuery('kelas_struktur', $tenantId)
+            ->select($this->existingColumns('kelas_struktur', [
+                'id', 'kelas_id', 'wali_guru_id', 'wali_guru_nama',
+                'ketua_siswa_id', 'ketua_siswa_nama', 'tahun_ajaran', 'semester',
+            ]))
+            ->when(Schema::hasColumn('kelas_struktur', 'tahun_ajaran'), fn ($query) => $query->where('tahun_ajaran', $sourceYear))
+            ->orderBy('kelas_id')
+            ->get();
+
+        $copied = 0;
+        foreach ($rows as $row) {
+            $kelasId = trim((string) ($row->kelas_id ?? ''));
+            if ($kelasId === '') {
+                continue;
+            }
+
+            $existing = $this->tenantQuery('kelas_struktur', $tenantId)
+                ->where('kelas_id', $kelasId)
+                ->when(Schema::hasColumn('kelas_struktur', 'tahun_ajaran'), fn ($query) => $query->where('tahun_ajaran', $targetYear))
+                ->first($this->existingColumns('kelas_struktur', ['id', 'kelas_id']));
+
+            $payload = $this->filterExistingPayload('kelas_struktur', [
+                'id' => $existing->id ?? (string) Str::uuid(),
+                'tenant_id' => $tenantId,
+                'kelas_id' => $kelasId,
+                'wali_guru_id' => $row->wali_guru_id ?? null,
+                'wali_guru_nama' => $row->wali_guru_nama ?? null,
+                'ketua_siswa_id' => $row->ketua_siswa_id ?? null,
+                'ketua_siswa_nama' => $row->ketua_siswa_nama ?? null,
+                'tahun_ajaran' => $targetYear,
+                'semester' => $targetSemester,
+                'updated_at' => now(),
+                'created_at' => now(),
+            ]);
+
+            if ($existing) {
+                unset($payload['id'], $payload['tenant_id'], $payload['kelas_id'], $payload['created_at']);
+                $query = $this->tenantQuery('kelas_struktur', $tenantId);
+                if (isset($existing->id)) {
+                    $query->where('id', $existing->id);
+                } else {
+                    $query->where('kelas_id', $kelasId);
+                }
+                $query->update($payload);
+            } else {
+                DB::table('kelas_struktur')->insert($payload);
+            }
+
+            $copied++;
+        }
+
+        return $copied;
+    }
+
+    private function copyOrganizationRows(
+        string $tenantId,
+        string $sourceYear,
+        string $targetYear,
+        string $targetSemester,
+        bool $replace
+    ): array {
+        if (! Schema::hasTable('organisasi')) {
+            return ['organisasi' => 0, 'organisasi_anggota' => 0];
+        }
+
+        if ($replace && Schema::hasColumn('organisasi', 'tahun_ajaran')) {
+            $targetOrgIds = $this->tenantQuery('organisasi', $tenantId)
+                ->where('tahun_ajaran', $targetYear)
+                ->pluck('id')
+                ->filter()
+                ->values()
+                ->all();
+
+            if (Schema::hasTable('organisasi_anggota') && $targetOrgIds !== []) {
+                $this->tenantQuery('organisasi_anggota', $tenantId)
+                    ->whereIn('organisasi_id', $targetOrgIds)
+                    ->delete();
+            }
+
+            $this->tenantQuery('organisasi', $tenantId)
+                ->where('tahun_ajaran', $targetYear)
+                ->delete();
+        }
+
+        $sourceOrganizations = $this->tenantQuery('organisasi', $tenantId)
+            ->select($this->existingColumns('organisasi', [
+                'id', 'nama', 'visi', 'misi', 'pembina_guru_id', 'pembina_guru_nama',
+                'tahun_ajaran', 'semester',
+            ]))
+            ->when(Schema::hasColumn('organisasi', 'tahun_ajaran'), fn ($query) => $query->where('tahun_ajaran', $sourceYear))
+            ->orderBy('nama')
+            ->get();
+
+        $orgMap = [];
+        $orgCopied = 0;
+        foreach ($sourceOrganizations as $row) {
+            $sourceId = trim((string) ($row->id ?? ''));
+            $name = trim((string) ($row->nama ?? ''));
+            if ($sourceId === '' || $name === '') {
+                continue;
+            }
+
+            $existing = $this->tenantQuery('organisasi', $tenantId)
+                ->whereRaw('lower(nama) = ?', [Str::lower($name)])
+                ->when(Schema::hasColumn('organisasi', 'tahun_ajaran'), fn ($query) => $query->where('tahun_ajaran', $targetYear))
+                ->first(['id']);
+
+            $targetId = (string) ($existing->id ?? $this->periodScopedId('organisasi', $name, $targetYear));
+            $payload = $this->filterExistingPayload('organisasi', [
+                'id' => $targetId,
+                'tenant_id' => $tenantId,
+                'nama' => $name,
+                'visi' => $row->visi ?? '',
+                'misi' => $row->misi ?? '',
+                'pembina_guru_id' => $row->pembina_guru_id ?? null,
+                'pembina_guru_nama' => $row->pembina_guru_nama ?? null,
+                'tahun_ajaran' => $targetYear,
+                'semester' => $targetSemester,
+                'updated_at' => now(),
+                'created_at' => now(),
+            ]);
+
+            if ($existing) {
+                unset($payload['id'], $payload['tenant_id'], $payload['created_at']);
+                $this->tenantQuery('organisasi', $tenantId)
+                    ->where('id', $targetId)
+                    ->update($payload);
+            } else {
+                DB::table('organisasi')->insert($payload);
+            }
+
+            $orgMap[$sourceId] = $targetId;
+            $orgCopied++;
+        }
+
+        $membersCopied = $this->copyOrganizationMemberRows($tenantId, $sourceYear, $targetYear, $targetSemester, $orgMap);
+
+        return ['organisasi' => $orgCopied, 'organisasi_anggota' => $membersCopied];
+    }
+
+    private function copyOrganizationMemberRows(
+        string $tenantId,
+        string $sourceYear,
+        string $targetYear,
+        string $targetSemester,
+        array $orgMap
+    ): int {
+        if (! Schema::hasTable('organisasi_anggota') || $orgMap === []) {
+            return 0;
+        }
+
+        $activeStudents = DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->whereRaw('lower(coalesce(status, \'active\')) not in (?, ?, ?, ?)', ['alumni', 'nonaktif', 'inactive', 'disabled'])
+            ->pluck('kelas', 'id');
+
+        $rows = $this->tenantQuery('organisasi_anggota', $tenantId)
+            ->select($this->existingColumns('organisasi_anggota', [
+                'organisasi_id', 'siswa_id', 'nama', 'kelas', 'jabatan',
+                'status', 'bagian', 'tahun_ajaran', 'semester',
+            ]))
+            ->whereIn('organisasi_id', array_keys($orgMap))
+            ->when(Schema::hasColumn('organisasi_anggota', 'tahun_ajaran'), fn ($query) => $query->where('tahun_ajaran', $sourceYear))
+            ->orderBy('organisasi_id')
+            ->orderBy('jabatan')
+            ->get();
+
+        $copied = 0;
+        foreach ($rows as $row) {
+            $studentId = trim((string) ($row->siswa_id ?? ''));
+            $targetOrgId = $orgMap[(string) ($row->organisasi_id ?? '')] ?? '';
+            if ($studentId === '' || $targetOrgId === '' || ! $activeStudents->has($studentId)) {
+                continue;
+            }
+
+            $existing = $this->tenantQuery('organisasi_anggota', $tenantId)
+                ->where('organisasi_id', $targetOrgId)
+                ->where('siswa_id', $studentId)
+                ->when(Schema::hasColumn('organisasi_anggota', 'tahun_ajaran'), fn ($query) => $query->where('tahun_ajaran', $targetYear))
+                ->first(['id']);
+
+            $payload = $this->filterExistingPayload('organisasi_anggota', [
+                'tenant_id' => $tenantId,
+                'organisasi_id' => $targetOrgId,
+                'siswa_id' => $studentId,
+                'nama' => $row->nama ?? '',
+                'kelas' => $activeStudents->get($studentId) ?: ($row->kelas ?? ''),
+                'jabatan' => $row->jabatan ?? 'Anggota',
+                'status' => $row->status ?? 'aktif',
+                'bagian' => $row->bagian ?? null,
+                'tahun_ajaran' => $targetYear,
+                'semester' => $targetSemester,
+                'updated_at' => now(),
+                'created_at' => now(),
+            ]);
+
+            if ($existing) {
+                unset($payload['tenant_id'], $payload['organisasi_id'], $payload['siswa_id'], $payload['created_at']);
+                $this->tenantQuery('organisasi_anggota', $tenantId)
+                    ->where('id', $existing->id)
+                    ->update($payload);
+            } else {
+                DB::table('organisasi_anggota')->insert($payload);
+            }
+
+            $copied++;
+        }
+
+        return $copied;
+    }
+
+    private function latestRfidEventRows(string $tenantId, int $cursor)
+    {
+        return DB::table('rfid_device_events')
+            ->where('tenant_id', $tenantId)
+            ->where('id', '>', $cursor)
+            ->whereNotNull('processed_at')
+            ->orderBy('id')
+            ->limit(25)
+            ->get();
+    }
+
+    private function formatRfidEventPayload(object $row): array
+    {
+        $response = json_decode((string) ($row->response_payload ?? ''), true);
+        if (! is_array($response)) {
+            $response = [];
+        }
+
+        return [
+            'id' => (int) $row->id,
+            'event_id' => $row->event_id ?? null,
+            'device_id' => $row->device_id ?? null,
+            'card_uid' => $row->card_uid ?? ($response['card_uid'] ?? null),
+            'mode' => $row->mode ?? ($response['mode'] ?? null),
+            'source' => $row->source ?? null,
+            'status' => $row->status ?? null,
+            'response_code' => $row->response_code ?? null,
+            'success' => (bool) ($response['success'] ?? false),
+            'reason' => $response['reason'] ?? null,
+            'message' => $response['message'] ?? null,
+            'nama' => $response['nama'] ?? null,
+            'kelas' => $response['kelas'] ?? null,
+            'mapel' => $response['mapel'] ?? null,
+            'waktu_absen' => $response['waktu_absen'] ?? ($response['waktu'] ?? null),
+            'absen_id' => $response['absen_id'] ?? null,
+            'response' => $response,
+            'scanned_at' => $row->scanned_at ?? null,
+            'processed_at' => $row->processed_at ?? null,
+            'created_at' => $row->created_at ?? null,
+        ];
+    }
+
+    private function eventStreamHeaders(): array
+    {
+        return [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache, no-transform',
+            'Connection' => 'keep-alive',
+            'X-Accel-Buffering' => 'no',
+        ];
+    }
+
+    private function periodScopedId(string $prefix, string $label, string $tahunAjaran): string
+    {
+        $slug = Str::slug($label) ?: $prefix;
+        $year = preg_replace('/[^0-9]/', '', $tahunAjaran) ?: Str::lower(Str::random(6));
+
+        return Str::limit($prefix.'-'.$slug.'-'.$year, 120, '');
+    }
+
     public function provisionUser(Request $request)
     {
         if (! $this->isAdmin($request)) {
@@ -881,9 +1356,11 @@ class AdminController extends ApiController
         if (Schema::hasTable('kelas_struktur')) {
             $classStructureRows = $this->tenantQuery('kelas_struktur', $tenantId)
                 ->select($this->existingColumns('kelas_struktur', [
-                    'kelas_id', 'wali_guru_id', 'wali_guru_nama',
+                    'id', 'kelas_id', 'wali_guru_id', 'wali_guru_nama',
                     'ketua_siswa_id', 'ketua_siswa_nama', 'created_at', 'updated_at',
+                    'tahun_ajaran', 'semester',
                 ]))
+                ->when($tahunAjaran !== '' && Schema::hasColumn('kelas_struktur', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $tahunAjaran))
                 ->when(! empty($classIds), fn ($builder) => $builder->whereIn('kelas_id', $classIds))
                 ->get()
                 ->map(fn ($row) => (array) $row)
@@ -898,7 +1375,9 @@ class AdminController extends ApiController
             ? $this->tenantQuery('struktur_sekolah', $tenantId)
                 ->select($this->existingColumns('struktur_sekolah', [
                     'id', 'jabatan', 'guru_id', 'guru_nama', 'created_at', 'updated_at',
+                    'tahun_ajaran', 'semester',
                 ]))
+                ->when($tahunAjaran !== '' && Schema::hasColumn('struktur_sekolah', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $tahunAjaran))
                 ->orderBy('jabatan')
                 ->get()
                 ->map(fn ($row) => (array) $row)
@@ -1680,7 +2159,7 @@ class AdminController extends ApiController
             ->pluck('aggregate', 'kelas');
         $scheduleCountByClass = $todaySchedule->groupBy('kelas_id')->map(fn ($rows) => $rows->count());
 
-        $recentScans = Schema::hasTable('absensi_scan_temp')
+        $recentTempScans = Schema::hasTable('absensi_scan_temp')
             ? $this->tenantQuery('absensi_scan_temp', $tenantId, 't')
                 ->leftJoin('profiles as p', function ($join) use ($tenantId) {
                     $join->on('p.id', '=', 't.siswa_id')
@@ -1708,6 +2187,57 @@ class AdminController extends ApiController
                 ->limit(50)
                 ->get()
             : collect();
+
+        $recentAttendanceScans = Schema::hasTable('absensi')
+            ? $this->tenantQuery('absensi', $tenantId, 'a')
+                ->leftJoin('profiles as p', function ($join) use ($tenantId) {
+                    $join->on('p.id', '=', 'a.uid')
+                        ->where('p.tenant_id', '=', $tenantId);
+                })
+                ->select([
+                    'a.id as absensi_id',
+                    'a.tanggal',
+                    'a.uid as siswa_id',
+                    'a.kelas',
+                    'a.mapel',
+                    'a.waktu',
+                    'a.oleh',
+                    'a.created_at',
+                    'p.nama as siswa_nama',
+                    'p.nis as siswa_nis',
+                    'p.photo_path as siswa_photo_path',
+                    'p.photo_url as siswa_photo_url',
+                    'p.rfid_uid as siswa_rfid_uid',
+                ])
+                ->where('a.tanggal', $date)
+                ->whereIn('a.oleh', ['rfid_auto', 'rfid_manual'])
+                ->orderByDesc('a.waktu')
+                ->limit(50)
+                ->get()
+                ->map(fn ($row) => (object) [
+                    'id' => 'absensi-'.$row->absensi_id,
+                    'tanggal' => $row->tanggal,
+                    'siswa_id' => $row->siswa_id,
+                    'kelas' => $row->kelas,
+                    'sesi' => $row->mapel,
+                    'scan_at' => $row->waktu,
+                    'source' => $row->oleh,
+                    'card_uid' => $row->siswa_rfid_uid,
+                    'mapel_count' => null,
+                    'created_at' => $row->created_at,
+                    'siswa_nama' => $row->siswa_nama,
+                    'siswa_nis' => $row->siswa_nis,
+                    'siswa_photo_path' => $row->siswa_photo_path,
+                    'siswa_photo_url' => $row->siswa_photo_url,
+                    'siswa_rfid_uid' => $row->siswa_rfid_uid,
+                ])
+            : collect();
+
+        $recentScans = $recentTempScans
+            ->concat($recentAttendanceScans)
+            ->sortByDesc(fn ($row) => (string) ($row->scan_at ?? $row->created_at ?? ''))
+            ->take(50)
+            ->values();
         $scannedCountByClass = $recentScans
             ->groupBy('kelas')
             ->map(fn ($rows) => $rows->pluck('siswa_id')->unique()->count());

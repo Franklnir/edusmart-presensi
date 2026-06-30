@@ -160,10 +160,13 @@ export default function Scan() {
   const [rfidDevices, setRfidDevices] = useState(null)
   const [rfidDevicesLoading, setRfidDevicesLoading] = useState(false)
   const [rfidDevicesError, setRfidDevicesError] = useState('')
+  const [rfidStreamStatus, setRfidStreamStatus] = useState('connecting')
 
   // ref untuk stabilisasi di callback
   const scannedRef = useRef([])
   const kelaslistRef = useRef([])
+  const rfidStreamCursorRef = useRef(0)
+  const rfidStreamRefreshTimerRef = useRef(null)
 
   // --- STATE MODE 1 (SCANNING) ---
   const [sessionSettings, setSessionSettings] = useState(() => ({
@@ -706,6 +709,113 @@ export default function Scan() {
     loadScansFromTemp(tanggal)
   }, [scanOperationalActive, tanggal, loadScansFromTemp])
 
+  const refreshScanSummarySoon = useCallback(() => {
+    if (rfidStreamRefreshTimerRef.current) {
+      window.clearTimeout(rfidStreamRefreshTimerRef.current)
+    }
+
+    rfidStreamRefreshTimerRef.current = window.setTimeout(() => {
+      rfidStreamRefreshTimerRef.current = null
+      loadKelasData(tanggal)
+      if (scanOperationalActive) {
+        loadScansFromTemp(tanggal)
+      }
+    }, 150)
+  }, [loadKelasData, loadScansFromTemp, scanOperationalActive, tanggal])
+
+  const handleRfidStreamEvent = useCallback((eventData = {}) => {
+    if (!eventData || typeof eventData !== 'object') return
+
+    refreshScanSummarySoon()
+    loadRfidDevices({ silent: true })
+
+    if (eventData.success) {
+      if (activeTab === 1) {
+        pushToast(
+          'success',
+          `RFID ${eventData.nama || eventData.card_uid || 'terbaca'}${eventData.kelas ? ` (${eventData.kelas})` : ''}`
+        )
+      }
+      try {
+        const audio = new Audio('/beep.mp3')
+        audio.play().catch(() => { })
+      } catch { }
+      return
+    }
+
+    const message = eventData.message || eventData.reason || 'Scan RFID belum berhasil diproses'
+    if (activeTab === 1) {
+      pushToast('warning', message)
+    }
+  }, [activeTab, loadRfidDevices, pushToast, refreshScanSummarySoon])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
+      setRfidStreamStatus('fallback')
+      return undefined
+    }
+
+    let closed = false
+    let source = null
+    let reconnectTimer = null
+
+    const connect = () => {
+      if (closed) return
+      setRfidStreamStatus((current) => current === 'connected' ? current : 'connecting')
+      source = new window.EventSource(
+        supabase.admin.rfidEventsStreamUrl(rfidStreamCursorRef.current),
+        { withCredentials: true }
+      )
+
+      source.addEventListener('ready', (event) => {
+        try {
+          const data = JSON.parse(event.data || '{}')
+          if (Number(data.cursor) > 0) {
+            rfidStreamCursorRef.current = Number(data.cursor)
+          }
+        } catch { }
+        setRfidStreamStatus('connected')
+      })
+
+      source.addEventListener('scan', (event) => {
+        try {
+          const data = JSON.parse(event.data || '{}')
+          const cursor = Number(event.lastEventId || data.id || 0)
+          if (cursor > 0) {
+            rfidStreamCursorRef.current = Math.max(rfidStreamCursorRef.current, cursor)
+          }
+          setRfidStreamStatus('connected')
+          handleRfidStreamEvent(data)
+        } catch (error) {
+          console.error('RFID stream parse error:', error)
+        }
+      })
+
+      source.addEventListener('ping', () => {
+        setRfidStreamStatus('connected')
+      })
+
+      source.onerror = () => {
+        if (closed) return
+        setRfidStreamStatus('reconnecting')
+        source?.close()
+        reconnectTimer = window.setTimeout(connect, 1500)
+      }
+    }
+
+    connect()
+
+    return () => {
+      closed = true
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      source?.close()
+      if (rfidStreamRefreshTimerRef.current) {
+        window.clearTimeout(rfidStreamRefreshTimerRef.current)
+        rfidStreamRefreshTimerRef.current = null
+      }
+    }
+  }, [handleRfidStreamEvent])
+
   /* ========= LOGIC SCANNING MANUAL ========= */
 
   const handleProcessScan = useCallback(
@@ -1071,7 +1181,11 @@ export default function Scan() {
         (payload) => {
           if (activeTab !== 1 || !scanOperationalActive) return
           const row = payload.new
-          if (!row || row.status !== 'raw') return
+          if (!row) return
+          if (row.status !== 'raw') {
+            refreshScanSummarySoon()
+            return
+          }
           handleProcessScan(row.card_uid, {
             fromRealtime: true,
             scanRowId: row.id
@@ -1083,7 +1197,7 @@ export default function Scan() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [activeTab, scanOperationalActive, handleProcessScan])
+  }, [activeTab, scanOperationalActive, handleProcessScan, refreshScanSummarySoon])
 
   /* ========= SIMPAN ABSENSI ========= */
 
@@ -1571,6 +1685,15 @@ export default function Scan() {
                       </span>
                       <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
                         {rfidDeviceSummary.offline || 0} offline
+                      </span>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                        rfidStreamStatus === 'connected'
+                          ? 'border-sky-200 bg-sky-50 text-sky-700'
+                          : rfidStreamStatus === 'reconnecting'
+                            ? 'border-amber-200 bg-amber-50 text-amber-700'
+                            : 'border-slate-200 bg-slate-50 text-slate-600'
+                      }`}>
+                        Stream {rfidStreamStatus === 'connected' ? 'realtime' : rfidStreamStatus === 'reconnecting' ? 'menyambung' : 'fallback'}
                       </span>
                     </div>
                     <p className="mt-1 text-sm text-gray-600">

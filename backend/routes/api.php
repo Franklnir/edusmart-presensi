@@ -227,11 +227,13 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::get('/academic-summary', [AdminController::class, 'academicSummary']);
     Route::post('/academic-period/apply', [AdminController::class, 'applyAcademicPeriod']);
     Route::post('/academic-period/restore-roster', [AdminController::class, 'restoreAcademicPeriodRoster']);
+    Route::post('/academic-period/copy-structure', [AdminController::class, 'copyAcademicStructure']);
     Route::get('/student-options', [AdminController::class, 'studentOptions']);
     Route::get('/teachers', [AdminController::class, 'teachers']);
     Route::get('/certificates', [AdminController::class, 'certificates']);
     Route::post('/certificates/{id}/send-email', [AdminController::class, 'sendCertificateEmail']);
     Route::get('/rfid-devices', [AdminController::class, 'rfidDevices']);
+    Route::get('/rfid-events/stream', [AdminController::class, 'rfidEventsStream']);
     Route::get('/scan-session-summary', [AdminController::class, 'scanSessionSummary']);
     Route::get('/feature-permissions', [AdminFeaturePermissionController::class, 'index']);
     Route::post('/feature-permissions', [AdminFeaturePermissionController::class, 'store']);

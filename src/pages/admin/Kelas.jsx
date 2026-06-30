@@ -792,6 +792,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
         .from('kelas_struktur')
         .select('*')
         .eq('kelas_id', kelasSelected)
+        .eq('tahun_ajaran', academicPeriod.tahunAjaran)
         .maybeSingle()
 
       if (error && error.code !== 'PGRST116') throw error
@@ -803,7 +804,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       pushToast('error', 'Gagal memuat struktur kelas')
       throw error
     }
-  }, [kelasSelected, pushToast])
+  }, [academicPeriod.tahunAjaran, kelasSelected, pushToast])
 
   const loadMapelList = useCallback(async () => {
     try {
@@ -1591,12 +1592,14 @@ export default function AKelas({ initialTab = 'kelas' }) {
         wali_guru_nama: waliGuruId ? guruNameById(waliGuruId) : '',
         ketua_siswa_id: ketuaUid || null,
         ketua_siswa_nama: ketuaUid ? siswaNameByUid(ketuaUid) : '',
+        tahun_ajaran: academicPeriod.tahunAjaran,
+        semester: academicPeriod.semester,
         updated_at: new Date().toISOString()
       }
 
       const { error } = await supabase
         .from('kelas_struktur')
-        .upsert(payload, { onConflict: 'kelas_id' })
+        .upsert(payload, { onConflict: 'tenant_id,kelas_id,tahun_ajaran' })
 
       if (error) throw error
 
@@ -1620,6 +1623,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
         .from('kelas_struktur')
         .delete()
         .eq('kelas_id', kelasSelected)
+        .eq('tahun_ajaran', academicPeriod.tahunAjaran)
 
       if (error) throw error
 
@@ -3763,4 +3767,3 @@ export default function AKelas({ initialTab = 'kelas' }) {
     </div>
   )
 }
-

@@ -4,6 +4,7 @@ import {
   Briefcase,
   Building2,
   CheckCircle2,
+  Copy,
   GraduationCap,
   Loader2,
   Pencil,
@@ -189,8 +190,11 @@ function EmptyState({ icon: Icon, title, description }) {
 export default function StrukturSekolahTab({
   guruList,
   academicPeriod = null,
+  activeAcademicPeriod = null,
+  academicYearOptions = [],
   pushToast,
-  showHeader = true
+  showHeader = true,
+  readOnly = false
 }) {
   const periodKey = useMemo(() => cacheKeyPart(academicPeriod?.tahunAjaran || 'active'), [academicPeriod?.tahunAjaran])
   const [cachedSummary, setCachedSummary, hasSummaryCache] = useLocalCache(`admin_struktur_sekolah_summary_${periodKey}`, {
@@ -211,6 +215,21 @@ export default function StrukturSekolahTab({
   const [gradeFilter, setGradeFilter] = useState('')
   const [editingPosition, setEditingPosition] = useState({ id: '', guruId: '' })
   const [editingWali, setEditingWali] = useState({ id: '', guruId: '' })
+  const copySourceOptions = useMemo(() => {
+    const currentYear = academicPeriod?.tahunAjaran || activeAcademicPeriod?.tahunAjaran || ''
+    return (academicYearOptions || [])
+      .map((option) => (typeof option === 'string' ? { value: option, label: option } : option))
+      .filter((option) => option?.value && option.value !== currentYear)
+  }, [academicPeriod?.tahunAjaran, academicYearOptions, activeAcademicPeriod?.tahunAjaran])
+  const [copySourceYear, setCopySourceYear] = useState(() => copySourceOptions[0]?.value || '')
+  const [copyingStructure, setCopyingStructure] = useState(false)
+
+  useEffect(() => {
+    setCopySourceYear((current) => {
+      if (copySourceOptions.some((option) => option.value === current)) return current
+      return copySourceOptions[0]?.value || ''
+    })
+  }, [copySourceOptions])
 
   const guruOptions = useMemo(() => {
     const source = Array.isArray(guruList) && guruList.length ? guruList : summaryGuruList
@@ -384,6 +403,11 @@ export default function StrukturSekolahTab({
 
   async function addPosisi(event) {
     event?.preventDefault()
+    if (readOnly) {
+      pushToast('info', 'Riwayat periode hanya bisa dilihat.')
+      return
+    }
+
     const jabatan = normalizeSpaces(posBaru)
     const normalizedJabatan = jabatan.toLowerCase()
 
@@ -409,6 +433,8 @@ export default function StrukturSekolahTab({
       jabatan,
       guru_id: posGuru || null,
       guru_nama: guruNama,
+      tahun_ajaran: academicPeriod?.tahunAjaran || null,
+      semester: academicPeriod?.semester || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     }
@@ -439,6 +465,11 @@ export default function StrukturSekolahTab({
   }
 
   async function savePosition(item) {
+    if (readOnly) {
+      pushToast('info', 'Riwayat periode hanya bisa dilihat.')
+      return
+    }
+
     const guruId = editingPosition.guruId || ''
     const guruNama = guruId ? getTeacherName(guruId) : ''
 
@@ -449,6 +480,8 @@ export default function StrukturSekolahTab({
         .update({
           guru_id: guruId || null,
           guru_nama: guruNama,
+          tahun_ajaran: academicPeriod?.tahunAjaran || null,
+          semester: academicPeriod?.semester || null,
           updated_at: new Date().toISOString()
         })
         .eq('id', item.id)
@@ -467,6 +500,11 @@ export default function StrukturSekolahTab({
   }
 
   async function deletePosition(item) {
+    if (readOnly) {
+      pushToast('info', 'Riwayat periode hanya bisa dilihat.')
+      return
+    }
+
     if (!confirmDelete(`Hapus jabatan "${item.jabatan}" dari struktur sekolah?`)) return
 
     try {
@@ -494,6 +532,11 @@ export default function StrukturSekolahTab({
   }
 
   async function saveWaliKelas(item) {
+    if (readOnly) {
+      pushToast('info', 'Riwayat periode hanya bisa dilihat.')
+      return
+    }
+
     const guruId = editingWali.guruId || ''
     const guruNama = guruId ? getTeacherName(guruId) : ''
 
@@ -505,8 +548,10 @@ export default function StrukturSekolahTab({
           kelas_id: item.id,
           wali_guru_id: guruId || null,
           wali_guru_nama: guruNama,
+          tahun_ajaran: academicPeriod?.tahunAjaran || null,
+          semester: academicPeriod?.semester || null,
           updated_at: new Date().toISOString()
-        }, { onConflict: 'kelas_id' })
+        }, { onConflict: 'tenant_id,kelas_id,tahun_ajaran' })
 
       if (error) throw error
 
@@ -518,6 +563,39 @@ export default function StrukturSekolahTab({
       pushToast('error', error?.message || 'Gagal menyimpan wali kelas')
     } finally {
       setSavingKey('')
+    }
+  }
+
+  async function copyStructureFromPeriod() {
+    const targetYear = academicPeriod?.tahunAjaran || ''
+    if (readOnly || !targetYear || !copySourceYear) return
+
+    const confirmed = window.confirm(
+      `Salin struktur sekolah dan organisasi dari periode ${copySourceYear} ke periode ${targetYear}? Data yang sudah ada akan diperbarui jika namanya sama.`
+    )
+    if (!confirmed) return
+
+    try {
+      setCopyingStructure(true)
+      const { data, error } = await supabase.admin.copyAcademicStructure({
+        source_tahun_ajaran: copySourceYear,
+        target_tahun_ajaran: targetYear,
+        include_organizations: true,
+        replace: false
+      })
+      if (error) throw error
+
+      const summary = data?.summary || {}
+      pushToast(
+        'success',
+        `Struktur disalin: ${summary.struktur_sekolah || 0} jabatan, ${summary.kelas_struktur || 0} wali kelas, ${summary.organisasi || 0} organisasi.`
+      )
+      await loadData({ silent: true, force: true })
+    } catch (error) {
+      console.error('Error copying struktur sekolah:', error)
+      pushToast('error', error?.message || 'Gagal menyalin struktur periode')
+    } finally {
+      setCopyingStructure(false)
     }
   }
 
@@ -560,6 +638,47 @@ export default function StrukturSekolahTab({
             {initialLoading ? 'Memuat data struktur sekolah...' : 'Memperbarui data struktur sekolah...'}
           </div>
         </div>
+      )}
+
+      {readOnly && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+          Riwayat periode {academicPeriod?.tahunAjaran || 'ini'} hanya bisa dilihat.
+        </div>
+      )}
+
+      {!readOnly && copySourceOptions.length > 0 && (
+        <SectionCard
+          icon={Copy}
+          title="Salin Dari Periode"
+          description="Gunakan struktur periode sebelumnya sebagai dasar periode aktif."
+        >
+          <div className="flex flex-col gap-3 md:flex-row md:items-end">
+            <div className="md:w-72">
+              <FieldLabel>Periode sumber</FieldLabel>
+              <select
+                className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                value={copySourceYear}
+                onChange={(event) => setCopySourceYear(event.target.value)}
+                disabled={copyingStructure}
+              >
+                {copySourceOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label || option.value}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={copyStructureFromPeriod}
+              disabled={copyingStructure || !copySourceYear}
+            >
+              {copyingStructure ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+              Salin Struktur
+            </button>
+          </div>
+        </SectionCard>
       )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -607,7 +726,7 @@ export default function StrukturSekolahTab({
               placeholder="Contoh: Kepala Sekolah"
               value={posBaru}
               onChange={(event) => setPosBaru(event.target.value)}
-              disabled={Boolean(savingKey)}
+              disabled={readOnly || Boolean(savingKey)}
             />
             <datalist id="list-posisi">
               {DEFAULT_POS.map((position) => (
@@ -621,13 +740,13 @@ export default function StrukturSekolahTab({
               value={posGuru}
               onChange={setPosGuru}
               options={guruOptions}
-              disabled={Boolean(savingKey)}
+              disabled={readOnly || Boolean(savingKey)}
             />
           </div>
           <button
             type="submit"
             className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={busy || !normalizeSpaces(posBaru)}
+            disabled={readOnly || busy || !normalizeSpaces(posBaru)}
           >
             {savingKey === 'add-position' ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -707,7 +826,7 @@ export default function StrukturSekolahTab({
                               onChange={(guruId) => setEditingPosition({ id: item.id, guruId })}
                               options={guruOptions}
                               placeholder="Kosongkan penanggung jawab"
-                              disabled={Boolean(savingKey)}
+                              disabled={readOnly || Boolean(savingKey)}
                             />
                           ) : teacherName ? (
                             <div className="flex items-center gap-2 text-slate-700">
@@ -729,7 +848,7 @@ export default function StrukturSekolahTab({
                                   type="button"
                                   className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-700 disabled:opacity-60"
                                   onClick={() => savePosition(item)}
-                                  disabled={Boolean(savingKey)}
+                                  disabled={readOnly || Boolean(savingKey)}
                                 >
                                   {rowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                                   Simpan
@@ -750,7 +869,7 @@ export default function StrukturSekolahTab({
                                   type="button"
                                   className="inline-flex h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
                                   onClick={() => startEditPosition(item)}
-                                  disabled={busy}
+                                  disabled={readOnly || busy}
                                   title="Edit penanggung jawab"
                                 >
                                   <Pencil className="h-4 w-4" />
@@ -759,7 +878,7 @@ export default function StrukturSekolahTab({
                                   type="button"
                                   className="inline-flex h-9 items-center justify-center rounded-xl border border-red-200 bg-white px-3 text-red-600 transition hover:bg-red-50 disabled:opacity-60"
                                   onClick={() => deletePosition(item)}
-                                  disabled={busy}
+                                  disabled={readOnly || busy}
                                   title="Hapus jabatan"
                                 >
                                   <Trash2 className="h-4 w-4" />
@@ -854,7 +973,7 @@ export default function StrukturSekolahTab({
                               onChange={(guruId) => setEditingWali({ id: item.id, guruId })}
                               options={guruOptions}
                               placeholder="Kosongkan wali kelas"
-                              disabled={Boolean(savingKey)}
+                              disabled={readOnly || Boolean(savingKey)}
                             />
                           ) : teacherName ? (
                             <div className="flex items-center gap-2 text-slate-700">
@@ -876,7 +995,7 @@ export default function StrukturSekolahTab({
                                   type="button"
                                   className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-700 disabled:opacity-60"
                                   onClick={() => saveWaliKelas(item)}
-                                  disabled={Boolean(savingKey)}
+                                  disabled={readOnly || Boolean(savingKey)}
                                 >
                                   {rowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                                   Simpan
@@ -896,7 +1015,7 @@ export default function StrukturSekolahTab({
                                 type="button"
                                 className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
                                 onClick={() => startEditWali(item)}
-                                disabled={busy}
+                                disabled={readOnly || busy}
                               >
                                 <Pencil className="h-4 w-4" />
                                 Edit

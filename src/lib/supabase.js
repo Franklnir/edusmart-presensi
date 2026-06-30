@@ -118,6 +118,13 @@ const normalizeApiUrl = (rawApiUrl, runtimeHost) => {
 const API_URL = normalizeApiUrl(import.meta.env.VITE_API_URL, RUNTIME_HOST)
 const TENANT_SLUG = import.meta.env.VITE_TENANT_SLUG || deriveTenantSlug(RUNTIME_HOST)
 export const CURRENT_TENANT_SLUG = TENANT_SLUG
+export const buildApiUrl = (path = '') => {
+  try {
+    return new URL(String(path || ''), `${API_URL}/`).toString()
+  } catch {
+    return `${API_URL}${String(path || '')}`
+  }
+}
 const GOOGLE_AUTH_ENABLED = String(import.meta.env.VITE_GOOGLE_AUTH_ENABLED || 'false')
   .trim()
   .toLowerCase() === 'true'
