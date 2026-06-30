@@ -122,6 +122,24 @@ const adminApi = {
       if (!res.error) invalidateDbSelectCache()
       return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
     },
+    async academicRolloverExceptions(params = {}) {
+      const res = await apiFetch(`/api/admin/academic-rollover-exceptions${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 0,
+        timeoutMs: 12000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async replaceAcademicRolloverExceptions(payload = {}) {
+      const res = await apiFetch('/api/admin/academic-rollover-exceptions', {
+        method: 'PUT',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 15000
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async studentOptions(params = {}) {
       const cacheKey = JSON.stringify(params || {})
       const res = await apiFetch(`/api/admin/student-options${buildQueryString(params)}`, {
@@ -184,6 +202,32 @@ const adminApi = {
       if (Number(cursor) > 0) params.set('cursor', String(Math.trunc(Number(cursor))))
       const query = params.toString() ? `?${params.toString()}` : ''
       return buildApiUrl(`/api/admin/rfid-events/stream${query}`)
+    },
+    async rfidEventsStreamStatus(cursor = 0) {
+      try {
+        const res = await fetch(this.rfidEventsStreamUrl(cursor), {
+          method: 'HEAD',
+          credentials: 'include',
+          cache: 'no-store',
+          headers: {
+            Accept: 'text/event-stream'
+          }
+        })
+        const contentType = String(res.headers.get('content-type') || '').toLowerCase()
+        return {
+          data: {
+            ready: res.ok && contentType.includes('text/event-stream'),
+            status: res.status,
+            content_type: contentType
+          },
+          error: null
+        }
+      } catch (error) {
+        return {
+          data: { ready: false, status: 0, content_type: '' },
+          error
+        }
+      }
     },
     async featurePermissions() {
       const res = await apiFetch('/api/admin/feature-permissions', {

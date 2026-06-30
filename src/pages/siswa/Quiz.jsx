@@ -742,7 +742,7 @@ export default function SiswaQuiz() {
   }, [questions])
 
   useEffect(() => {
-    Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
+    Object.values(essaySaveTimersRef.current || {}).forEach((timerId) => clearTimeout(timerId))
     essaySaveTimersRef.current = {}
     essayDraftMetaRef.current = {}
     pendingAnswersRef.current = {}
@@ -784,7 +784,7 @@ export default function SiswaQuiz() {
     return () => {
       if (quizReloadTimerRef.current) clearTimeout(quizReloadTimerRef.current)
       if (quizDetailReloadTimerRef.current) clearTimeout(quizDetailReloadTimerRef.current)
-      Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
+      Object.values(essaySaveTimersRef.current || {}).forEach((timerId) => clearTimeout(timerId))
       essaySaveTimersRef.current = {}
       essayDraftMetaRef.current = {}
       pendingAnswersRef.current = {}
@@ -1742,7 +1742,7 @@ export default function SiswaQuiz() {
 
   const flushPendingAnswers = async (options = {}) => {
     if (batchFlushInFlightRef.current) return false
-    const pendingRows = Object.values(pendingAnswersRef.current)
+    const pendingRows = Object.values(pendingAnswersRef.current || {})
     if (!pendingRows.length) return true
 
     const quizId = String(pendingRows[0]?.quiz_id || '')
@@ -1988,7 +1988,7 @@ export default function SiswaQuiz() {
       autoSubmitLockRef.current = true
       setIsSubmitting(true)
       setSubmitConfirmOpen(false)
-      Object.values(essaySaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
+      Object.values(essaySaveTimersRef.current || {}).forEach((timerId) => clearTimeout(timerId))
       essaySaveTimersRef.current = {}
       await flushPendingAnswers({ silent: true })
       const { data, error } = await supabase.quiz.submit({

@@ -82,7 +82,7 @@ export function useStudentClassActions({
 
       if (error) throw error
 
-      const strukturLama = Object.values(strukturKelas).find(
+      const strukturLama = Object.values(strukturKelas || {}).find(
         (struktur) => struktur.ketua_siswa_id === user.id
       )
 

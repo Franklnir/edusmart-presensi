@@ -9,7 +9,7 @@ const cleanAcceptString = (accept) => {
   // kita ekstrak ekstensinya untuk ditampilkan sebagai teks
   // Contoh: { 'image/*': ['.png', '.jpg'] } menjadi ".png, .jpg"
   if (typeof accept === 'object' && !Array.isArray(accept)) {
-    return Object.values(accept).flat().join(', ');
+    return Object.values(accept || {}).flat().join(', ');
   }
   
   // FIX: Pastikan accept adalah string sebelum melakukan .split

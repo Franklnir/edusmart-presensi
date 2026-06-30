@@ -190,7 +190,7 @@ export default function GuruQuiz() {
   const [imageSizeLoadingByPath, setImageSizeLoadingByPath] = useState({})
   const imageSizeByPathRef = useRef({})
   const imageSizeLoadingRef = useRef(new Set())
-  const questionMediaUploading = questionImageUploading || Object.values(optionImageUploading).some(Boolean)
+  const questionMediaUploading = questionImageUploading || Object.values(optionImageUploading || {}).some(Boolean)
 
   const orderedQuizList = useMemo(() => (
     sortQuizzesByPriority(quizList, nowTick)
@@ -695,7 +695,7 @@ export default function GuruQuiz() {
       }
     })
 
-    Object.values(map).forEach((summary) => {
+    Object.values(map || {}).forEach((summary) => {
       summary.count = Math.max(summary.maxWarningCount || 0, summary.incidentKeys?.size || 0)
       delete summary.maxWarningCount
       delete summary.incidentKeys
@@ -1061,7 +1061,7 @@ export default function GuruQuiz() {
                 }
               }
             })
-            Object.values(presenceMap).forEach((presence) => {
+            Object.values(presenceMap || {}).forEach((presence) => {
               delete presence.active_device_ids
             })
           }

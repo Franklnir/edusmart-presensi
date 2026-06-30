@@ -405,13 +405,13 @@ export default function ASiswa() {
 
   // Cek ketua kelas
   const isKetuaKelas = (siswaId) => {
-    return Object.values(strukturKelas).some(
+    return Object.values(strukturKelas || {}).some(
       struktur => struktur.ketua_siswa_id === siswaId
     )
   }
 
   const getKelasKetua = (siswaId) => {
-    const struktur = Object.values(strukturKelas).find(
+    const struktur = Object.values(strukturKelas || {}).find(
       s => s.ketua_siswa_id === siswaId
     )
     return struktur ? getNamaKelas(struktur.kelas_id) : null

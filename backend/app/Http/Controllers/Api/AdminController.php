@@ -128,9 +128,145 @@ class AdminController extends ApiController
         ]);
     }
 
-    public function rfidEventsStream(Request $request)
+    public function academicRolloverExceptions(Request $request)
     {
         if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        [$sourceYear, $targetYear] = $this->resolveRolloverExceptionYears($request->all());
+        if (! $sourceYear || ! $targetYear) {
+            return $this->deny('Periode sumber dan target wajib diisi.', 422);
+        }
+
+        if (! Schema::hasTable('academic_rollover_exceptions')) {
+            return $this->ok([
+                'rows' => [],
+                'schema_ready' => false,
+                'source_tahun_ajaran' => $sourceYear,
+                'target_tahun_ajaran' => $targetYear,
+            ]);
+        }
+
+        $columns = $this->existingColumns('academic_rollover_exceptions', [
+            'student_id', 'reason', 'created_at', 'updated_at',
+        ]);
+
+        $rows = $this->tenantQuery('academic_rollover_exceptions', $tenantId)
+            ->select($columns ?: ['student_id', 'reason'])
+            ->where('source_tahun_ajaran', $sourceYear)
+            ->where('target_tahun_ajaran', $targetYear)
+            ->when(Schema::hasColumn('academic_rollover_exceptions', 'resolved_at'), fn ($query) => $query->whereNull('resolved_at'))
+            ->when(Schema::hasColumn('academic_rollover_exceptions', 'created_at'), fn ($query) => $query->orderBy('created_at'))
+            ->get()
+            ->map(fn ($row) => [
+                'student_id' => (string) ($row->student_id ?? ''),
+                'reason' => (string) ($row->reason ?? ''),
+                'created_at' => $row->created_at ?? null,
+                'updated_at' => $row->updated_at ?? null,
+            ])
+            ->values()
+            ->all();
+
+        return $this->ok([
+            'rows' => $rows,
+            'schema_ready' => true,
+            'source_tahun_ajaran' => $sourceYear,
+            'target_tahun_ajaran' => $targetYear,
+        ]);
+    }
+
+    public function replaceAcademicRolloverExceptions(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        if (! Schema::hasTable('academic_rollover_exceptions')) {
+            return $this->deny('Tabel pengecualian rollover belum tersedia. Jalankan migration terbaru di VPS.', 422);
+        }
+
+        [$sourceYear, $targetYear] = $this->resolveRolloverExceptionYears($request->all());
+        if (! $sourceYear || ! $targetYear) {
+            return $this->deny('Periode sumber dan target wajib diisi.', 422);
+        }
+
+        if ($sourceYear === $targetYear) {
+            return $this->deny('Periode target rollover harus berbeda dari periode sumber.', 422);
+        }
+
+        $studentIds = collect($request->input('student_ids', []))
+            ->map(fn ($studentId) => trim((string) $studentId))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $reason = trim((string) $request->input('reason', 'Tidak naik kelas')) ?: 'Tidak naik kelas';
+        $userId = (string) ($request->user()?->id ?? '');
+
+        $validationError = $this->validateRolloverExceptionStudents($tenantId, $studentIds);
+        if ($validationError) {
+            return $this->deny($validationError, 422);
+        }
+
+        DB::transaction(function () use ($tenantId, $sourceYear, $targetYear, $studentIds, $reason, $userId) {
+            $deleteQuery = $this->tenantQuery('academic_rollover_exceptions', $tenantId)
+                ->where('source_tahun_ajaran', $sourceYear)
+                ->where('target_tahun_ajaran', $targetYear);
+
+            if (Schema::hasColumn('academic_rollover_exceptions', 'resolved_at')) {
+                $deleteQuery->whereNull('resolved_at');
+            }
+
+            $deleteQuery->delete();
+
+            if ($studentIds === []) {
+                return;
+            }
+
+            $now = now();
+            $rows = array_map(function (string $studentId) use ($tenantId, $sourceYear, $targetYear, $reason, $userId, $now) {
+                return $this->filterExistingPayload('academic_rollover_exceptions', [
+                    'id' => (string) Str::uuid(),
+                    'tenant_id' => $tenantId,
+                    'student_id' => $studentId,
+                    'source_tahun_ajaran' => $sourceYear,
+                    'target_tahun_ajaran' => $targetYear,
+                    'reason' => $reason,
+                    'created_by' => $userId ?: null,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            }, $studentIds);
+
+            DB::table('academic_rollover_exceptions')->insert(array_values(array_filter($rows)));
+        });
+
+        return $this->ok([
+            'saved_count' => count($studentIds),
+            'rows' => array_map(fn ($studentId) => [
+                'student_id' => $studentId,
+                'reason' => $reason,
+            ], $studentIds),
+            'source_tahun_ajaran' => $sourceYear,
+            'target_tahun_ajaran' => $targetYear,
+        ]);
+    }
+
+    public function rfidEventsStream(Request $request)
+    {
+        if (! $this->isAdmin($request) && ! $this->hasDelegatedAdminFeatureAccess($request, 'scan-kehadiran')) {
             return $this->deny();
         }
 
@@ -3742,6 +3878,52 @@ class AdminController extends ApiController
             ->mapWithKeys(fn ($studentId) => [trim((string) $studentId) => true])
             ->filter(fn ($selected, $studentId) => $studentId !== '')
             ->all();
+    }
+
+    private function resolveRolloverExceptionYears(array $payload): array
+    {
+        $sourceYear = AcademicPeriod::normalizeAcademicYear($payload['source_tahun_ajaran'] ?? null)
+            ?: trim((string) ($payload['source_tahun_ajaran'] ?? ''));
+        $targetYear = AcademicPeriod::normalizeAcademicYear($payload['target_tahun_ajaran'] ?? null)
+            ?: trim((string) ($payload['target_tahun_ajaran'] ?? ''));
+
+        return [$sourceYear ?: null, $targetYear ?: null];
+    }
+
+    private function validateRolloverExceptionStudents(string $tenantId, array $studentIds): ?string
+    {
+        if ($studentIds === []) {
+            return null;
+        }
+
+        if (! Schema::hasTable('profiles')) {
+            return 'Data siswa belum siap.';
+        }
+
+        $query = DB::table('profiles')
+            ->whereIn('id', $studentIds);
+
+        if (Schema::hasColumn('profiles', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        if (Schema::hasColumn('profiles', 'role')) {
+            $query->whereIn('role', ['siswa', 'student']);
+        }
+
+        if (Schema::hasColumn('profiles', 'status')) {
+            $query->where('status', 'active');
+        }
+
+        $validCount = $query
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->unique()
+            ->count();
+
+        return $validCount === count($studentIds)
+            ? null
+            : 'Siswa pengecualian harus siswa aktif di sekolah ini.';
     }
 
     private function markRolloverExceptionsResolved(string $tenantId, string $sourceYear, string $targetYear): void

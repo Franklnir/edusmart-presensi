@@ -55,18 +55,6 @@ import {
 } from '../../features/classes/utils/classUtils'
 import SchedulePreviewTable from '../../features/classes/components/SchedulePreviewTable'
 
-const createClientUuid = () => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
-    const random = Math.floor(Math.random() * 16)
-    const value = char === 'x' ? random : (random & 0x3) | 0x8
-    return value.toString(16)
-  })
-}
-
 /* ===== Password Modal Component (Akses Halaman) ===== */
 function PasswordModal({ isOpen, onClose, onConfirm, title = "Konfirmasi Password", loading = false }) {
   const [password, setPassword] = useState('')
@@ -1298,16 +1286,14 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
   async function loadPromotionExceptions() {
     try {
-      const { data, error } = await supabase
-        .from('academic_rollover_exceptions')
-        .select('student_id,reason')
-        .eq('source_tahun_ajaran', academicPeriod.tahunAjaran)
-        .eq('target_tahun_ajaran', nextAcademicPeriod.tahunAjaran)
-        .is('resolved_at', null)
+      const { data, error } = await supabase.admin.academicRolloverExceptions({
+        source_tahun_ajaran: academicPeriod.tahunAjaran,
+        target_tahun_ajaran: nextAcademicPeriod.tahunAjaran
+      })
 
       if (error) throw error
 
-      const rows = data || []
+      const rows = Array.isArray(data?.rows) ? data.rows : []
       setPromotionSelectedIds(rows.map((row) => row.student_id).filter(Boolean))
       const reason = rows.find((row) => String(row.reason || '').trim())?.reason
       setPromotionRetainReason(reason || 'Tidak naik kelas')
@@ -1381,34 +1367,14 @@ export default function AKelas({ initialTab = 'kelas' }) {
       if (!window.confirm(lines.join('\n'))) return
 
       setPromotionLoading(true)
-      const now = new Date().toISOString()
-
-      const deleteQuery = supabase
-        .from('academic_rollover_exceptions')
-        .delete()
-        .eq('source_tahun_ajaran', academicPeriod.tahunAjaran)
-        .eq('target_tahun_ajaran', nextAcademicPeriod.tahunAjaran)
-        .is('resolved_at', null)
-      const { error: deleteError } = await deleteQuery
-      if (deleteError) throw deleteError
-
-      if (selectedIds.length) {
-        const reason = String(promotionRetainReason || '').trim() || 'Tidak naik kelas'
-        const rows = selectedIds.map((studentId) => ({
-          id: createClientUuid(),
-          student_id: studentId,
-          source_tahun_ajaran: academicPeriod.tahunAjaran,
-          target_tahun_ajaran: nextAcademicPeriod.tahunAjaran,
-          reason,
-          created_at: now,
-          updated_at: now
-        }))
-
-        const { error: insertError } = await supabase
-          .from('academic_rollover_exceptions')
-          .insert(rows)
-        if (insertError) throw insertError
-      }
+      const reason = String(promotionRetainReason || '').trim() || 'Tidak naik kelas'
+      const { error } = await supabase.admin.replaceAcademicRolloverExceptions({
+        source_tahun_ajaran: academicPeriod.tahunAjaran,
+        target_tahun_ajaran: nextAcademicPeriod.tahunAjaran,
+        student_ids: selectedIds,
+        reason
+      })
+      if (error) throw error
 
       invalidateAcademicQueries()
       pushToast(

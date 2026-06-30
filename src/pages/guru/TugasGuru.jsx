@@ -970,12 +970,11 @@ export default function TugasGuru() {
           : siswaKelas.length
 
         const jawabanIni = jawabanArr.filter((j) => j.tugas_id === tugas.id)
-        const uniqueByUser = Object.values(
-          jawabanIni.reduce((acc, j) => {
-            acc[j.user_id] = j
-            return acc
-          }, {})
-        )
+        const jawabanByUser = jawabanIni.reduce((acc, j) => {
+          acc[j.user_id] = j
+          return acc
+        }, {})
+        const uniqueByUser = Object.values(jawabanByUser || {})
 
         const sudahDinilai = uniqueByUser.filter((j) => j.nilai != null).length
         const belumDinilai = uniqueByUser.filter((j) => j.nilai == null).length

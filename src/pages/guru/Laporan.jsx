@@ -770,7 +770,7 @@ export default function LaporanRekap() {
 
   // Hitung Rata-rata & Grade
   const hitungRataRataDanGrade = (nilaiTugas) => {
-    const values = Object.values(nilaiTugas)
+    const values = Object.values(nilaiTugas || {})
       .map((it) => it.nilai)
       .filter(
         (v) =>

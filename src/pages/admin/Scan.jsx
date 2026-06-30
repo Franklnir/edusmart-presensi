@@ -719,14 +719,41 @@ export default function Scan() {
     let closed = false
     let source = null
     let reconnectTimer = null
+    let fallbackTimer = null
+    let reconnectAttempts = 0
 
-    const connect = () => {
+    const startFallbackPolling = () => {
+      if (closed || fallbackTimer) return
+      setRfidStreamStatus('fallback')
+      refreshScanSummarySoon()
+      loadRfidDevices({ silent: true })
+      fallbackTimer = window.setInterval(() => {
+        refreshScanSummarySoon()
+        loadRfidDevices({ silent: true })
+      }, 2500)
+    }
+
+    const connect = async () => {
       if (closed) return
       setRfidStreamStatus((current) => current === 'connected' ? current : 'connecting')
-      source = new window.EventSource(
-        supabase.admin.rfidEventsStreamUrl(rfidStreamCursorRef.current),
-        { withCredentials: true }
-      )
+
+      const streamStatus = await supabase.admin.rfidEventsStreamStatus(rfidStreamCursorRef.current)
+      if (closed) return
+      if (!streamStatus.data?.ready) {
+        startFallbackPolling()
+        return
+      }
+
+      try {
+        source = new window.EventSource(
+          supabase.admin.rfidEventsStreamUrl(rfidStreamCursorRef.current),
+          { withCredentials: true }
+        )
+      } catch (error) {
+        console.warn('RFID event stream fallback:', error)
+        startFallbackPolling()
+        return
+      }
 
       source.addEventListener('ready', (event) => {
         try {
@@ -735,6 +762,7 @@ export default function Scan() {
             rfidStreamCursorRef.current = Number(data.cursor)
           }
         } catch { }
+        reconnectAttempts = 0
         setRfidStreamStatus('connected')
       })
 
@@ -745,6 +773,7 @@ export default function Scan() {
           if (cursor > 0) {
             rfidStreamCursorRef.current = Math.max(rfidStreamCursorRef.current, cursor)
           }
+          reconnectAttempts = 0
           setRfidStreamStatus('connected')
           handleRfidStreamEvent(data)
         } catch (error) {
@@ -760,7 +789,12 @@ export default function Scan() {
         if (closed) return
         setRfidStreamStatus('reconnecting')
         source?.close()
-        reconnectTimer = window.setTimeout(connect, 1500)
+        reconnectAttempts += 1
+        if (reconnectAttempts >= 3) {
+          startFallbackPolling()
+          return
+        }
+        reconnectTimer = window.setTimeout(connect, Math.min(1500 * reconnectAttempts, 5000))
       }
     }
 
@@ -769,13 +803,14 @@ export default function Scan() {
     return () => {
       closed = true
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      if (fallbackTimer) window.clearInterval(fallbackTimer)
       source?.close()
       if (rfidStreamRefreshTimerRef.current) {
         window.clearTimeout(rfidStreamRefreshTimerRef.current)
         rfidStreamRefreshTimerRef.current = null
       }
     }
-  }, [handleRfidStreamEvent])
+  }, [handleRfidStreamEvent, loadRfidDevices, refreshScanSummarySoon])
 
   /* ========= LOGIC SCANNING MANUAL ========= */
 
@@ -1527,14 +1562,19 @@ export default function Scan() {
         {/* Header */}
         <div className="page-title-card">
           <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-            <div>
-              <h1 className="page-title-heading">
-                Scan & Absensi RFID
-              </h1>
-              <p className="page-title-description">
-                Kelola kehadiran siswa melalui scan kartu RFID dan
-                pantau riwayat kehadiran
-              </p>
+            <div className="flex items-center space-x-4">
+              <div className="p-3 rounded-2xl bg-blue-100 text-blue-600">
+                <ScanLine className="h-6 w-6" />
+              </div>
+              <div>
+                <h1 className="page-title-heading">
+                  Scan & Absensi RFID
+                </h1>
+                <p className="page-title-description">
+                  Kelola kehadiran siswa melalui scan kartu RFID dan
+                  pantau riwayat kehadiran
+                </p>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
