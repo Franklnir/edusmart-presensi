@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Mail\SertifikatMail;
 use App\Jobs\RefreshAdminPageCacheJob;
+use App\Mail\SertifikatMail;
 use App\Models\Profile;
 use App\Models\User;
 use App\Services\Admin\AdminPageCacheService;
