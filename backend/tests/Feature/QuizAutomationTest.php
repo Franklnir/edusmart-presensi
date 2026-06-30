@@ -440,6 +440,8 @@ class QuizAutomationTest extends TestCase
 
     public function test_guru_can_update_deadline_but_not_content_while_submission_ongoing(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-02-10 10:00:00'));
+
         $tenantId = $this->defaultTenantId();
         [$siswa] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
         [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
