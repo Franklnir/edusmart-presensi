@@ -132,6 +132,7 @@ return new class extends Migration
 
             if (! Schema::hasColumn($tableName, 'tenant_id')) {
                 $this->backfillTableWithPeriod($tableName, $fallback['tahun_ajaran'], $fallback['semester']);
+
                 continue;
             }
 
