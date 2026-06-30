@@ -34,3 +34,12 @@ Saya telah merakit *script* Migrasi PostgreSQL berskala raksasa di `backend/data
 6. Memperbaiki Indeks Pencarian agar kembali normal.
 
 Dengan ini, tugas optimasi di sisi Backend telah sepenuhnya disiapkan!
+
+## 4. Optimasi Eksekusi & Antrean WhatsApp Gateway
+> [!NOTE]
+> **Status:** Selesai Diperbarui & Diimplementasikan
+
+Beberapa penyesuaian logika bisnis untuk pengiriman pesan WhatsApp (terutama peringatan Alpha harian) telah ditetapkan agar sinkron dengan jam pulang sekolah yang sebenarnya:
+1. **Waktu Filter Mapel (06:30 - 17:30)**: Sistem kini hanya akan mendeteksi status Alpha pada jam-jam rasional tersebut (tidak menghitung mapel malam hari atau di atas jam pulang).
+2. **Kunci Jam Eksekusi (17:55 WIB)**: Pengiriman massal notifikasi harian akan terpusat secara rapi pada jam 17:55 untuk memastikan rekap absen hari tersebut sudah tersimpan seutuhnya.
+3. **Optimasi Kecepatan Antrean**: Interval antar pesan antar nomor pusat (*global rate-limit*) dikurangi dari 10 detik menjadi **6 detik**, memangkas waktu tunggu penyelesaian Broadcast WhatsApp secara drastis dengan tetap menghindari pemblokiran *WhatsApp Gateway* (Baileys/Evolution API).

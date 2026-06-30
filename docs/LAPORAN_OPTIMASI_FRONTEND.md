@@ -26,6 +26,13 @@ Selain tampilan, peladen (VPS) dan pangkalan data (Database) juga telah diperkua
 
 ---
 
+## 3. Standardisasi Desain Sistem (CSS)
+Untuk memelihara nilai-nilai estetika yang berkelas (*Enterprise-Grade UI*), antarmuka admin telah melalui perombakan gaya:
+- ✅ **Standardisasi Komponen `.page-title-card`**: Seluruh area judul halaman di panel *Admin Sekolah*, Guru, maupun menu pendukung lain kini disamaratakan. Resolusi *min-height* ditetapkan kuat secara absolut menjadi `104px` demi menjaga keseimbangan dengan jarak pandang ikon, sehingga komponen kartu pada menu yang tidak memiliki sub-judul deskripsi akan tetap berdiri tegap (tidak mengempis secara acak).
+- ✅ **Uniformitas Ornamen**: Logika penyeleksi CSS yang tidak konsisten sebelumnya (`:not(:has(...))`) dihilangkan seluruhnya, mengembalikan identitas garis hias biru dengan bayangan (*gradient shadow*) beserta letak *padding-left* standar `2.75rem` ke seluruh sudut aplikasi.
+
+---
+
 ## Status Sistem Saat Ini
 Sistem Anda saat ini secara teknis **sudah masuk kategori Enterprise-Grade** untuk sisi penanganan antarmuka penggunanya. Jika suatu saat sekolah ini memiliki 50.000 siswa sekalipun, laptop dengan RAM 2GB tetap bisa membuka menu-menu di atas dengan sangat mulus.
 
