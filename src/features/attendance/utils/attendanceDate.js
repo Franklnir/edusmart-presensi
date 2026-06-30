@@ -1,4 +1,6 @@
 import {
+  ACADEMIC_YEAR_OPTIONS_BACK,
+  ACADEMIC_YEAR_OPTIONS_FORWARD,
   SEMESTER_GANJIL,
   SEMESTER_GENAP,
   normalizeAcademicYear,
@@ -52,8 +54,8 @@ export const getCurrentDateTime = () => {
 
 export const getAcademicYearOptions = (period = resolveAcademicPeriod()) => {
   const start = Number(period.startYear || String(period.tahunAjaran || '').slice(0, 4)) || resolveAcademicPeriod().startYear
-  return Array.from({ length: 5 }, (_, index) => {
-    const year = start - 2 + index
+  return Array.from({ length: ACADEMIC_YEAR_OPTIONS_BACK + ACADEMIC_YEAR_OPTIONS_FORWARD + 1 }, (_, index) => {
+    const year = start - ACADEMIC_YEAR_OPTIONS_BACK + index
     return `${year}/${year + 1}`
   })
 }

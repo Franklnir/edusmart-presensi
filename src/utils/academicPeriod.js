@@ -344,6 +344,9 @@ export const inferCohortYear = (grade, academicStartYear = getCurrentAcademicPer
   return String(academicStartYear + (offsetByGrade[normalized] || 0))
 }
 
+export const ACADEMIC_YEAR_OPTIONS_BACK = 5
+export const ACADEMIC_YEAR_OPTIONS_FORWARD = 15
+
 /**
  * Generate academic year dropdown options based on real-time calendar year.
  * Returns options from (currentYear - back) to (currentYear + forward) in format "YYYY/YYYY".
@@ -351,11 +354,15 @@ export const inferCohortYear = (grade, academicStartYear = getCurrentAcademicPer
  *
  * @param {object} options
  * @param {number} [options.back=5] - How many years back from current
- * @param {number} [options.forward=2] - How many years forward from current
+ * @param {number} [options.forward=15] - How many years forward from current
  * @param {Date} [options.date] - Reference date (default: now)
  * @returns {{ value: string, label: string, isCurrent: boolean }[]}
  */
-export const generateAcademicYearOptions = ({ back = 5, forward = 2, date } = {}) => {
+export const generateAcademicYearOptions = ({
+  back = ACADEMIC_YEAR_OPTIONS_BACK,
+  forward = ACADEMIC_YEAR_OPTIONS_FORWARD,
+  date
+} = {}) => {
   const now = date || new Date()
   const month = now.getMonth() + 1
   const calendarYear = now.getFullYear()

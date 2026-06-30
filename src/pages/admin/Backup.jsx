@@ -500,7 +500,7 @@ export default function BackupAdmin() {
   const { isSuperAdmin, superAdminChecked } = useAuthStore()
   const { pushToast } = useUIStore()
   const activePeriod = useMemo(() => resolveAcademicPeriod(), [])
-  const academicYearOptions = useMemo(() => generateAcademicYearOptions({ back: 6, forward: 2 }), [])
+  const academicYearOptions = useMemo(() => generateAcademicYearOptions({ back: 6 }), [])
 
   const [superTenants, setSuperTenants] = useState([])
   const [selectedTenantId, setSelectedTenantId] = useState('')

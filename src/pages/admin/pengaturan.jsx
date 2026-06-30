@@ -1707,7 +1707,7 @@ export default function APengaturan() {
   const academicYearMonths = activeAcademicPeriod.academicYearMonths?.length
     ? activeAcademicPeriod.academicYearMonths
     : academicMonths
-  const periodYearOptions = generateAcademicYearOptions({ back: 5, forward: 2 })
+  const periodYearOptions = generateAcademicYearOptions()
   const semesterPeriodCards = [
     {
       key: SEMESTER_GANJIL,
@@ -1739,7 +1739,7 @@ export default function APengaturan() {
     : driveStatus?.status === 'needs_attention'
       ? 'bg-amber-100 text-amber-700'
       : 'bg-slate-200 text-slate-700'
-  const driveYearOptions = generateAcademicYearOptions({ back: 5, forward: 2 })
+  const driveYearOptions = generateAcademicYearOptions()
   const driveClassUsageRows = Array.isArray(driveStatus?.usage_by_class) ? driveStatus.usage_by_class : []
   const driveSemesterUsageRows = Array.isArray(driveStatus?.usage_by_semester) ? driveStatus.usage_by_semester : []
   const driveFilteredStorage = driveStatus?.app_storage || DRIVE_STATUS_DEFAULT.app_storage

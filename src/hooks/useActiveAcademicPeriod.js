@@ -206,10 +206,7 @@ export default function useActiveAcademicPeriod({
     }
   }, [resolvedPeriod])
 
-  const academicYearOptions = useMemo(
-    () => generateAcademicYearOptions({ back: 5, forward: 2 }),
-    []
-  )
+  const academicYearOptions = useMemo(() => generateAcademicYearOptions(), [])
 
   const setAcademicYear = useCallback((tahunAjaran) => {
     const normalized = normalizeAcademicYear(tahunAjaran)
