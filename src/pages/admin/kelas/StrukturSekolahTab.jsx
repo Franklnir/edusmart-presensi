@@ -288,9 +288,9 @@ export default function StrukturSekolahTab({
       }
 
       const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.admin.academicSummary(params),
+        queryKey: queryKeys.admin.structureBootstrap(params),
         queryFn: async () => {
-          const { data: summaryData, error } = await supabase.admin.academicSummary(params)
+          const { data: summaryData, error } = await supabase.admin.strukturBootstrap(params)
           if (error) throw error
           return summaryData || {}
         },

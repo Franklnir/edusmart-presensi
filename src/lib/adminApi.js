@@ -50,6 +50,54 @@ const adminApi = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async homeBootstrap(params = {}) {
+      const cacheKey = JSON.stringify(params || {})
+      const res = await apiFetch(`/api/admin/home-bootstrap${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 60 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 15 * 60 * 1000,
+        staleKey: `admin.home-bootstrap.${cacheKey}`,
+        timeoutMs: 10000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async teacherOptions(params = {}) {
+      const cacheKey = JSON.stringify(params || {})
+      const res = await apiFetch(`/api/admin/teacher-options${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 5 * 60 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 30 * 60 * 1000,
+        staleKey: `admin.teacher-options.${cacheKey}`,
+        timeoutMs: 10000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async organisasiBootstrap(params = {}) {
+      const cacheKey = JSON.stringify(params || {})
+      const res = await apiFetch(`/api/admin/organisasi-bootstrap${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 60 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 15 * 60 * 1000,
+        staleKey: `admin.organisasi-bootstrap.${cacheKey}`,
+        timeoutMs: 10000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async strukturBootstrap(params = {}) {
+      const cacheKey = JSON.stringify(params || {})
+      const res = await apiFetch(`/api/admin/struktur-bootstrap${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 60 * 1000,
+        persistCache: true,
+        staleCacheTtlMs: 15 * 60 * 1000,
+        staleKey: `admin.struktur-bootstrap.${cacheKey}`,
+        timeoutMs: 10000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async students(params = {}) {
       const res = await apiFetch(`/api/admin/students${buildQueryString(params)}`, {
         method: 'GET',

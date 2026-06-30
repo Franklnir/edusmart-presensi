@@ -275,55 +275,33 @@ export default function AHome() {
     setIsLoading(shouldBlock)
     setIsDashboardRefreshing(!shouldBlock)
     try {
-      const periodPromise = loadCurrentAcademicPeriod()
-      const batchPromise = supabase.batch([
-        {
-          key: 'people',
-          query: supabase
-            .from('profiles')
-            .select('id, nama, email, kelas, role, status, angkatan')
-            .in('role', ['admin', 'guru', 'teacher'])
-            .order('role')
-            .order('nama')
-        },
-        {
-          key: 'pengumuman',
-          query: supabase
-            .from('pengumuman')
-            .select('id,judul,keterangan,target,created_at,updated_at')
-            .order('created_at', { ascending: false })
-        }
-      ])
-      const period = await periodPromise
+      const period = activeSchoolPeriod?.tahunAjaran
+        ? activeSchoolPeriod
+        : await loadCurrentAcademicPeriod()
       const summaryParams = period?.tahunAjaran ? { tahun_ajaran: period.tahunAjaran } : {}
-      const [summaryRes, batchRes] = await Promise.all([
-        queryClient.fetchQuery({
-          queryKey: queryKeys.admin.dashboardSummary(summaryParams),
-          queryFn: async () => {
-            const { data, error } = await supabase.admin.dashboardSummary(summaryParams)
-            if (error) throw error
-            return data || {}
-          },
-          staleTime: silent ? 60 * 1000 : 15 * 1000
-        }).then((data) => ({ data })),
-        batchPromise
-      ])
+      const bootstrap = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.homeBootstrap(summaryParams),
+        queryFn: async () => {
+          const { data, error } = await supabase.admin.homeBootstrap(summaryParams)
+          if (error) throw error
+          return data || {}
+        },
+        staleTime: silent ? 60 * 1000 : 15 * 1000
+      })
 
-      const { data, error, errors } = batchRes
-      if (summaryRes.error) {
-        throw new Error(summaryRes.error.message || 'Ringkasan dashboard gagal dimuat')
+      if (bootstrap?.settings) {
+        setSettingsId(bootstrap.settings?.id || null)
+        setMaxEskulPerSiswa(normalizeEskulLimit(bootstrap.settings?.max_ekskul_per_siswa))
       }
-      if (error && !data) {
-        throw new Error(error.message || 'Data dashboard gagal dimuat')
-      }
-      if (errors && Object.keys(errors).length > 0) {
-        console.warn('Sebagian data dashboard gagal dimuat:', errors)
+      if (bootstrap?.academic_period?.tahun_ajaran) {
+        setActiveEskulPeriod(resolveAcademicPeriod(bootstrap.academic_period))
       }
 
-      const people = data?.people?.data || []
+      const people = bootstrap?.people || []
       const guruRows = people.filter((item) => item.role === 'guru' || item.role === 'teacher')
       const adminRows = people.filter((item) => item.role === 'admin')
-      const summary = summaryRes.data || {}
+      const summary = bootstrap?.summary || bootstrap || {}
+      const pengumumanRows = bootstrap?.pengumuman || []
 
       setStats({
         siswa: summary.siswa || 0,
@@ -331,7 +309,7 @@ export default function AHome() {
         admin: summary.admin || adminRows.length,
         kelas: summary.kelas || 0,
         absensi: summary.absensi || 0,
-        pengumuman: summary.pengumuman || (data?.pengumuman?.data || []).length,
+        pengumuman: summary.pengumuman || pengumumanRows.length,
         eskul: summary.eskul || 0
       })
 
@@ -342,7 +320,7 @@ export default function AHome() {
         }))
       )
 
-      setPengumumanList(data?.pengumuman?.data || [])
+      setPengumumanList(pengumumanRows)
 
     } catch (error) {
       pushToast('error', error?.message ? `Gagal memuat data awal: ${error.message}` : 'Gagal memuat data awal')
@@ -350,7 +328,7 @@ export default function AHome() {
       setIsLoading(false)
       setIsDashboardRefreshing(false)
     }
-  }, [hasStatsCache, loadCurrentAcademicPeriod, pushToast])
+  }, [activeSchoolPeriod, hasStatsCache, loadCurrentAcademicPeriod, pushToast])
 
   useEffect(() => {
     if (hasLoadedInitialDataRef.current) return

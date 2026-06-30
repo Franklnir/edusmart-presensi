@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Mail\SertifikatMail;
+use App\Jobs\RefreshAdminPageCacheJob;
 use App\Models\Profile;
 use App\Models\User;
+use App\Services\Admin\AdminPageCacheService;
 use App\Services\Rfid\RfidDeviceService;
 use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
@@ -119,6 +121,16 @@ class AdminController extends ApiController
             $summary['organisasi'] = $organizationSummary['organisasi'];
             $summary['organisasi_anggota'] = $organizationSummary['organisasi_anggota'];
         }
+
+        $this->refreshAdminPageCache(
+            $tenantId,
+            [
+                AdminPageCacheService::SCOPE_HOME,
+                AdminPageCacheService::SCOPE_STRUCTURE,
+                AdminPageCacheService::SCOPE_ORGANIZATIONS,
+            ],
+            [$sourceYear, $targetYear]
+        );
 
         return $this->ok([
             'source_tahun_ajaran' => $sourceYear,
@@ -968,6 +980,8 @@ class AdminController extends ApiController
 
         $this->logAudit($request, 'profiles', $userId, $isUpdate ? 'UPDATE' : 'INSERT', $oldData, $newData, $tenantId);
 
+        $this->refreshAdminPageCache($tenantId);
+
         return response()->json([
             'data' => [
                 'user' => $user,
@@ -1078,7 +1092,7 @@ class AdminController extends ApiController
         ]);
     }
 
-    public function dashboardSummary(Request $request)
+    public function dashboardSummary(Request $request, AdminPageCacheService $pageCache)
     {
         set_time_limit(120);
         if (! $this->isAdmin($request)) {
@@ -1090,41 +1104,83 @@ class AdminController extends ApiController
             return $this->deny('Tenant tidak valid', 400);
         }
 
-        $settings = $this->firstTenantRow('settings', $tenantId);
-        $requestedAcademicYear = AcademicPeriod::normalizeAcademicYear($this->queryText($request, 'tahun_ajaran'));
-        $tahunAjaran = $requestedAcademicYear ?: (AcademicPeriod::normalizeAcademicYear($settings?->tahun_ajaran ?? null) ?: '');
-
-        $cacheKey = $this->dashboardSummaryCacheKey($tenantId, $tahunAjaran);
-        $payload = Cache::remember($cacheKey, now()->addSeconds(60), function () use ($tenantId, $settings, $tahunAjaran) {
-            $profileCounts = DB::table('profiles')
-                ->select('role', DB::raw('count(*) as aggregate'))
-                ->where('tenant_id', $tenantId)
-                ->whereIn('role', ['guru', 'admin'])
-                ->groupBy('role')
-                ->pluck('aggregate', 'role');
-
-            $periodStart = $settings?->periode_mulai ?? null;
-            $periodEnd = $settings?->periode_selesai ?? null;
-
-            $attendanceQuery = $this->tenantQuery('absensi', $tenantId);
-            if ($periodStart && $periodEnd && Schema::hasColumn('absensi', 'tanggal')) {
-                $attendanceQuery->whereBetween('tanggal', [$periodStart, $periodEnd]);
-            }
-
-            return [
-                'siswa' => $this->studentCountForAcademicYear($tenantId, $tahunAjaran),
-                'guru' => (int) ($profileCounts['guru'] ?? 0),
-                'admin' => (int) ($profileCounts['admin'] ?? 0),
-                'kelas' => $this->classesForAcademicYear($tenantId, $tahunAjaran)->count(),
-                'absensi' => Schema::hasTable('absensi') ? (int) $attendanceQuery->count() : 0,
-                'pengumuman' => $this->tenantTableCount('pengumuman', $tenantId),
-                'eskul' => $this->tenantTableCount('ekskul', $tenantId),
-                'tahun_ajaran' => $tahunAjaran,
-                'generated_at' => now()->toISOString(),
-            ];
-        });
+        $payload = $pageCache->dashboardSummary($tenantId, [
+            'tahun_ajaran' => $this->queryText($request, 'tahun_ajaran'),
+        ]);
 
         return response()->json(['data' => $payload]);
+    }
+
+    public function homeBootstrap(Request $request, AdminPageCacheService $pageCache)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        return response()->json([
+            'data' => $pageCache->homeBootstrap($tenantId, [
+                'tahun_ajaran' => $this->queryText($request, 'tahun_ajaran'),
+            ]),
+        ]);
+    }
+
+    public function teacherOptions(Request $request, AdminPageCacheService $pageCache)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        return response()->json([
+            'data' => $pageCache->teacherOptions($tenantId, [
+                'scope' => $this->queryText($request, 'scope'),
+            ]),
+        ]);
+    }
+
+    public function organisasiBootstrap(Request $request, AdminPageCacheService $pageCache)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        return response()->json([
+            'data' => $pageCache->organizationBootstrap($tenantId, [
+                'tahun_ajaran' => $this->queryText($request, 'tahun_ajaran'),
+            ]),
+        ]);
+    }
+
+    public function strukturBootstrap(Request $request, AdminPageCacheService $pageCache)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        return response()->json([
+            'data' => $pageCache->structureBootstrap($tenantId, [
+                'tahun_ajaran' => $this->queryText($request, 'tahun_ajaran'),
+            ]),
+        ]);
     }
 
     public function students(Request $request)
@@ -1427,6 +1483,17 @@ class AdminController extends ApiController
             $tenantId,
             AcademicPeriod::normalizeAcademicYear($this->firstTenantRow('settings', $tenantId)?->tahun_ajaran ?? null) ?: ''
         ));
+        $this->refreshAdminPageCache(
+            $tenantId,
+            [
+                AdminPageCacheService::SCOPE_HOME,
+                AdminPageCacheService::SCOPE_STRUCTURE,
+                AdminPageCacheService::SCOPE_ORGANIZATIONS,
+            ],
+            [
+                AcademicPeriod::normalizeAcademicYear($this->firstTenantRow('settings', $tenantId)?->tahun_ajaran ?? null) ?: '',
+            ]
+        );
         $this->logAudit($request, 'profiles', $historyId ?: 'student-import', 'IMPORT', null, [
             'summary' => $summary,
             'history_id' => $historyId,
@@ -1440,7 +1507,7 @@ class AdminController extends ApiController
         ]);
     }
 
-    public function academicSummary(Request $request)
+    public function academicSummary(Request $request, AdminPageCacheService $pageCache)
     {
         if (! $this->isAdmin($request)) {
             return $this->deny();
@@ -1463,6 +1530,20 @@ class AdminController extends ApiController
             $tahunAjaran = AcademicPeriod::normalizeAcademicYear($settings?->tahun_ajaran ?? null) ?: '';
         } else {
             $tahunAjaran = AcademicPeriod::normalizeAcademicYear($tahunAjaran) ?: $tahunAjaran;
+        }
+
+        if (
+            ! $includeStudents
+            && ! $includeSchedule
+            && ! $includeMapel
+            && $requestedClassId === ''
+            && $studentStatus === ''
+        ) {
+            return response()->json([
+                'data' => $pageCache->structureBootstrap($tenantId, [
+                    'tahun_ajaran' => $tahunAjaran,
+                ]),
+            ]);
         }
 
         $classes = $this->classesForAcademicYear($tenantId, $tahunAjaran);
@@ -1860,6 +1941,20 @@ class AdminController extends ApiController
             return $this->deny($e->getMessage(), 422);
         }
 
+        $this->refreshAdminPageCache(
+            $tenantId,
+            [
+                AdminPageCacheService::SCOPE_HOME,
+                AdminPageCacheService::SCOPE_STRUCTURE,
+                AdminPageCacheService::SCOPE_ORGANIZATIONS,
+                AdminPageCacheService::SCOPE_TEACHER_OPTIONS,
+            ],
+            [
+                $previousYear,
+                (string) ($result['period']['tahun_ajaran'] ?? $tahunAjaran),
+            ]
+        );
+
         return response()->json(['data' => $result]);
     }
 
@@ -1943,6 +2038,16 @@ class AdminController extends ApiController
 
             return $payload;
         });
+
+        $this->refreshAdminPageCache(
+            $tenantId,
+            [
+                AdminPageCacheService::SCOPE_HOME,
+                AdminPageCacheService::SCOPE_STRUCTURE,
+                AdminPageCacheService::SCOPE_ORGANIZATIONS,
+            ],
+            [(string) ($period['tahun_ajaran'] ?? '')]
+        );
 
         return response()->json(['data' => $result]);
     }
@@ -2587,6 +2692,16 @@ class AdminController extends ApiController
             $tenantId
         );
 
+        $this->refreshAdminPageCache(
+            $tenantId,
+            [
+                AdminPageCacheService::SCOPE_HOME,
+                AdminPageCacheService::SCOPE_STRUCTURE,
+                AdminPageCacheService::SCOPE_ORGANIZATIONS,
+                AdminPageCacheService::SCOPE_TEACHER_OPTIONS,
+            ]
+        );
+
         return response()->json([
             'data' => [
                 'profile' => $fresh,
@@ -2704,6 +2819,16 @@ class AdminController extends ApiController
                 'edited_at' => $now->toISOString(),
             ],
             $tenantId
+        );
+
+        $this->refreshAdminPageCache(
+            $tenantId,
+            [
+                AdminPageCacheService::SCOPE_HOME,
+                AdminPageCacheService::SCOPE_STRUCTURE,
+                AdminPageCacheService::SCOPE_ORGANIZATIONS,
+                AdminPageCacheService::SCOPE_TEACHER_OPTIONS,
+            ]
         );
 
         return response()->json([
@@ -2854,6 +2979,16 @@ class AdminController extends ApiController
                 'edited_at' => $now->toISOString(),
             ],
             $tenantId
+        );
+
+        $this->refreshAdminPageCache(
+            $tenantId,
+            [
+                AdminPageCacheService::SCOPE_HOME,
+                AdminPageCacheService::SCOPE_STRUCTURE,
+                AdminPageCacheService::SCOPE_ORGANIZATIONS,
+                AdminPageCacheService::SCOPE_TEACHER_OPTIONS,
+            ]
         );
 
         return response()->json([
@@ -3016,6 +3151,15 @@ class AdminController extends ApiController
                 'alamat' => $fresh?->alamat,
             ],
             $tenantId
+        );
+
+        $this->refreshAdminPageCache(
+            $tenantId,
+            [
+                AdminPageCacheService::SCOPE_HOME,
+                AdminPageCacheService::SCOPE_STRUCTURE,
+                AdminPageCacheService::SCOPE_ORGANIZATIONS,
+            ]
         );
 
         return response()->json([
@@ -4313,6 +4457,32 @@ class AdminController extends ApiController
     private function dashboardSummaryCacheKey(string $tenantId, string $tahunAjaran = ''): string
     {
         return "tenant:{$tenantId}:admin-dashboard-summary:v3:".sha1($tahunAjaran ?: 'active');
+    }
+
+    private function refreshAdminPageCache(string $tenantId, array $scopes = [], array $years = []): void
+    {
+        if (trim($tenantId) === '') {
+            return;
+        }
+
+        $scopes = array_values(array_unique(array_filter($scopes))) ?: [
+            AdminPageCacheService::SCOPE_HOME,
+            AdminPageCacheService::SCOPE_STRUCTURE,
+            AdminPageCacheService::SCOPE_ORGANIZATIONS,
+            AdminPageCacheService::SCOPE_TEACHER_OPTIONS,
+        ];
+
+        $years = array_values(array_unique(array_filter(array_map(
+            fn ($year) => AcademicPeriod::normalizeAcademicYear($year) ?: '',
+            $years
+        ))));
+
+        try {
+            app(AdminPageCacheService::class)->bumpTenantVersions($tenantId, $scopes);
+            RefreshAdminPageCacheJob::dispatch($tenantId, $scopes, $years)->afterResponse();
+        } catch (\Throwable $e) {
+            // Cache admin tidak boleh mengganggu mutasi utama.
+        }
     }
 
     private function studentCountForAcademicYear(string $tenantId, string $tahunAjaran = ''): int

@@ -28,9 +28,12 @@ export const queryClient = new QueryClient({
 export const queryKeys = {
   admin: {
     dashboardSummary: (params = {}) => ['admin', 'dashboard-summary', params],
+    homeBootstrap: (params = {}) => ['admin', 'home-bootstrap', params],
     academicSummary: (params = {}) => ['admin', 'academic-summary', params],
+    structureBootstrap: (params = {}) => ['admin', 'structure-bootstrap', params],
     activeAcademicPeriodSettings: () => ['admin', 'active-academic-period-settings'],
     organizations: (params = {}) => ['admin', 'organizations', params],
+    organizationBootstrap: (params = {}) => ['admin', 'organization-bootstrap', params],
     organizationDetail: (params = {}) => ['admin', 'organization-detail', params],
     organizationMembers: (params = {}) => ['admin', 'organization-members', params],
     students: (params = {}) => ['admin', 'students', params],

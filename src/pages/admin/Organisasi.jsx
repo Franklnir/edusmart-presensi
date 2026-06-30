@@ -24,15 +24,11 @@ export default function OrganisasiPage() {
   } = useQuery({
     queryKey: queryKeys.admin.teacherOptions({ scope: 'organisasi' }),
     queryFn: async () => {
-      const guruResult = await supabase
-        .from('profiles')
-        .select('id,nama,email,jabatan,status')
-        .eq('role', 'guru')
-        .order('nama')
+      const { data, error } = await supabase.admin.teacherOptions({ scope: 'organisasi' })
 
-      if (guruResult.error) throw guruResult.error
+      if (error) throw error
 
-      return (guruResult.data || []).map((guru) => ({
+      return (data?.rows || []).map((guru) => ({
         ...guru,
         name: guru.nama || guru.email || guru.id
       }))

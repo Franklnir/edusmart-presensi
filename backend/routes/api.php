@@ -220,6 +220,10 @@ Route::prefix('reports')->middleware(['auth:sanctum', 'throttle:api'])->group(fu
 Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::delete('/users/{id}', [AdminController::class, 'deleteUser']);
     Route::patch('/users/{id}/status', [AdminController::class, 'updateUserStatus']);
+    Route::get('/home-bootstrap', [AdminController::class, 'homeBootstrap']);
+    Route::get('/teacher-options', [AdminController::class, 'teacherOptions']);
+    Route::get('/organisasi-bootstrap', [AdminController::class, 'organisasiBootstrap']);
+    Route::get('/struktur-bootstrap', [AdminController::class, 'strukturBootstrap']);
     Route::get('/dashboard-summary', [AdminController::class, 'dashboardSummary']);
     Route::get('/students', [AdminController::class, 'students']);
     Route::get('/students/{id}', [AdminController::class, 'studentDetail']);

@@ -130,21 +130,13 @@ export default function OrganisasiTab({
       setLoadingList(shouldBlock)
       setRefreshingList(!shouldBlock)
       const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.admin.organizations({ tahun_ajaran: academicPeriod?.tahunAjaran || '' }),
+        queryKey: queryKeys.admin.organizationBootstrap({ tahun_ajaran: academicPeriod?.tahunAjaran || '' }),
         queryFn: async () => {
-          let query = supabase
-            .from('organisasi')
-            .select('*')
-            .order('nama')
-
-          if (academicPeriod?.tahunAjaran) {
-            query = query.eq('tahun_ajaran', academicPeriod.tahunAjaran)
-          }
-
-          const { data, error } = await query
-
+          const { data, error } = await supabase.admin.organisasiBootstrap({
+            tahun_ajaran: academicPeriod?.tahunAjaran || ''
+          })
           if (error) throw error
-          return data || []
+          return data?.organisasi || []
         },
         staleTime: force ? 0 : 60 * 1000
       })

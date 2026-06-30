@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Jobs\RefreshAdminPageCacheJob;
+use App\Services\Admin\AdminPageCacheService;
 use App\Services\Db\DbDeleteExecutor;
 use App\Services\Db\DbInsertExecutor;
 use App\Services\Db\DbRequestShapeValidator;
@@ -2553,6 +2555,22 @@ class DbController extends ApiController
     {
         if ($tenantId && $table === 'settings') {
             Cache::forget('attendance-qr:academic-period:'.$tenantId);
+        }
+
+        if ($tenantId) {
+            $scopes = AdminPageCacheService::scopesForTable($table);
+            if ($scopes !== []) {
+                try {
+                    app(AdminPageCacheService::class)->bumpTenantVersions($tenantId, $scopes);
+                    RefreshAdminPageCacheJob::dispatch(
+                        $tenantId,
+                        $scopes,
+                        AdminPageCacheService::yearsFromRows(array_merge($beforeRows, $afterRows))
+                    )->afterResponse();
+                } catch (\Throwable $e) {
+                    // Cache refresh tidak boleh memblokir mutasi database utama.
+                }
+            }
         }
 
         if (! $tenantId || ! $this->isQuizContentTable($table)) {
