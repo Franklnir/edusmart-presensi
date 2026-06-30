@@ -92,7 +92,7 @@ class SettingsController extends ApiController
             return $this->deny('Tenant tidak valid', 400);
         }
 
-        return $this->ok($this->scanSettingsForTenant((string) $tenantId));
+        return $this->ok($this->scanSettingsPayload($request, (string) $tenantId));
     }
 
     public function scanUpdate(Request $request)
@@ -104,6 +104,13 @@ class SettingsController extends ApiController
         $tenantId = $this->resolveOwnedTenantId($request);
         if (! $tenantId) {
             return $this->deny('Tenant tidak valid', 400);
+        }
+
+        if (! $this->canUpdateScanSettings($request, (string) $tenantId)) {
+            return $this->deny(
+                'Guru biasa hanya bisa melihat Pengaturan Scan Manual. Perubahan hanya bisa dilakukan admin sekolah, wali kelas, atau guru berjabatan.',
+                403
+            );
         }
 
         $existing = DB::table('settings')
@@ -153,7 +160,7 @@ class SettingsController extends ApiController
         }
 
         if (empty($update)) {
-            return $this->ok($this->scanSettingsForTenant((string) $tenantId));
+            return $this->ok($this->scanSettingsPayload($request, (string) $tenantId));
         }
 
         $merged = array_merge((array) ($existing ?? []), $update);
@@ -177,7 +184,7 @@ class SettingsController extends ApiController
             DB::table('settings')->insert($update);
         }
 
-        return $this->ok($this->scanSettingsForTenant((string) $tenantId));
+        return $this->ok($this->scanSettingsPayload($request, (string) $tenantId));
     }
 
     public function update(Request $request)
@@ -286,6 +293,132 @@ class SettingsController extends ApiController
             'schema_supports_scan_always_active' => $supportsAlwaysActive,
             'updated_at' => $data['updated_at'] ?? null,
         ];
+    }
+
+    private function scanSettingsPayload(Request $request, string $tenantId): array
+    {
+        return array_merge($this->scanSettingsForTenant($tenantId), [
+            'can_update_settings' => $this->canUpdateScanSettings($request, $tenantId),
+        ]);
+    }
+
+    private function canUpdateScanSettings(Request $request, string $tenantId): bool
+    {
+        if ($this->isSuperAdminIdentity($request)) {
+            return true;
+        }
+
+        $profile = $this->profile($request);
+        $role = strtolower((string) ($profile?->role ?? ''));
+        if ($role === 'admin') {
+            return true;
+        }
+
+        if (! in_array($role, ['guru', 'teacher'], true)) {
+            return false;
+        }
+
+        $teacherId = (string) ($request->user()?->id ?? $profile?->id ?? '');
+        if ($teacherId === '') {
+            return false;
+        }
+
+        if ($this->teacherHasActiveHomeroomContext($tenantId, $teacherId)) {
+            return true;
+        }
+
+        if ($this->teacherHasActivePositionContext($tenantId, $teacherId, $profile?->jabatan ?? null)) {
+            return true;
+        }
+
+        return $this->teacherHasDelegatedScanManagerContext($tenantId, $teacherId);
+    }
+
+    private function teacherHasActiveHomeroomContext(string $tenantId, string $teacherId): bool
+    {
+        if ($teacherId === '' || ! Schema::hasTable('kelas_struktur') || ! Schema::hasColumn('kelas_struktur', 'wali_guru_id')) {
+            return false;
+        }
+
+        $query = DB::table('kelas_struktur')
+            ->where('wali_guru_id', $teacherId);
+        $this->scopeTenant($query, 'kelas_struktur', $tenantId);
+        $this->scopeActiveAcademicPeriod($query, 'kelas_struktur', $tenantId);
+
+        return $query->exists();
+    }
+
+    private function teacherHasActivePositionContext(string $tenantId, string $teacherId, mixed $profilePosition = null): bool
+    {
+        $position = trim((string) ($profilePosition ?? ''));
+        if ($position !== '' && $position !== '-') {
+            return true;
+        }
+
+        if ($teacherId === '' || ! Schema::hasTable('struktur_sekolah') || ! Schema::hasColumn('struktur_sekolah', 'guru_id')) {
+            return false;
+        }
+
+        $query = DB::table('struktur_sekolah')
+            ->where('guru_id', $teacherId);
+        $this->scopeTenant($query, 'struktur_sekolah', $tenantId);
+        $this->scopeActiveAcademicPeriod($query, 'struktur_sekolah', $tenantId);
+
+        return $query->exists();
+    }
+
+    private function teacherHasDelegatedScanManagerContext(string $tenantId, string $teacherId): bool
+    {
+        if ($teacherId === '' || ! Schema::hasTable('admin_feature_permissions')) {
+            return false;
+        }
+
+        $query = DB::table('admin_feature_permissions')
+            ->where('target_teacher_id', $teacherId)
+            ->where('feature_key', 'scan-kehadiran')
+            ->where('is_active', true)
+            ->whereIn('target_type', ['homeroom', 'position']);
+        $this->scopeTenant($query, 'admin_feature_permissions', $tenantId);
+
+        return $query->exists();
+    }
+
+    private function scopeTenant($query, string $table, string $tenantId): void
+    {
+        if ($tenantId !== '' && Schema::hasColumn($table, 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+    }
+
+    private function scopeActiveAcademicPeriod($query, string $table, string $tenantId): void
+    {
+        if (! Schema::hasTable('settings')) {
+            return;
+        }
+
+        $columns = array_values(array_filter([
+            Schema::hasColumn('settings', 'tahun_ajaran') ? 'tahun_ajaran' : null,
+            Schema::hasColumn('settings', 'semester_aktif') ? 'semester_aktif' : null,
+        ]));
+        if ($columns === []) {
+            return;
+        }
+
+        $settings = DB::table('settings')
+            ->when(Schema::hasColumn('settings', 'tenant_id'), fn ($builder) => $builder->where('tenant_id', $tenantId))
+            ->orderBy('id')
+            ->first($columns);
+
+        $year = trim((string) ($settings->tahun_ajaran ?? ''));
+        $semester = trim((string) ($settings->semester_aktif ?? ''));
+
+        if ($year !== '' && Schema::hasColumn($table, 'tahun_ajaran')) {
+            $query->where('tahun_ajaran', $year);
+        }
+
+        if ($semester !== '' && Schema::hasColumn($table, 'semester')) {
+            $query->where('semester', $semester);
+        }
     }
 
     private function booleanValue($value): bool

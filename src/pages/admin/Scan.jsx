@@ -8,6 +8,7 @@ import React, {
 } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useUIStore } from '../../store/useUIStore'
+import { useAuthStore } from '../../store/useAuthStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import {
@@ -82,6 +83,11 @@ const LEGACY_SETTINGS_SCAN_COLUMNS = `
   manual_jam_pulang_selesai,
   auto_alpha_enabled
 `
+
+const SCAN_SETTINGS_READONLY_MESSAGE =
+  'Guru biasa hanya bisa melihat Pengaturan Scan Manual. Perubahan hanya bisa dilakukan admin sekolah, wali kelas, atau guru berjabatan.'
+
+const isTeacherRole = (role) => ['guru', 'teacher'].includes(String(role || '').toLowerCase())
 
 const isMissingSettingsColumnError = (error, columnName) => {
   if (!error) return false
@@ -174,14 +180,19 @@ const findRelevantMapelForSingleScan = (jadwalSiswa, scanRecord, session) => {
 
 export default function Scan() {
   const { pushToast, setLoading } = useUIStore()
+  const profile = useAuthStore((state) => state.profile)
+  const isTeacherProfile = isTeacherRole(profile?.role)
+  const isDelegatedScanPath = typeof window !== 'undefined' &&
+    window.location?.pathname?.startsWith('/guru/admin/scan')
   const [activeTab, setActiveTab] = useState(1)
 
   // --- SETTINGS ---
-  const [settingsId, setSettingsId] = useState(null)
   const [manualModeEnabled, setManualModeEnabled] = useState(false)
   const [scanAlwaysActive, setScanAlwaysActive] = useState(true)
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [autoAlphaEnabled, setAutoAlphaEnabled] = useState(true)
+  const [canManageScanSettings, setCanManageScanSettings] = useState(false)
+  const scanSettingsReadonly = (isTeacherProfile || isDelegatedScanPath) && !canManageScanSettings
 
   // --- STATE UMUM ---
   const [kelaslist, setKelasList] = useState([])
@@ -231,10 +242,12 @@ export default function Scan() {
   const applyLoadedScanSettings = useCallback((data = {}) => {
     if (!data) return
 
-    setSettingsId(data.id ?? null)
     setManualModeEnabled(data.scan_manual_enabled ?? false)
     setScanAlwaysActive(data.scan_always_active ?? true)
     setAutoAlphaEnabled(data.auto_alpha_enabled ?? true)
+    if (typeof data.can_update_settings === 'boolean') {
+      setCanManageScanSettings(data.can_update_settings)
+    }
 
     setSessionSettings((prev) => ({
       ...prev,
@@ -296,24 +309,12 @@ export default function Scan() {
           return
         }
 
-        // Tidak ada row (PGRST116) → buat default
-        let { data: inserted, error: insertErr } = await supabase
-          .from('settings')
-          .insert({ scan_manual_enabled: false, scan_always_active: true })
-          .select('id, scan_manual_enabled, scan_always_active')
-          .single()
-
-        if (isMissingSettingsColumnError(insertErr, 'scan_always_active')) {
-          ; ({ data: inserted, error: insertErr } = await supabase
-            .from('settings')
-            .insert({ scan_manual_enabled: false })
-            .select('id, scan_manual_enabled')
-            .single())
-        }
-
-        if (insertErr) throw insertErr
-
-        applyLoadedScanSettings(inserted)
+        applyLoadedScanSettings({
+          id: null,
+          scan_manual_enabled: false,
+          scan_always_active: true,
+          auto_alpha_enabled: true
+        })
       } catch (err) {
         console.error(err)
         pushToast(
@@ -382,73 +383,47 @@ export default function Scan() {
     }
   }, [scanAlwaysActive])
 
+  const notifyScanSettingsReadonly = useCallback(() => {
+    pushToast('warning', SCAN_SETTINGS_READONLY_MESSAGE)
+  }, [pushToast])
+
+  const ensureCanEditScanSettings = useCallback(() => {
+    if (!scanSettingsReadonly) return true
+    notifyScanSettingsReadonly()
+    return false
+  }, [notifyScanSettingsReadonly, scanSettingsReadonly])
+
+  const guardReadonlyScanSettingsInput = useCallback((event) => {
+    if (!scanSettingsReadonly) return
+    event.preventDefault()
+    event.stopPropagation()
+    notifyScanSettingsReadonly()
+  }, [notifyScanSettingsReadonly, scanSettingsReadonly])
+
+  const updateSessionSettingValue = useCallback((field, value) => {
+    if (!ensureCanEditScanSettings()) return
+    setSessionSettings((prev) => ({
+      ...prev,
+      [field]: value
+    }))
+  }, [ensureCanEditScanSettings])
+
   // fungsi update settings
   const updateSettings = useCallback(
     async (payload) => {
+      if (!ensureCanEditScanSettings()) {
+        return false
+      }
+
       try {
         setSettingsLoading(true)
 
         const apiSave = await supabase.admin.updateScanSettings(payload)
-        if (!apiSave.error) {
-          if (apiSave.data) applyLoadedScanSettings(apiSave.data)
-          return true
+        if (apiSave.error) {
+          throw apiSave.error
         }
 
-        console.warn('Fallback save scan settings via Supabase:', apiSave.error)
-
-        const applyPayload = async (nextPayload) => {
-          if (settingsId) {
-            const { error } = await supabase
-              .from('settings')
-              .update(nextPayload)
-              .eq('id', settingsId)
-
-            if (error) throw error
-            return null
-          }
-
-          const { data, error } = await supabase
-            .from('settings')
-            .insert(nextPayload)
-            .select('id')
-            .single()
-
-          if (error) throw error
-          return data
-        }
-
-        let savedData = null
-        if (settingsId) {
-          try {
-            await applyPayload(payload)
-          } catch (error) {
-            if (
-              Object.prototype.hasOwnProperty.call(payload, 'scan_always_active') &&
-              isMissingSettingsColumnError(error, 'scan_always_active')
-            ) {
-              const { scan_always_active: _ignored, ...legacyPayload } = payload
-              await applyPayload(legacyPayload)
-            } else {
-              throw error
-            }
-          }
-        } else {
-          try {
-            savedData = await applyPayload(payload)
-          } catch (error) {
-            if (
-              Object.prototype.hasOwnProperty.call(payload, 'scan_always_active') &&
-              isMissingSettingsColumnError(error, 'scan_always_active')
-            ) {
-              const { scan_always_active: _ignored, ...legacyPayload } = payload
-              savedData = await applyPayload(legacyPayload)
-            } else {
-              throw error
-            }
-          }
-          setSettingsId(savedData.id)
-        }
-
+        if (apiSave.data) applyLoadedScanSettings(apiSave.data)
         return true
       } catch (err) {
         console.error(err)
@@ -463,7 +438,7 @@ export default function Scan() {
         setSettingsLoading(false)
       }
     },
-    [applyLoadedScanSettings, settingsId, pushToast]
+    [applyLoadedScanSettings, ensureCanEditScanSettings, pushToast]
   )
 
   /* ========= HELPER VALIDASI JAM SCAN ========= */
@@ -517,6 +492,8 @@ export default function Scan() {
   }, [sessionSettings, pushToast])
 
   const toggleManualMode = async () => {
+    if (!ensureCanEditScanSettings()) return
+
     if (scanAlwaysActive) {
       pushToast('info', 'Mode manual dikelola otomatis karena scan harian realtime aktif.')
       return
@@ -544,6 +521,8 @@ export default function Scan() {
   }
 
   const toggleScanAlwaysActive = async () => {
+    if (!ensureCanEditScanSettings()) return
+
     const next = !scanAlwaysActive
 
     if (next) {
@@ -585,6 +564,8 @@ export default function Scan() {
   }
 
   const handleSaveJamSettings = async () => {
+    if (!ensureCanEditScanSettings()) return
+
     const ok = validateSessionSettings()
     if (!ok) return
 
@@ -600,6 +581,8 @@ export default function Scan() {
   }
 
   const toggleAutoAlpha = async () => {
+    if (!ensureCanEditScanSettings()) return
+
     const next = !autoAlphaEnabled
     setAutoAlphaEnabled(next)
     const saved = await updateSettings({ auto_alpha_enabled: next })
@@ -1791,6 +1774,12 @@ export default function Scan() {
                     </div>
 
                     <div className="p-6 space-y-6">
+                      {scanSettingsReadonly && (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                          Akun guru ini mendapat akses Scan Kehadiran sebagai mode lihat. Pengaturan Scan Manual hanya bisa diubah admin sekolah, wali kelas, atau guru berjabatan.
+                        </div>
+                      )}
+
                       <div className={`flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between ${scanAlwaysActive
                         ? 'border-blue-200 bg-blue-50'
                         : 'border-gray-200 bg-gray-50'
@@ -1811,11 +1800,12 @@ export default function Scan() {
                         <button
                           type="button"
                           onClick={toggleScanAlwaysActive}
+                          aria-disabled={settingsLoading || scanSettingsReadonly}
                           disabled={settingsLoading}
                           className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${scanAlwaysActive
                             ? 'bg-blue-600'
                             : 'bg-gray-300'
-                            } ${settingsLoading ? 'cursor-not-allowed opacity-50' : ''}`}
+                            } ${settingsLoading || scanSettingsReadonly ? 'cursor-not-allowed opacity-50' : ''}`}
                         >
                           <span
                             className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${scanAlwaysActive
@@ -1837,13 +1827,11 @@ export default function Scan() {
                               type="date"
                               value={tanggal}
                               disabled={scanAlwaysActive}
-                              onChange={(e) =>
-                                setSessionSettings((prev) => ({
-                                  ...prev,
-                                  tanggal: e.target.value
-                                }))
-                              }
-                              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:cursor-not-allowed disabled:bg-blue-50 disabled:text-blue-700"
+                              readOnly={scanSettingsReadonly}
+                              onMouseDown={guardReadonlyScanSettingsInput}
+                              onKeyDown={guardReadonlyScanSettingsInput}
+                              onChange={(e) => updateSessionSettingValue('tanggal', e.target.value)}
+                              className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:cursor-not-allowed disabled:bg-blue-50 disabled:text-blue-700 ${scanSettingsReadonly ? 'cursor-not-allowed bg-gray-50 text-gray-500' : ''}`}
                             />
                             {scanAlwaysActive && (
                               <p className="mt-2 text-xs font-medium text-blue-700">
@@ -1862,13 +1850,11 @@ export default function Scan() {
                                 value={
                                   sessionSettings.jam_masuk_mulai
                                 }
-                                onChange={(e) =>
-                                  setSessionSettings((prev) => ({
-                                    ...prev,
-                                    jam_masuk_mulai: e.target.value
-                                  }))
-                                }
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                readOnly={scanSettingsReadonly}
+                                onMouseDown={guardReadonlyScanSettingsInput}
+                                onKeyDown={guardReadonlyScanSettingsInput}
+                                onChange={(e) => updateSessionSettingValue('jam_masuk_mulai', e.target.value)}
+                                className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${scanSettingsReadonly ? 'cursor-not-allowed bg-gray-50 text-gray-500' : ''}`}
                               />
                             </div>
                             <div>
@@ -1880,13 +1866,11 @@ export default function Scan() {
                                 value={
                                   sessionSettings.jam_masuk_selesai
                                 }
-                                onChange={(e) =>
-                                  setSessionSettings((prev) => ({
-                                    ...prev,
-                                    jam_masuk_selesai: e.target.value
-                                  }))
-                                }
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                readOnly={scanSettingsReadonly}
+                                onMouseDown={guardReadonlyScanSettingsInput}
+                                onKeyDown={guardReadonlyScanSettingsInput}
+                                onChange={(e) => updateSessionSettingValue('jam_masuk_selesai', e.target.value)}
+                                className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${scanSettingsReadonly ? 'cursor-not-allowed bg-gray-50 text-gray-500' : ''}`}
                               />
                             </div>
                           </div>
@@ -1901,13 +1885,11 @@ export default function Scan() {
                                 value={
                                   sessionSettings.jam_pulang_mulai
                                 }
-                                onChange={(e) =>
-                                  setSessionSettings((prev) => ({
-                                    ...prev,
-                                    jam_pulang_mulai: e.target.value
-                                  }))
-                                }
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                readOnly={scanSettingsReadonly}
+                                onMouseDown={guardReadonlyScanSettingsInput}
+                                onKeyDown={guardReadonlyScanSettingsInput}
+                                onChange={(e) => updateSessionSettingValue('jam_pulang_mulai', e.target.value)}
+                                className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${scanSettingsReadonly ? 'cursor-not-allowed bg-gray-50 text-gray-500' : ''}`}
                               />
                             </div>
                             <div>
@@ -1919,13 +1901,11 @@ export default function Scan() {
                                 value={
                                   sessionSettings.jam_pulang_selesai
                                 }
-                                onChange={(e) =>
-                                  setSessionSettings((prev) => ({
-                                    ...prev,
-                                    jam_pulang_selesai: e.target.value
-                                  }))
-                                }
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                readOnly={scanSettingsReadonly}
+                                onMouseDown={guardReadonlyScanSettingsInput}
+                                onKeyDown={guardReadonlyScanSettingsInput}
+                                onChange={(e) => updateSessionSettingValue('jam_pulang_selesai', e.target.value)}
+                                className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${scanSettingsReadonly ? 'cursor-not-allowed bg-gray-50 text-gray-500' : ''}`}
                               />
                             </div>
                           </div>
@@ -1948,11 +1928,12 @@ export default function Scan() {
                             </div>
                             <button
                               onClick={toggleManualMode}
+                              aria-disabled={settingsLoading || scanAlwaysActive || scanSettingsReadonly}
                               disabled={settingsLoading || scanAlwaysActive}
                               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${scanOperationalActive
                                 ? 'bg-blue-600'
                                 : 'bg-gray-300'
-                                } ${settingsLoading || scanAlwaysActive
+                                } ${settingsLoading || scanAlwaysActive || scanSettingsReadonly
                                   ? 'opacity-50 cursor-not-allowed'
                                   : ''
                                 }`}
@@ -1979,11 +1960,12 @@ export default function Scan() {
                             </div>
                             <button
                               onClick={toggleAutoAlpha}
+                              aria-disabled={settingsLoading || scanSettingsReadonly}
                               disabled={settingsLoading}
                               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${autoAlphaEnabled
                                 ? 'bg-red-600'
                                 : 'bg-gray-300'
-                                } ${settingsLoading ? 'cursor-not-allowed opacity-50' : ''}`}
+                                } ${settingsLoading || scanSettingsReadonly ? 'cursor-not-allowed opacity-50' : ''}`}
                             >
                               <span
                                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoAlphaEnabled
@@ -1997,7 +1979,8 @@ export default function Scan() {
                           <div className="space-y-3">
                             <button
                               onClick={handleSaveJamSettings}
-                              className="w-full bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-3 rounded-lg inline-flex items-center justify-center gap-2 font-medium shadow-sm transition-colors"
+                              aria-disabled={scanSettingsReadonly}
+                              className={`w-full bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-3 rounded-lg inline-flex items-center justify-center gap-2 font-medium shadow-sm transition-colors ${scanSettingsReadonly ? 'cursor-not-allowed opacity-60' : ''}`}
                             >
                               <Save size={18} />
                               Simpan Pengaturan Jam
