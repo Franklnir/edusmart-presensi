@@ -2189,26 +2189,31 @@ class AdminController extends ApiController
                 ->get()
             : collect();
 
-        $recentAttendanceScans = Schema::hasTable('absensi')
+        $canReadAttendanceScans = Schema::hasTable('absensi')
+            && Schema::hasColumn('absensi', 'tanggal')
+            && Schema::hasColumn('absensi', 'uid')
+            && Schema::hasColumn('absensi', 'waktu')
+            && Schema::hasColumn('absensi', 'oleh');
+
+        $recentAttendanceScans = $canReadAttendanceScans
             ? $this->tenantQuery('absensi', $tenantId, 'a')
                 ->leftJoin('profiles as p', function ($join) use ($tenantId) {
                     $join->on('p.id', '=', 'a.uid')
                         ->where('p.tenant_id', '=', $tenantId);
                 })
                 ->select([
-                    'a.id as absensi_id',
-                    'a.tanggal',
-                    'a.uid as siswa_id',
-                    'a.kelas',
-                    'a.mapel',
-                    'a.waktu',
-                    'a.oleh',
-                    'a.created_at',
-                    'p.nama as siswa_nama',
-                    'p.nis as siswa_nis',
-                    'p.photo_path as siswa_photo_path',
-                    'p.photo_url as siswa_photo_url',
-                    'p.rfid_uid as siswa_rfid_uid',
+                    $this->nullableAliasedColumn('absensi', 'a', 'id', 'absensi_id'),
+                    $this->nullableAliasedColumn('absensi', 'a', 'tanggal'),
+                    $this->nullableAliasedColumn('absensi', 'a', 'uid', 'siswa_id'),
+                    $this->nullableAliasedColumn('absensi', 'a', 'kelas'),
+                    $this->nullableAliasedColumn('absensi', 'a', 'mapel'),
+                    $this->nullableAliasedColumn('absensi', 'a', 'waktu'),
+                    $this->nullableAliasedColumn('absensi', 'a', 'oleh'),
+                    $this->nullableAliasedColumn('profiles', 'p', 'nama', 'siswa_nama'),
+                    $this->nullableAliasedColumn('profiles', 'p', 'nis', 'siswa_nis'),
+                    $this->nullableAliasedColumn('profiles', 'p', 'photo_path', 'siswa_photo_path'),
+                    $this->nullableAliasedColumn('profiles', 'p', 'photo_url', 'siswa_photo_url'),
+                    $this->nullableAliasedColumn('profiles', 'p', 'rfid_uid', 'siswa_rfid_uid'),
                 ])
                 ->where('a.tanggal', $date)
                 ->whereIn('a.oleh', ['rfid_auto', 'rfid_manual'])
@@ -2216,7 +2221,7 @@ class AdminController extends ApiController
                 ->limit(50)
                 ->get()
                 ->map(fn ($row) => (object) [
-                    'id' => 'absensi-'.$row->absensi_id,
+                    'id' => 'absensi-'.($row->absensi_id ?: md5(($row->siswa_id ?? '').'|'.($row->mapel ?? '').'|'.($row->waktu ?? ''))),
                     'tanggal' => $row->tanggal,
                     'siswa_id' => $row->siswa_id,
                     'kelas' => $row->kelas,
@@ -2225,7 +2230,7 @@ class AdminController extends ApiController
                     'source' => $row->oleh,
                     'card_uid' => $row->siswa_rfid_uid,
                     'mapel_count' => null,
-                    'created_at' => $row->created_at,
+                    'created_at' => $row->waktu,
                     'siswa_nama' => $row->siswa_nama,
                     'siswa_nis' => $row->siswa_nis,
                     'siswa_photo_path' => $row->siswa_photo_path,
@@ -5125,6 +5130,17 @@ class AdminController extends ApiController
             fn ($column) => $column === '*' ? "{$prefix}.*" : "{$prefix}.{$column}",
             $this->existingColumns($table, $columns)
         );
+    }
+
+    private function nullableAliasedColumn(string $table, string $alias, string $column, ?string $as = null)
+    {
+        $as = $as ?: $column;
+
+        if (! Schema::hasTable($table) || ! Schema::hasColumn($table, $column)) {
+            return DB::raw("NULL as {$as}");
+        }
+
+        return $as === $column ? "{$alias}.{$column}" : "{$alias}.{$column} as {$as}";
     }
 
     private function presenceAggregateQuery(string $tenantId, $activeCutoff = null)

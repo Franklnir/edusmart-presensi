@@ -157,12 +157,13 @@ const adminApi = {
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
     async scanSessionSummary(params = {}) {
-      const res = await apiFetch(`/api/admin/scan-session-summary${buildQueryString(params)}`, {
+      const queryString = buildQueryString(params)
+      const res = await apiFetch(`/api/admin/scan-session-summary${queryString}`, {
         method: 'GET',
         cacheTtlMs: 10 * 1000,
         persistCache: true,
         staleCacheTtlMs: 2 * 60 * 1000,
-        staleKey: 'admin.scan-session-summary',
+        staleKey: `admin.scan-session-summary:${queryString || 'default'}`,
         timeoutMs: 12000
       })
       return { data: res.raw?.data ?? res.data, error: res.error }

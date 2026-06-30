@@ -108,6 +108,35 @@ const scanDateToTimeValue = (value) => {
   return timeMatch?.[1] || ''
 }
 
+const mapRecentScansToStudents = (rows = [], classes = []) => {
+  const classRows = Array.isArray(classes) ? classes : []
+
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      if (!row?.siswa_id) return null
+
+      const scanDate = row.scan_at ? new Date(row.scan_at) : null
+      const hasScanDate = scanDate && !Number.isNaN(scanDate.getTime())
+      const kelasInfo = classRows.find((k) => k.id === row.kelas)
+      const mapelCount = row.mapel_count ?? (kelasInfo?.total_mapel || 0)
+
+      return {
+        id: row.siswa_id,
+        nama: row.siswa_nama,
+        nis: row.siswa_nis,
+        kelas: row.kelas,
+        photo_path: row.siswa_photo_path,
+        photo_url: row.siswa_photo_url,
+        rfid_uid: row.siswa_rfid_uid,
+        scan_time: hasScanDate ? scanDate.toLocaleTimeString() : '',
+        scan_date: row.scan_at,
+        session: row.sesi,
+        mapel_count: mapelCount
+      }
+    })
+    .filter(Boolean)
+}
+
 const findRelevantMapelForSingleScan = (jadwalSiswa, scanRecord, session) => {
   if (!Array.isArray(jadwalSiswa) || jadwalSiswa.length === 0 || !scanRecord) {
     return null
@@ -609,32 +638,44 @@ export default function Scan() {
     return () => window.clearInterval(timer)
   }, [loadRfidDevices])
 
-  /* ========= LOAD KELAS & STATISTIK ========= */
+  /* ========= LOAD KELAS, STATISTIK & SCAN ========= */
 
-  const loadKelasData = useCallback(
-    async (dateString) => {
-      setLoadingData(true)
+  const loadScanSummary = useCallback(
+    async (dateString, { silent = false, includeScans } = {}) => {
+      if (!dateString) return null
+
+      const shouldIncludeScans = includeScans ?? scanOperationalActive
+      if (!silent) setLoadingData(true)
       try {
         const { data, error } = await supabase.admin.scanSessionSummary({ date: dateString })
         if (error) throw error
 
         const stats = data?.classes || []
-
         setKelasList(stats)
         kelaslistRef.current = stats
+
+        if (shouldIncludeScans) {
+          setScannedStudents(mapRecentScansToStudents(data?.recent_scans || [], stats))
+        } else {
+          setScannedStudents([])
+        }
+
+        return data
       } catch (error) {
         console.error(error)
-        pushToast('error', 'Gagal memuat data kelas')
+        pushToast('error', 'Gagal memuat ringkasan scan RFID')
+
+        return null
       } finally {
-        setLoadingData(false)
+        if (!silent) setLoadingData(false)
       }
     },
-    [pushToast]
+    [pushToast, scanOperationalActive]
   )
 
   useEffect(() => {
-    loadKelasData(tanggal)
-  }, [tanggal, loadKelasData])
+    loadScanSummary(tanggal, { includeScans: scanOperationalActive })
+  }, [scanOperationalActive, tanggal, loadScanSummary])
 
   useEffect(() => {
     setKelasList((prev) =>
@@ -649,66 +690,6 @@ export default function Scan() {
     )
   }, [scannedStudents])
 
-  /* ========= LOAD SCAN HARI INI ========= */
-
-  const loadScansFromTemp = useCallback(
-    async (dateString) => {
-      if (!dateString) return
-      try {
-        const { data, error } = await supabase.admin.scanSessionSummary({ date: dateString })
-        if (error) throw error
-
-        const tempScans = data?.recent_scans || []
-        if (!tempScans.length) {
-          setScannedStudents([])
-          return
-        }
-
-        const mapped = tempScans
-          .map((row) => {
-            const scanDate = row.scan_at ? new Date(row.scan_at) : null
-
-            const kelasInfo = kelaslistRef.current.find(
-              (k) => k.id === row.kelas
-            )
-            const mapelCount =
-              row.mapel_count ?? (kelasInfo?.total_mapel || 0)
-
-            return {
-              id: row.siswa_id,
-              nama: row.siswa_nama,
-              nis: row.siswa_nis,
-              kelas: row.kelas,
-              photo_path: row.siswa_photo_path,
-              photo_url: row.siswa_photo_url,
-              rfid_uid: row.siswa_rfid_uid,
-              scan_time: scanDate
-                ? scanDate.toLocaleTimeString()
-                : '',
-              scan_date: row.scan_at,
-              session: row.sesi,
-              mapel_count: mapelCount
-            }
-          })
-          .filter(Boolean)
-
-        setScannedStudents(mapped)
-      } catch (error) {
-        console.error(error)
-        pushToast('error', 'Gagal memuat data scan sementara')
-      }
-    },
-    [pushToast]
-  )
-
-  useEffect(() => {
-    if (!scanOperationalActive) {
-      setScannedStudents([])
-      return
-    }
-    loadScansFromTemp(tanggal)
-  }, [scanOperationalActive, tanggal, loadScansFromTemp])
-
   const refreshScanSummarySoon = useCallback(() => {
     if (rfidStreamRefreshTimerRef.current) {
       window.clearTimeout(rfidStreamRefreshTimerRef.current)
@@ -716,12 +697,9 @@ export default function Scan() {
 
     rfidStreamRefreshTimerRef.current = window.setTimeout(() => {
       rfidStreamRefreshTimerRef.current = null
-      loadKelasData(tanggal)
-      if (scanOperationalActive) {
-        loadScansFromTemp(tanggal)
-      }
+      loadScanSummary(tanggal, { silent: true, includeScans: scanOperationalActive })
     }, 150)
-  }, [loadKelasData, loadScansFromTemp, scanOperationalActive, tanggal])
+  }, [loadScanSummary, scanOperationalActive, tanggal])
 
   const handleRfidStreamEvent = useCallback((eventData = {}) => {
     if (!eventData || typeof eventData !== 'object') return
@@ -905,7 +883,10 @@ export default function Scan() {
             audio.play().catch(() => { })
           } catch { }
 
-          loadKelasData(todayIso)
+          loadScanSummary(todayIso, {
+            silent: true,
+            includeScans: scanOperationalActive
+          })
         } catch (err) {
           console.error('Error Scan Langsung:', err)
           pushToast('error', 'Gagal memproses absen langsung.')
@@ -1085,7 +1066,7 @@ export default function Scan() {
         setLoading(false)
       }
     },
-    [sessionSettings, scanOperationalActive, pushToast, setLoading, tanggal]
+    [loadScanSummary, sessionSettings, scanOperationalActive, pushToast, setLoading, tanggal]
   )
 
   const handleDeleteScan = async (record) => {
@@ -1377,7 +1358,10 @@ export default function Scan() {
               : ''
           ].filter(Boolean).join(' ')
         )
-        loadKelasData(tanggal)
+        loadScanSummary(tanggal, {
+          silent: true,
+          includeScans: scanOperationalActive
+        })
       } else {
         pushToast(
           'info',
