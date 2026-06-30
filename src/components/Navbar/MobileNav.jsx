@@ -154,7 +154,7 @@ const MobileNav = React.memo(({
                   onError={onLogoError}
                 />
               ) : (
-                <span className="font-extrabold text-white text-xs">{schoolName.charAt(0).toUpperCase()}</span>
+                <span className="font-semibold text-white text-xs">{schoolName.charAt(0).toUpperCase()}</span>
               )}
             </div>
             <div className="min-w-0">
@@ -205,7 +205,7 @@ const MobileNav = React.memo(({
           <aside className="theme-mobile-drawer absolute right-0 top-0 h-full w-[min(88vw,360px)] bg-white shadow-2xl border-l border-slate-100 flex flex-col">
             <div className="flex items-center justify-between px-4 py-4 border-b border-slate-100">
               <div className="min-w-0">
-                <p className="text-sm font-extrabold text-slate-900 truncate">{schoolName}</p>
+                <p className="text-sm font-semibold text-slate-900 truncate">{schoolName}</p>
                 <p className={`inline-flex mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${roleBadge.bg} ${roleBadge.text}`}>
                   {roleBadge.label}
                 </p>

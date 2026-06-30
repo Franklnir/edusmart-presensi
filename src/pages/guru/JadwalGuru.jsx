@@ -413,7 +413,7 @@ const JamKosongActionOverlay = ({ action, onClose, onConfirm, processing }) => {
               <span className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-wide ${tone.badge}`}>
                 {tone.label}
               </span>
-              <h3 className="mt-3 text-xl font-extrabold text-slate-950">
+              <h3 className="mt-3 text-xl font-semibold text-slate-950">
                 {action.title}
               </h3>
               <p className="mt-1 text-sm leading-6 text-slate-600">

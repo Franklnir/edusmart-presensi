@@ -19,7 +19,7 @@ import {
 // Helper kecil biar konsisten
 const normalizeEmail = (email) => email.trim().toLowerCase()
 let authInitPromise = null
-const SETTINGS_COLUMNS = 'id,nama_sekolah,logo_url,logo_path,admin_lock_enabled,updated_at'
+const SETTINGS_COLUMNS = 'id,nama_sekolah,logo_url,logo_path,admin_lock_enabled,tahun_ajaran,semester_aktif,periode_mulai,periode_selesai,periode_ganjil_mulai,periode_ganjil_selesai,periode_genap_mulai,periode_genap_selesai,max_ekskul_per_siswa,updated_at'
 const AUTH_SESSION_RETRY_ATTEMPTS = 3
 const AUTH_SESSION_RETRY_DELAY_MS = 500
 const GOOGLE_POPUP_SESSION_RETRY_ATTEMPTS = 24

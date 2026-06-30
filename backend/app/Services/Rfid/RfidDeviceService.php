@@ -534,13 +534,17 @@ class RfidDeviceService
             $this->decodeMetadata($device->metadata ?? null),
             $metadata
         );
+        $lastIp = $this->nullableString($ipAddress)
+            ?? $this->nullableString($metadata['ip_address'] ?? null)
+            ?? $this->nullableString($metadata['local_ip'] ?? null)
+            ?? $this->nullableString($metadata['ip'] ?? null);
 
         DB::table('rfid_devices')
             ->where('id', $device->id)
             ->update([
                 'last_seen_at' => now(),
                 'last_transport' => $this->normalizeTransport($transport),
-                'last_ip' => $this->nullableString($ipAddress),
+                'last_ip' => $lastIp,
                 'metadata' => ! empty($mergedMetadata)
                     ? json_encode($mergedMetadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
                     : null,

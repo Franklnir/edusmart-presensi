@@ -743,7 +743,7 @@ function InfoCard({ emoji, title, desc, tone = 'violet' }) {
   return (
     <div className={`rounded-2xl border p-5 shadow-card ${cls}`}>
       <div className="mb-2 text-2xl">{emoji}</div>
-      <h3 className="text-sm font-extrabold">{title}</h3>
+      <h3 className="text-sm font-semibold">{title}</h3>
       <p className="mt-1 text-xs opacity-80">{desc}</p>
     </div>
   )

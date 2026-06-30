@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { queryClient, queryKeys } from '../lib/queryClient'
+import { useAuthStore } from '../store/useAuthStore'
 import {
   generateAcademicYearOptions,
   getCurrentAcademicPeriod,
@@ -13,6 +15,7 @@ const toPeriodFilter = (period) => ({
 })
 
 const DEFAULT_FILTER_STORAGE_KEY = 'edusmart.default.periodFilter'
+const SETTINGS_PERIOD_COLUMNS = 'id, tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai, max_ekskul_per_siswa, updated_at'
 
 const withCalendarSemester = (period) => {
   const current = getCurrentAcademicPeriod()
@@ -65,7 +68,11 @@ export default function useActiveAcademicPeriod({
   storageKey = DEFAULT_FILTER_STORAGE_KEY,
   persistFilter = true
 } = {}) {
-  const fallback = useMemo(() => resolveAcademicPeriod(), [])
+  const authSettings = useAuthStore((state) => state.settings)
+  const fallback = useMemo(
+    () => withCalendarSemester(resolveAcademicPeriod(useAuthStore.getState().settings || {})),
+    []
+  )
   const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(fallback)
   const [periodFilter, setPeriodFilter] = useState(() => (
     persistFilter
@@ -83,31 +90,44 @@ export default function useActiveAcademicPeriod({
     writeStoredPeriodFilter(storageKey, periodFilter, activeAcademicPeriod)
   }, [activeAcademicPeriod, periodFilter, persistFilter, storageKey])
 
+  const applyResolvedPeriod = useCallback((resolved) => {
+    setActiveAcademicPeriod(resolved)
+    setPeriodFilter((prev) => {
+      const year = normalizeAcademicYear(prev.tahunAjaran)
+      const isFallbackPeriod = year === fallback.tahunAjaran
+      const currentActive = activeAcademicPeriodRef.current
+      const isPreviousActive = year === currentActive.tahunAjaran
+      if (year && !isFallbackPeriod && !isPreviousActive) return { ...prev, semester: '' }
+      return toPeriodFilter(resolved)
+    })
+  }, [fallback.tahunAjaran])
+
+  useEffect(() => {
+    if (!authSettings) return
+    const resolved = withCalendarSemester(resolveAcademicPeriod(authSettings || {}))
+    applyResolvedPeriod(resolved)
+  }, [applyResolvedPeriod, authSettings])
+
   useEffect(() => {
     let cancelled = false
 
-    const applyResolvedPeriod = (resolved) => {
-      setActiveAcademicPeriod(resolved)
-      setPeriodFilter((prev) => {
-        const year = normalizeAcademicYear(prev.tahunAjaran)
-        const isFallbackPeriod = year === fallback.tahunAjaran
-        const currentActive = activeAcademicPeriodRef.current
-        const isPreviousActive = year === currentActive.tahunAjaran
-        if (year && !isFallbackPeriod && !isPreviousActive) return { ...prev, semester: '' }
-        return toPeriodFilter(resolved)
-      })
-    }
-
     const load = async () => {
       try {
-        const { data, error } = await supabase
-          .from('settings')
-          .select('tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai')
-          .order('id', { ascending: true })
-          .limit(1)
-          .maybeSingle()
+        const data = await queryClient.fetchQuery({
+          queryKey: queryKeys.admin.activeAcademicPeriodSettings(),
+          queryFn: async () => {
+            const { data, error } = await supabase
+              .from('settings')
+              .select(SETTINGS_PERIOD_COLUMNS)
+              .order('id', { ascending: true })
+              .limit(1)
+              .maybeSingle()
 
-        if (error) throw error
+            if (error) throw error
+            return data || {}
+          },
+          staleTime: 60 * 1000
+        })
         if (cancelled) return
 
         const resolved = withCalendarSemester(resolveAcademicPeriod(data || {}))
@@ -128,6 +148,7 @@ export default function useActiveAcademicPeriod({
       .channel('active_academic_period_settings')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, (payload) => {
         if (cancelled) return
+        queryClient.setQueryData(queryKeys.admin.activeAcademicPeriodSettings(), payload.new || {})
         const resolved = withCalendarSemester(resolveAcademicPeriod(payload.new || {}))
         applyResolvedPeriod(resolved)
       })
@@ -137,7 +158,7 @@ export default function useActiveAcademicPeriod({
       cancelled = true
       supabase.removeChannel(channel)
     }
-  }, [fallback])
+  }, [applyResolvedPeriod, fallback])
 
   const resolvedPeriod = useMemo(
     () => resolveAcademicPeriod({

@@ -106,7 +106,8 @@ const resolveAutoPrefetchMax = (requestedMax) => {
     : Number(navigator.deviceMemory || 0)
   const constrainedDevice = deviceMemory > 0 && deviceMemory <= 4
   const constrainedConnection = connection?.effectiveType === '3g'
-  const ceiling = constrainedDevice || constrainedConnection ? 1 : 2
+  const balancedDevice = deviceMemory > 0 && deviceMemory <= 6
+  const ceiling = constrainedDevice || constrainedConnection ? 1 : balancedDevice ? 2 : 5
 
   return Math.min(safeRequestedMax, ceiling)
 }

@@ -108,7 +108,7 @@ function GoogleStatusOverlay({ status, onClose }) {
               <span className="text-2xl font-black">{isSuccess ? '✓' : isWarning ? '!' : '×'}</span>
             </div>
             <div className="min-w-0 flex-1">
-              <h3 id="google-status-title" className="text-lg font-extrabold text-slate-950">
+              <h3 id="google-status-title" className="text-lg font-semibold text-slate-950">
                 {status.title}
               </h3>
               <p className="mt-2 text-sm leading-6 text-slate-700">{status.message}</p>

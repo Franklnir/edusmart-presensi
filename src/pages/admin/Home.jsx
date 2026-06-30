@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useLocalCache } from '../../hooks/useLocalCache'
 import { useUIStore } from '../../store/useUIStore'
@@ -6,6 +6,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
+import { queryClient, queryKeys } from '../../lib/queryClient'
 import { List } from 'react-window'
 
 /* ===== Utils ===== */
@@ -151,24 +152,6 @@ const StatCard = React.memo(({ label, value, icon, color = 'blue' }) => {
 
 StatCard.displayName = 'StatCard'
 
-// Loading Skeleton
-const LoadingSkeleton = React.memo(() => (
-  <div className="animate-pulse space-y-6">
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-      {[...Array(6)].map((_, i) => (
-        <div key={i} className="bg-slate-100 rounded-2xl h-24" />
-      ))}
-    </div>
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-      {[...Array(2)].map((_, i) => (
-        <div key={i} className="bg-slate-100 rounded-2xl h-96" />
-      ))}
-    </div>
-  </div>
-))
-
-LoadingSkeleton.displayName = 'LoadingSkeleton'
-
 // ===================================================================
 //    Halaman Home Admin (Dashboard, Pengumuman & Ekstrakurikuler)
 // ===================================================================
@@ -200,23 +183,34 @@ export default function AHome() {
     eskul: 0
   })
 
-  const [isLoading, setIsLoading] = useState(!hasStatsCache)
+  const [isLoading, setIsLoading] = useState(false)
+  const [isDashboardRefreshing, setIsDashboardRefreshing] = useState(false)
   const [settingsId, setSettingsId] = useState(null)
   const [maxEskulPerSiswa, setMaxEskulPerSiswa] = useState(DEFAULT_MAX_ESKUL_PER_SISWA)
   const [savingMaxEskul, setSavingMaxEskul] = useState(false)
   const [activeEskulPeriod, setActiveEskulPeriod] = useState(() => resolveAcademicPeriod())
+  const hasLoadedInitialDataRef = useRef(false)
 
   useEffect(() => {
     setActiveEskulPeriod(activeSchoolPeriod)
   }, [activeSchoolPeriod])
 
-  const loadCurrentAcademicPeriod = useCallback(async () => {
-    const { data } = await supabase
-      .from('settings')
-      .select(SETTINGS_PERIOD_COLUMNS)
-      .order('id')
-      .limit(1)
-      .maybeSingle()
+  const loadCurrentAcademicPeriod = useCallback(async ({ force = false } = {}) => {
+    const data = await queryClient.fetchQuery({
+      queryKey: queryKeys.admin.activeAcademicPeriodSettings(),
+      queryFn: async () => {
+        const { data, error } = await supabase
+          .from('settings')
+          .select(SETTINGS_PERIOD_COLUMNS)
+          .order('id')
+          .limit(1)
+          .maybeSingle()
+
+        if (error) throw error
+        return data || {}
+      },
+      staleTime: force ? 0 : 60 * 1000
+    })
 
     const period = resolveAcademicPeriod(data || {})
     setSettingsId(data?.id || null)
@@ -226,8 +220,10 @@ export default function AHome() {
   }, [])
 
   // Gunakan useCallback untuk fungsi yang dipanggil di useEffect
-  const loadAllData = useCallback(async () => {
-    setIsLoading(true)
+  const loadAllData = useCallback(async ({ silent = false } = {}) => {
+    const shouldBlock = !silent && !hasStatsCache
+    setIsLoading(shouldBlock)
+    setIsDashboardRefreshing(!shouldBlock)
     try {
       const periodPromise = loadCurrentAcademicPeriod()
       const batchPromise = supabase.batch([
@@ -251,7 +247,15 @@ export default function AHome() {
       const period = await periodPromise
       const summaryParams = period?.tahunAjaran ? { tahun_ajaran: period.tahunAjaran } : {}
       const [summaryRes, batchRes] = await Promise.all([
-        supabase.admin.dashboardSummary(summaryParams),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.admin.dashboardSummary(summaryParams),
+          queryFn: async () => {
+            const { data, error } = await supabase.admin.dashboardSummary(summaryParams)
+            if (error) throw error
+            return data || {}
+          },
+          staleTime: silent ? 60 * 1000 : 15 * 1000
+        }).then((data) => ({ data })),
         batchPromise
       ])
 
@@ -294,27 +298,37 @@ export default function AHome() {
       pushToast('error', error?.message ? `Gagal memuat data awal: ${error.message}` : 'Gagal memuat data awal')
     } finally {
       setIsLoading(false)
+      setIsDashboardRefreshing(false)
     }
-  }, [loadCurrentAcademicPeriod, pushToast])
+  }, [hasStatsCache, loadCurrentAcademicPeriod, pushToast])
 
   useEffect(() => {
-    loadAllData()
-  }, [loadAllData])
+    if (hasLoadedInitialDataRef.current) return
+    hasLoadedInitialDataRef.current = true
+    loadAllData({ silent: hasStatsCache })
+  }, [hasStatsCache, loadAllData])
 
   const loadStatistics = useCallback(async () => {
     try {
       const params = activeSchoolPeriod?.tahunAjaran ? { tahun_ajaran: activeSchoolPeriod.tahunAjaran } : {}
-      const { data, error } = await supabase.admin.dashboardSummary(params)
-      if (error) throw error
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.dashboardSummary(params),
+        queryFn: async () => {
+          const { data, error } = await supabase.admin.dashboardSummary(params)
+          if (error) throw error
+          return data || {}
+        },
+        staleTime: 15 * 1000
+      })
 
       setStats({
-        siswa: data?.siswa || 0,
-        guru: data?.guru || 0,
-        admin: data?.admin || 0,
-        kelas: data?.kelas || 0,
-        absensi: data?.absensi || 0,
-        pengumuman: data?.pengumuman || 0,
-        eskul: data?.eskul || 0
+        siswa: data.siswa || 0,
+        guru: data.guru || 0,
+        admin: data.admin || 0,
+        kelas: data.kelas || 0,
+        absensi: data.absensi || 0,
+        pengumuman: data.pengumuman || 0,
+        eskul: data.eskul || 0
       })
     } catch (error) {
       pushToast('error', 'Gagal memuat statistik')
@@ -325,7 +339,7 @@ export default function AHome() {
     const channel = supabase
       .channel('admin_home_period')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => {
-        void loadCurrentAcademicPeriod()
+        void loadCurrentAcademicPeriod({ force: true })
         void loadStatistics()
       })
       .subscribe()
@@ -391,11 +405,18 @@ export default function AHome() {
       if (kelas) params.kelas = kelas
       if (q) params.q = q
 
-      const { data, error } = await supabase.admin.studentOptions(params)
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.studentOptions(params),
+        queryFn: async () => {
+          const { data, error } = await supabase.admin.studentOptions(params)
+          if (error) throw error
+          return data || {}
+        },
+        staleTime: force ? 0 : 60 * 1000
+      })
       if (data?.meta?.has_more !== undefined) {
          setMemberOptionsHasMore(data.meta.has_more)
       }
-      if (error) throw error
       const rows = data?.rows || []
       mergeSiswaOptions(rows)
       if (!kelas) setStudentOptionsLoaded(true)
@@ -412,7 +433,7 @@ export default function AHome() {
     } finally {
       setStudentOptionsLoading(false)
     }
-  }, [eskulDataPeriod?.tahunAjaran, mergeSiswaOptions, pushToast, siswaList, studentOptionsLoaded, studentOptionsLoading])
+  }, [eskulDataPeriod?.tahunAjaran, mergeSiswaOptions, pushToast])
 
 
   // Map cepat: uid → {nama, kelas}
@@ -633,12 +654,12 @@ export default function AHome() {
 
   
   useEffect(() => {
-    if (addMemberMode !== 'single' || addMemberLocked) return undefined
+    if (!isAddMemberModalOpen || addMemberMode !== 'single' || addMemberLocked) return undefined
     const timer = window.setTimeout(() => {
       loadStudentOptions({ q: memberSearch, kelas: addMemberClass })
     }, memberSearch ? 300 : 0)
     return () => window.clearTimeout(timer)
-  }, [addMemberMode, addMemberLocked, memberSearch, addMemberClass, loadStudentOptions])
+  }, [addMemberMode, addMemberLocked, addMemberClass, isAddMemberModalOpen, loadStudentOptions, memberSearch])
 
   const loadEskulAnggota = useCallback(async () => {
     if (!eskulSel) return
@@ -1126,27 +1147,27 @@ export default function AHome() {
     }
   }, [eskulSel, isViewingArchivePeriod, loadEskulAnggota, pushToast])
 
-  if (isLoading) {
-    return (
-      <div className="page-wrapper">
-        <LoadingSkeleton />
-      </div>
-    )
-  }
-
   return (
     <div className="page-wrapper">
       <div className="w-full space-y-6">
         {/* ── Header ── */}
         <div className="page-title-card">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-2xl text-blue-600">
-              📊
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-2xl text-blue-600">
+                📊
+              </div>
+              <div>
+                <h1 className="page-title-heading">Dashboard Admin</h1>
+                <p className="page-title-description">Kelola data sekolah, pengumuman, dan ekstrakurikuler</p>
+              </div>
             </div>
-            <div>
-              <h1 className="page-title-heading">Dashboard Admin</h1>
-              <p className="page-title-description">Kelola data sekolah, pengumuman, dan ekstrakurikuler</p>
-            </div>
+            {(isLoading || isDashboardRefreshing) && (
+              <span className="inline-flex items-center gap-2 self-start rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 sm:self-center">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                {hasStatsCache ? 'Memperbarui data...' : 'Menyiapkan data...'}
+              </span>
+            )}
           </div>
         </div>
 

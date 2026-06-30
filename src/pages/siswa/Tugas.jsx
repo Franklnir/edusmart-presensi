@@ -475,7 +475,7 @@ function MiniCard({ title, value, icon, cls }) {
       <div className="flex items-center justify-between">
         <div>
           <div className="text-xs opacity-80">{title}</div>
-          <div className="text-2xl font-extrabold">{value}</div>
+          <div className="text-2xl font-semibold">{value}</div>
         </div>
         <div className="text-2xl">{icon}</div>
       </div>
@@ -1549,7 +1549,7 @@ export default function TugasSiswa() {
             <div className="assignment-submit-success__mark mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
               <CheckCircle2 className="h-11 w-11" />
             </div>
-            <div className="text-xl font-extrabold text-slate-950">{uploadSuccessNotice.title}</div>
+            <div className="text-xl font-semibold text-slate-950">{uploadSuccessNotice.title}</div>
             {uploadSuccessNotice.detail && (
               <div className="mt-2 max-w-xs text-sm font-medium text-slate-600">{uploadSuccessNotice.detail}</div>
             )}
@@ -1572,7 +1572,7 @@ export default function TugasSiswa() {
                 <CheckCircle2 className="assignment-success-toast__icon relative h-6 w-6" />
               </div>
               <div className="min-w-0">
-                <div className="text-sm font-extrabold text-emerald-900">{uploadSuccessNotice.title}</div>
+                <div className="text-sm font-semibold text-emerald-900">{uploadSuccessNotice.title}</div>
                 {uploadSuccessNotice.detail && (
                   <div className="mt-0.5 text-xs text-emerald-700">{uploadSuccessNotice.detail}</div>
                 )}
@@ -1853,7 +1853,7 @@ export default function TugasSiswa() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="font-extrabold text-slate-800 truncate">{t.judul}</div>
+                        <div className="font-semibold text-slate-800 truncate">{t.judul}</div>
                         <div className="text-xs text-slate-500 mt-1">{t.mapel}</div>
                       </div>
                       <StatusBadge status={t.myStatus} />
@@ -1948,7 +1948,7 @@ export default function TugasSiswa() {
                           🧾
                         </div>
                         <div className="min-w-0">
-                          <div className="text-xl sm:text-2xl font-extrabold text-slate-800 truncate">
+                          <div className="text-xl sm:text-2xl font-semibold text-slate-800 truncate">
                             {detail?.tugas?.judul || selectedTugas.judul}
                           </div>
                           <div className="text-sm text-slate-600 mt-1">
@@ -2062,7 +2062,7 @@ export default function TugasSiswa() {
                             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
                               <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div>
-                                  <div className="text-sm font-extrabold text-emerald-900">Jawaban sudah terkirim</div>
+                                  <div className="text-sm font-semibold text-emerald-900">Jawaban sudah terkirim</div>
                                   <div className="mt-1 text-xs text-emerald-700">
                                     {detail?.myJawaban?.waktu_submit ? `Terakhir submit: ${formatDateTime(detail.myJawaban.waktu_submit)}` : 'Jawaban tersimpan.'}
                                   </div>

@@ -53,14 +53,14 @@ const DesktopSidebar = React.memo(({
               onError={onLogoError}
             />
           ) : (
-            <span className="font-extrabold text-white text-[15px]">{schoolName.charAt(0).toUpperCase()}</span>
+            <span className="font-semibold text-white text-[15px]">{schoolName.charAt(0).toUpperCase()}</span>
           )}
         </div>
 
         {!collapsed && (
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-semibold text-brand-600 uppercase tracking-[0.16em] leading-none mb-1">{roleBadge.label} Panel</p>
-            <p className="text-[16px] font-extrabold text-slate-900 truncate leading-tight">{schoolName}</p>
+            <p className="text-[16px] font-semibold text-slate-900 truncate leading-tight">{schoolName}</p>
           </div>
         )}
 

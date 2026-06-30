@@ -1168,7 +1168,7 @@ export default function SHome() {
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-brand-600 via-brand-700 to-indigo-700 p-6 text-white shadow-brand">
           <div className="relative z-10">
             <p className="text-sm font-semibold text-brand-200 mb-0.5">{greeting} 👋</p>
-            <h1 className="text-2xl font-extrabold">{profile?.nama || 'Siswa'}</h1>
+            <h1 className="text-2xl font-semibold">{profile?.nama || 'Siswa'}</h1>
             <p className="text-sm text-brand-200 mt-1">
               Kelas <span className="font-bold text-white">{dashboardClass || profileClass || '—'}</span>
             </p>
@@ -1236,7 +1236,7 @@ export default function SHome() {
 	                  </button>
 	                  <div className="flex items-center gap-2">
 	                    {tugasMeta.overdue > 0 && (
-	                      <span className="px-2.5 py-1 bg-red-600 text-white rounded-full text-xs font-extrabold shadow-sm">
+	                      <span className="px-2.5 py-1 bg-red-600 text-white rounded-full text-xs font-semibold shadow-sm">
 	                        -{tugasMeta.overdue}
 	                      </span>
 	                    )}
@@ -1257,7 +1257,7 @@ export default function SHome() {
 	                        <h3 className={`font-semibold text-sm transition-colors ${t.isOverdue ? 'text-red-800 group-hover:text-red-900' : 'text-slate-800 group-hover:text-violet-700'}`}>{t.judul}</h3>
 	                        <div className="flex flex-shrink-0 items-center gap-1.5">
 	                          {t.isOverdue && (
-	                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-600 text-white border border-red-600 font-extrabold">
+	                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-600 text-white border border-red-600 font-semibold">
 	                              -1
 	                            </span>
 	                          )}
@@ -1419,22 +1419,22 @@ export default function SHome() {
               {/* Status Saya */}
               <div className="mb-4 p-3.5 rounded-xl border-2 border-brand-100 bg-gradient-to-br from-brand-50 to-indigo-50">
                 <p className="text-xs font-semibold text-slate-600 mb-1">Status Anda Hari Ini</p>
-                <p className={`text-2xl font-extrabold ${statusUser === 'Hadir' ? 'text-emerald-600' : statusUser === 'Izin' || statusUser === 'Sakit' ? 'text-amber-600' : statusUser === 'Alpha' ? 'text-rose-600' : 'text-brand-600'}`}>{statusUser}</p>
+                <p className={`text-2xl font-semibold ${statusUser === 'Hadir' ? 'text-emerald-600' : statusUser === 'Izin' || statusUser === 'Sakit' ? 'text-amber-600' : statusUser === 'Alpha' ? 'text-rose-600' : 'text-brand-600'}`}>{statusUser}</p>
                 <p className="text-xs text-slate-500 mt-0.5">Kelas {dashboardClass || profileClass || '—'}</p>
               </div>
               {/* Ringkasan Kelas */}
               <p className="text-xs font-semibold text-slate-500 mb-2.5 uppercase tracking-wider">Ringkasan Kelas</p>
               <div className="grid grid-cols-3 gap-2">
                 <div className="rounded-xl p-2.5 text-center bg-emerald-50 border border-emerald-100">
-                  <div className="text-xl font-extrabold text-emerald-600">{ringkas.H}</div>
+                  <div className="text-xl font-semibold text-emerald-600">{ringkas.H}</div>
                   <div className="text-[10px] font-semibold text-emerald-700 mt-0.5">Hadir</div>
                 </div>
                 <div className="rounded-xl p-2.5 text-center bg-amber-50 border border-amber-100">
-                  <div className="text-xl font-extrabold text-amber-600">{ringkas.I}</div>
+                  <div className="text-xl font-semibold text-amber-600">{ringkas.I}</div>
                   <div className="text-[10px] font-semibold text-amber-700 mt-0.5">Izin</div>
                 </div>
                 <div className="rounded-xl p-2.5 text-center bg-rose-50 border border-rose-100">
-                  <div className="text-xl font-extrabold text-rose-600">{ringkas.A}</div>
+                  <div className="text-xl font-semibold text-rose-600">{ringkas.A}</div>
                   <div className="text-[10px] font-semibold text-rose-700 mt-0.5">Alpha</div>
                 </div>
               </div>

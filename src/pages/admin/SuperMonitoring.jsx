@@ -154,7 +154,7 @@ function StatCard({ label, value, hint, icon: Icon, tone = 'indigo' }) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
-          <p className="mt-2 text-3xl font-extrabold text-slate-950">{value}</p>
+          <p className="mt-2 text-3xl font-semibold text-slate-950">{value}</p>
         </div>
         <span className={`grid h-11 w-11 place-items-center rounded-2xl ${toneClass}`}>
           <Icon size={19} />
@@ -172,7 +172,7 @@ function QueueMetricCard({ label, value, hint, icon: Icon, status = 'healthy' })
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
-          <p className="mt-2 truncate text-2xl font-extrabold text-slate-950">{value}</p>
+          <p className="mt-2 truncate text-2xl font-semibold text-slate-950">{value}</p>
         </div>
         <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl ${meta.iconBox}`}>
           <Icon size={19} />
@@ -199,7 +199,7 @@ export function QueueStatusPanel({ jobs }) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">Queue & Background Jobs</p>
-          <h2 className="mt-1 text-xl font-extrabold text-slate-950">Worker Queue Operasional</h2>
+          <h2 className="mt-1 text-xl font-semibold text-slate-950">Worker Queue Operasional</h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <StatusPill status={status.level} label={status.label} />
@@ -282,7 +282,7 @@ export function QueueTable({ queues = [] }) {
   return (
     <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-base font-extrabold text-slate-950">Queue Backlog</h2>
+        <h2 className="text-base font-semibold text-slate-950">Queue Backlog</h2>
         <ListChecks size={18} className="text-indigo-500" />
       </div>
       <div className="overflow-x-auto">
@@ -330,7 +330,7 @@ export function WorkerPanel({ supervisors = [], heartbeats = {} }) {
   return (
     <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-base font-extrabold text-slate-950">Worker & Heartbeat</h2>
+        <h2 className="text-base font-semibold text-slate-950">Worker & Heartbeat</h2>
         <ServerCog size={18} className="text-indigo-500" />
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
@@ -360,7 +360,7 @@ export function WorkerPanel({ supervisors = [], heartbeats = {} }) {
           <div key={supervisor.name} className="rounded-2xl border border-slate-100 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="truncate text-sm font-extrabold text-slate-950">{supervisor.name}</p>
+                <p className="truncate text-sm font-semibold text-slate-950">{supervisor.name}</p>
                 <p className="text-xs text-slate-500">PID {supervisor.pid || '-'} · {formatNumber(supervisor.total_processes)} proses</p>
               </div>
               <StatusPill status={supervisor.status} />
@@ -417,7 +417,7 @@ export function JobTable({ title, rows = [], empty, failed = false }) {
     <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-extrabold text-slate-950">{title}</h2>
+          <h2 className="text-base font-semibold text-slate-950">{title}</h2>
           {shouldScroll ? (
             <p className="mt-1 text-xs font-medium text-slate-500">
               Tampil {JOB_LIST_VISIBLE_COUNT} dari {formatNumber(rows.length)} job, scroll untuk lainnya.
@@ -462,7 +462,7 @@ function MiniBarChart({ title, rows = [], valueKey = 'online_now', labelKey = 'n
   return (
     <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-base font-extrabold text-slate-950">{title}</h2>
+        <h2 className="text-base font-semibold text-slate-950">{title}</h2>
         <BarChart3 size={18} className="text-indigo-500" />
       </div>
       {rows.length === 0 ? (
@@ -507,7 +507,7 @@ function LineChart({ rows = [] }) {
   return (
     <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
       <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-base font-extrabold text-slate-950">Grafik Aktivitas 24 Jam</h2>
+        <h2 className="text-base font-semibold text-slate-950">Grafik Aktivitas 24 Jam</h2>
         <p className="text-xs font-semibold text-slate-500">Berdasarkan presence ping pengguna</p>
       </div>
       <div className="overflow-hidden rounded-2xl bg-slate-950 p-4">
@@ -549,7 +549,7 @@ function ActiveUserList({ users = [] }) {
   return (
     <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-base font-extrabold text-slate-950">Pengguna Sedang Aktif</h2>
+        <h2 className="text-base font-semibold text-slate-950">Pengguna Sedang Aktif</h2>
         <Signal size={18} className="text-emerald-500" />
       </div>
       <div className="space-y-2">
@@ -647,7 +647,7 @@ export default function SuperMonitoring() {
         <div className="grid gap-4 xl:grid-cols-[1.45fr_.95fr]">
           <LineChart rows={charts.presence_24h || []} />
           <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
-            <h2 className="mb-4 text-base font-extrabold text-slate-950">Distribusi Role</h2>
+            <h2 className="mb-4 text-base font-semibold text-slate-950">Distribusi Role</h2>
             <div className="space-y-3">
               {roleDistribution.map((row) => {
                 const total = Math.max(1, Number(totals.students || 0) + Number(totals.teachers || 0) + Number(totals.admins || 0))

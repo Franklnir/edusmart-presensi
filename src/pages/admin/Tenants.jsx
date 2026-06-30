@@ -2687,11 +2687,11 @@ const Tenants = () => {
                               <th className="px-3 py-2.5 font-semibold">Device ID</th>
                               <th className="px-3 py-2.5 font-semibold">Nama</th>
                               <th className="px-3 py-2.5 font-semibold">Board</th>
-                              <th className="px-3 py-2.5 font-semibold">Status</th>
+                              <th className="px-3 py-2.5 font-semibold">Status Alat</th>
                               <th className="px-3 py-2.5 font-semibold">Transport</th>
                               <th className="px-3 py-2.5 font-semibold">Koneksi</th>
-                              <th className="px-3 py-2.5 font-semibold">Last Seen</th>
-                              <th className="px-3 py-2.5 font-semibold">IP</th>
+                              <th className="px-3 py-2.5 font-semibold">Terakhir Aktif</th>
+                              <th className="px-3 py-2.5 font-semibold">IP Terakhir</th>
                               <th className="px-3 py-2.5 font-semibold text-right">Aksi</th>
                             </tr>
                           </thead>
@@ -2725,7 +2725,7 @@ const Tenants = () => {
                                       ? 'bg-emerald-100 text-emerald-700'
                                       : 'bg-slate-100 text-slate-600'
                                   }`}>
-                                    {device.status}
+                                    {device.status === 'active' ? 'Aktif' : device.status || '-'}
                                   </span>
                                 </td>
                                 <td className="px-3 py-2.5 text-slate-600">{device.transport || '-'}</td>
@@ -3468,6 +3468,40 @@ const Tenants = () => {
                       <p className="text-xs text-slate-500">MQTT Host</p>
                       <p className="text-sm font-semibold text-slate-900 mt-1 break-all">
                         {detailRfidTemplate?.mqtt?.host || '-'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className={`rounded-xl border px-4 py-3 ${
+                      selectedDeviceDetail.is_online
+                        ? 'border-emerald-200 bg-emerald-50'
+                        : 'border-rose-200 bg-rose-50'
+                    }`}>
+                      <p className={`text-xs font-semibold uppercase ${
+                        selectedDeviceDetail.is_online ? 'text-emerald-600' : 'text-rose-600'
+                      }`}>
+                        Koneksi Alat
+                      </p>
+                      <p className={`mt-1 inline-flex items-center gap-2 text-sm font-semibold ${
+                        selectedDeviceDetail.is_online ? 'text-emerald-700' : 'text-rose-700'
+                      }`}>
+                        <span className={`h-2 w-2 rounded-full ${
+                          selectedDeviceDetail.is_online ? 'animate-pulse bg-emerald-500' : 'bg-rose-500'
+                        }`} />
+                        {selectedDeviceDetail.is_online ? 'Online' : 'Offline'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase text-slate-500">Terakhir Aktif</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">
+                        {selectedDeviceDetail.last_seen_at ? formatDateTime(selectedDeviceDetail.last_seen_at) : 'Belum pernah aktif'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase text-slate-500">IP Terakhir</p>
+                      <p className="mt-1 break-all font-mono text-sm font-semibold text-slate-900">
+                        {selectedDeviceDetail.last_ip || '-'}
                       </p>
                     </div>
                   </div>

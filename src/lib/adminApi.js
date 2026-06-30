@@ -158,6 +158,17 @@ const adminApi = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async rfidDevices() {
+      const res = await apiFetch('/api/admin/rfid-devices', {
+        method: 'GET',
+        cacheTtlMs: 5000,
+        persistCache: true,
+        staleCacheTtlMs: 2 * 60 * 1000,
+        staleKey: 'admin.rfid-devices',
+        timeoutMs: 12000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async featurePermissions() {
       const res = await apiFetch('/api/admin/feature-permissions', {
         method: 'GET',

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Mail\SertifikatMail;
 use App\Models\Profile;
 use App\Models\User;
+use App\Services\Rfid\RfidDeviceService;
 use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -20,6 +21,56 @@ use Illuminate\Validation\Rules\Password as PasswordRule;
 
 class AdminController extends ApiController
 {
+    public function rfidDevices(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->resolveOwnedTenantId($request) ?? $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        if (! Schema::hasTable('rfid_devices')) {
+            return $this->ok([
+                'tenant_id' => (string) $tenantId,
+                'tenant_slug' => (string) ($request->attributes->get('tenant_slug') ?? ''),
+                'summary' => ['total' => 0, 'online' => 0, 'offline' => 0],
+                'devices' => [],
+            ]);
+        }
+
+        $tenantSlug = trim((string) ($request->attributes->get('tenant_slug') ?? ''));
+        if ($tenantSlug === '') {
+            $tenantSlug = (string) DB::table('tenants')
+                ->where('id', $tenantId)
+                ->value('slug');
+        }
+
+        if ($tenantSlug === '') {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $devices = collect(app(RfidDeviceService::class)->listDevices($tenantSlug))
+            ->filter(fn ($device) => (string) ($device['tenant_id'] ?? '') === (string) $tenantId)
+            ->values();
+
+        $total = $devices->count();
+        $online = $devices->where('is_online', true)->count();
+
+        return $this->ok([
+            'tenant_id' => (string) $tenantId,
+            'tenant_slug' => $tenantSlug,
+            'summary' => [
+                'total' => $total,
+                'online' => $online,
+                'offline' => $total - $online,
+            ],
+            'devices' => $devices->all(),
+        ]);
+    }
+
     public function provisionUser(Request $request)
     {
         if (! $this->isAdmin($request)) {

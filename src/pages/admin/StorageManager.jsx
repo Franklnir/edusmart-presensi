@@ -107,7 +107,7 @@ function StatTile({ icon: Icon, label, value, hint }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-          <p className="mt-1 break-words text-xl font-extrabold leading-tight text-slate-950 sm:text-2xl">{value || '-'}</p>
+          <p className="mt-1 break-words text-xl font-semibold leading-tight text-slate-950 sm:text-2xl">{value || '-'}</p>
         </div>
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-indigo-50 text-indigo-600 transition-colors group-hover:bg-indigo-100">
           <Icon size={18} />
@@ -913,7 +913,7 @@ function StorageManager() {
         </label>
         <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-xs text-indigo-800">
           <p className="font-bold uppercase tracking-wide">Sisa platform bisa dibagi</p>
-          <p className="mt-2 text-lg font-extrabold text-indigo-950">{nevaPlatform?.remaining_after_allocated_label || 'Belum diset'}</p>
+          <p className="mt-2 text-lg font-semibold text-indigo-950">{nevaPlatform?.remaining_after_allocated_label || 'Belum diset'}</p>
           <p className="mt-1">Maksimal untuk sekolah ini: <span className="font-semibold">{maxNevaQuotaForSelectedBytes !== null ? formatBytesLabel(maxNevaQuotaForSelectedBytes) : 'Set APP_OBJECT_STORAGE_CAPACITY_GB'}</span></p>
         </div>
       </div>

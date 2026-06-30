@@ -53,7 +53,7 @@ function MetricCard({ label, value, hint, icon: Icon, percent, tone = 'indigo' }
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
-          <p className="mt-2 break-words text-2xl font-extrabold text-slate-950">{value}</p>
+          <p className="mt-2 break-words text-2xl font-semibold text-slate-950">{value}</p>
         </div>
         <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl ${colorClass}`}>
           <Icon size={19} />
@@ -103,7 +103,7 @@ function CapacityChart({ basis = {} }) {
 
   return (
     <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
-      <h2 className="mb-4 text-base font-extrabold text-slate-950">Basis Estimasi Kapasitas</h2>
+      <h2 className="mb-4 text-base font-semibold text-slate-950">Basis Estimasi Kapasitas</h2>
       <div className="space-y-3">
         {rows.map(([label, value]) => (
           <div key={label} className="space-y-1.5">
@@ -207,23 +207,23 @@ export default function SuperServerMonitoring() {
         <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
           <HealthGauge score={prediction.health_score} statusLabel={prediction.status_label || runtime.status_label} />
           <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
-            <h2 className="text-base font-extrabold text-slate-950">Identitas Runtime</h2>
+            <h2 className="text-base font-semibold text-slate-950">Identitas Runtime</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl bg-slate-50 p-4">
                 <p className="text-xs font-bold uppercase text-slate-500">Public IP</p>
-                <p className="mt-1 font-extrabold text-slate-950">{data?.server?.public_ip || '-'}</p>
+                <p className="mt-1 font-semibold text-slate-950">{data?.server?.public_ip || '-'}</p>
               </div>
               <div className="rounded-xl bg-slate-50 p-4">
                 <p className="text-xs font-bold uppercase text-slate-500">Hostname</p>
-                <p className="mt-1 truncate font-extrabold text-slate-950">{data?.server?.hostname || '-'}</p>
+                <p className="mt-1 truncate font-semibold text-slate-950">{data?.server?.hostname || '-'}</p>
               </div>
               <div className="rounded-xl bg-slate-50 p-4">
                 <p className="text-xs font-bold uppercase text-slate-500">Website</p>
-                <p className="mt-1 truncate font-extrabold text-slate-950">{data?.server?.app_url || '-'}</p>
+                <p className="mt-1 truncate font-semibold text-slate-950">{data?.server?.app_url || '-'}</p>
               </div>
               <div className="rounded-xl bg-slate-50 p-4">
                 <p className="text-xs font-bold uppercase text-slate-500">Update</p>
-                <p className="mt-1 font-extrabold text-slate-950">{data?.generated_at ? formatDateTime(data.generated_at) : '-'}</p>
+                <p className="mt-1 font-semibold text-slate-950">{data?.generated_at ? formatDateTime(data.generated_at) : '-'}</p>
               </div>
             </div>
           </section>
@@ -239,7 +239,7 @@ export default function SuperServerMonitoring() {
         <div className="grid gap-4 xl:grid-cols-[.9fr_1.1fr]">
           <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-base font-extrabold text-slate-950">Jaringan</h2>
+              <h2 className="text-base font-semibold text-slate-950">Jaringan</h2>
               <Network size={18} className="text-indigo-500" />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -266,7 +266,7 @@ export default function SuperServerMonitoring() {
 
           <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-base font-extrabold text-slate-950">Prediksi Kapasitas</h2>
+              <h2 className="text-base font-semibold text-slate-950">Prediksi Kapasitas</h2>
               <Globe2 size={18} className="text-indigo-500" />
             </div>
             <div className="rounded-2xl bg-gradient-to-br from-indigo-600 to-slate-950 p-5 text-white">

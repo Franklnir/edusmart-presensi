@@ -27,10 +27,16 @@ export const queryClient = new QueryClient({
 
 export const queryKeys = {
   admin: {
+    dashboardSummary: (params = {}) => ['admin', 'dashboard-summary', params],
     academicSummary: (params = {}) => ['admin', 'academic-summary', params],
+    activeAcademicPeriodSettings: () => ['admin', 'active-academic-period-settings'],
+    organizations: (params = {}) => ['admin', 'organizations', params],
+    organizationDetail: (params = {}) => ['admin', 'organization-detail', params],
+    organizationMembers: (params = {}) => ['admin', 'organization-members', params],
     students: (params = {}) => ['admin', 'students', params],
     studentOptions: (params = {}) => ['admin', 'student-options', params],
     teachers: (params = {}) => ['admin', 'teachers', params],
+    teacherOptions: (params = {}) => ['admin', 'teacher-options', params],
   },
   reports: {
     teacherSummary: (params = {}) => ['reports', 'teacher-summary', params],

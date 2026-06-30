@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * useLocalCache
@@ -12,33 +12,65 @@ import { useState, useEffect } from 'react';
  * @returns {[any, Function, boolean]} [state, setState, isLoadedFromCache]
  */
 export function useLocalCache(key, initialValue) {
-  // Try to load from cache immediately on mount
-  const [data, setData] = useState(() => {
+  const initialValueRef = useRef(initialValue);
+  initialValueRef.current = initialValue;
+
+  const readCache = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return { value: initialValueRef.current, hasCache: false };
+    }
+
     try {
       const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
+      return {
+        value: item ? JSON.parse(item) : initialValueRef.current,
+        hasCache: Boolean(item)
+      };
     } catch (error) {
       console.warn(`Error reading localStorage key "${key}":`, error);
-      return initialValue;
+      return { value: initialValueRef.current, hasCache: false };
     }
+  }, [key]);
+
+  // Try to load from cache immediately on mount
+  const [cacheState, setCacheState] = useState(() => {
+    const cached = readCache();
+    return { key, value: cached.value, hasCache: cached.hasCache };
   });
 
-  // Track if we had a cache hit to prevent unnecessary skeleton loading
-  const hasCache = !!window.localStorage.getItem(key);
+  useEffect(() => {
+    const cached = readCache();
+    setCacheState({ key, value: cached.value, hasCache: cached.hasCache });
+  }, [key, readCache]);
 
   // Wrap setState to also write to localStorage
-  const setCachedData = (newValue) => {
-    try {
-      // Allow value to be a function so we have same API as useState
-      const valueToStore =
-        newValue instanceof Function ? newValue(data) : newValue;
-      
-      setData(valueToStore);
-      window.localStorage.setItem(key, JSON.stringify(valueToStore));
-    } catch (error) {
-      console.warn(`Error setting localStorage key "${key}":`, error);
-    }
-  };
+  const setCachedData = useCallback((newValue) => {
+    setCacheState((previousState) => {
+      try {
+        const previous =
+          previousState.key === key ? previousState.value : readCache().value;
+        // Allow value to be a function so we have same API as useState.
+        const valueToStore =
+          newValue instanceof Function ? newValue(previous) : newValue;
 
-  return [data, setCachedData, hasCache];
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(key, JSON.stringify(valueToStore));
+        }
+
+        return { key, value: valueToStore, hasCache: true };
+      } catch (error) {
+        console.warn(`Error setting localStorage key "${key}":`, error);
+        return previousState;
+      }
+    });
+  }, [key, readCache]);
+
+  const visibleState = cacheState.key === key
+    ? cacheState
+    : (() => {
+      const cached = readCache();
+      return { key, value: cached.value, hasCache: cached.hasCache };
+    })();
+
+  return [visibleState.value, setCachedData, visibleState.hasCache];
 }

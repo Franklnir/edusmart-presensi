@@ -638,6 +638,8 @@ class MqttBridgeService
             'free_heap',
             'heap',
             'battery',
+            'ip_address',
+            'local_ip',
             'ip',
             'mac',
         ] as $key) {

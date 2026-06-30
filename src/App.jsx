@@ -7,6 +7,7 @@ import AppBootShell from './components/AppBootShell'
 import AppRoutes from './router'
 import { useAuthStore } from './store/useAuthStore'
 import { SESSION_EXPIRED_EVENT, hasAuthSessionHint, supabase } from './lib/supabase'
+import { scheduleRoutePrefetch } from './lib/routePrefetch'
 import { isMarketingLandingPath } from './utils/marketingHost'
 import {
   DEFAULT_USER_THEME,
@@ -15,6 +16,13 @@ import {
 } from './theme/userThemes'
 
 const AUTH_PATHS = ['/login', '/auth/google/popup', '/register', '/forgot-password', '/reset-password']
+const ADMIN_PRIORITY_PREFETCH_ROUTES = [
+  '/admin/home',
+  '/admin/organisasi',
+  '/admin/struktur-sekolah',
+  '/admin/siswa',
+  '/admin/guru'
+]
 const SESSION_REVALIDATE_INTERVAL_MS = 60 * 1000
 const buildLoginRedirectPath = ({ reason = '', next = '' } = {}) => {
   const params = new URLSearchParams()
@@ -92,6 +100,17 @@ const App = () => {
       init()
     }
   }, [initialized, init, shouldInitAuth])
+
+  useEffect(() => {
+    if (!initialized || !user?.id || profile?.role !== 'admin') return undefined
+
+    return scheduleRoutePrefetch(ADMIN_PRIORITY_PREFETCH_ROUTES, {
+      max: ADMIN_PRIORITY_PREFETCH_ROUTES.length,
+      delay: 900,
+      gap: 700,
+      timeout: 3500
+    })
+  }, [initialized, profile?.role, user?.id])
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined

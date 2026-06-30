@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { queryClient, queryKeys } from '../../../lib/queryClient'
+import { useLocalCache } from '../../../hooks/useLocalCache'
 
 const confirmDelete = (msg = 'Yakin mau dihapus?') => window.confirm(msg)
 
@@ -11,19 +12,28 @@ export default function OrganisasiTab({
   pushToast,
   showHeader = true
 }) {
-  const [orgList, setOrgList] = useState([])
+  const periodKey = useMemo(
+    () => String(academicPeriod?.tahunAjaran || 'active').replace(/[^\w-]/g, '-'),
+    [academicPeriod?.tahunAjaran]
+  )
+  const [orgList, setOrgList, hasOrgListCache] = useLocalCache(`admin_organisasi_list_${periodKey}`, [])
   const [orgSel, setOrgSel] = useState('')
   const [orgForm, setOrgForm] = useState({ nama: '', visi: '', misi: '', pembinaGuruId: '' })
-  const [orgAnggota, setOrgAnggota] = useState([])
+  const [orgAnggota, setOrgAnggota, hasOrgAnggotaCache] = useLocalCache(`admin_organisasi_anggota_${periodKey}_${orgSel || 'none'}`, [])
   const [addMemberUid, setAddMemberUid] = useState('')
   const [addMemberJabatan, setAddMemberJabatan] = useState('')
   const [editAnggotaId, setEditAnggotaId] = useState(null)
   const [editAnggotaData, setEditAnggotaData] = useState({})
   const [loading, setLoading] = useState(false)
+  const [loadingList, setLoadingList] = useState(!hasOrgListCache)
+  const [refreshingList, setRefreshingList] = useState(false)
+  const [loadingDetail, setLoadingDetail] = useState(false)
+  const [loadingMembers, setLoadingMembers] = useState(false)
   const [memberSearch, setMemberSearch] = useState('')
   const [memberOptions, setMemberOptions] = useState(() => siswaList || [])
   const [memberOptionsLoading, setMemberOptionsLoading] = useState(false)
   const [memberOptionsHasMore, setMemberOptionsHasMore] = useState(false)
+  const [memberOptionsTouched, setMemberOptionsTouched] = useState(false)
 
   const JABATAN_OPTS = ['Ketua', 'Wakil Ketua', 'Sekretaris', 'Bendahara', 'Koordinator', 'Anggota']
   const FORBIDDEN = /[.#$[\]]/
@@ -39,6 +49,7 @@ export default function OrganisasiTab({
 
 
   const loadMemberOptions = useCallback(async (query = '') => {
+    setMemberOptionsTouched(true)
     setMemberOptionsLoading(true)
     try {
       const params = {
@@ -71,8 +82,8 @@ export default function OrganisasiTab({
   }, [academicPeriod?.tahunAjaran, mapStudentOptions, pushToast])
 
   useEffect(() => {
-    loadOrgList()
-  }, [])
+    loadOrgList({ silent: hasOrgListCache })
+  }, [academicPeriod?.tahunAjaran])
 
   useEffect(() => {
     if (Array.isArray(siswaList) && siswaList.length) {
@@ -83,6 +94,9 @@ export default function OrganisasiTab({
 
   useEffect(() => {
     if (orgSel) {
+      setMemberOptionsTouched(false)
+      setMemberSearch('')
+      setAddMemberUid('')
       loadOrgDetail()
       loadOrgAnggota()
     } else {
@@ -94,109 +108,130 @@ export default function OrganisasiTab({
   }, [academicPeriod?.tahunAjaran, orgSel])
 
   useEffect(() => {
-    if (!orgSel) return undefined
+    if (!orgSel || !memberOptionsTouched) return undefined
 
     const timer = window.setTimeout(() => {
       loadMemberOptions(memberSearch)
     }, memberSearch ? 300 : 0)
 
     return () => window.clearTimeout(timer)
-  }, [loadMemberOptions, memberSearch, orgSel])
+  }, [loadMemberOptions, memberOptionsTouched, memberSearch, orgSel])
 
-  const loadOrgList = async () => {
+  const loadOrgList = async ({ silent = false, force = false } = {}) => {
+    const shouldBlock = !silent && !hasOrgListCache && orgList.length === 0
     try {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('organisasi')
-        .select('*')
-        .order('nama')
+      setLoadingList(shouldBlock)
+      setRefreshingList(!shouldBlock)
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.organizations({ tahun_ajaran: academicPeriod?.tahunAjaran || '' }),
+        queryFn: async () => {
+          const { data, error } = await supabase
+            .from('organisasi')
+            .select('*')
+            .order('nama')
 
-      if (error) throw error
+          if (error) throw error
+          return data || []
+        },
+        staleTime: force ? 0 : 60 * 1000
+      })
       setOrgList(data || [])
     } catch (error) {
       console.error('Error loading organisasi:', error)
       pushToast('error', 'Gagal memuat data organisasi')
     } finally {
-      setLoading(false)
+      setLoadingList(false)
+      setRefreshingList(false)
     }
   }
 
-  const loadOrgDetail = async () => {
+  const loadOrgDetail = async ({ force = false } = {}) => {
     try {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('organisasi')
-        .select('*')
-        .eq('id', orgSel)
-        .single()
+      setLoadingDetail(true)
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.organizationDetail({ id: orgSel }),
+        queryFn: async () => {
+          const { data, error } = await supabase
+            .from('organisasi')
+            .select('*')
+            .eq('id', orgSel)
+            .single()
 
-      if (error) throw error
+          if (error) throw error
+          return data || null
+        },
+        staleTime: force ? 0 : 60 * 1000
+      })
 
       setOrgForm({
-        nama: data.nama || '',
-        visi: data.visi || '',
-        misi: data.misi || '',
-        pembinaGuruId: data.pembina_guru_id || ''
+        nama: data?.nama || '',
+        visi: data?.visi || '',
+        misi: data?.misi || '',
+        pembinaGuruId: data?.pembina_guru_id || ''
       })
     } catch (error) {
       console.error('Error loading org detail:', error)
       pushToast('error', 'Gagal memuat detail organisasi')
     } finally {
-      setLoading(false)
+      setLoadingDetail(false)
     }
   }
 
-  const loadOrgAnggota = async () => {
+  const loadOrgAnggota = async ({ force = false } = {}) => {
+    const shouldBlock = !hasOrgAnggotaCache && orgAnggota.length === 0
     try {
-      setLoading(true)
+      setLoadingMembers(shouldBlock)
 
-      const { data, error } = await supabase
-        .from('organisasi_anggota')
-        .select('*')
-        .eq('organisasi_id', orgSel)
-        .order('jabatan', { ascending: false })
-        .order('nama')
+      const rows = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.organizationMembers({ id: orgSel, tahun_ajaran: academicPeriod?.tahunAjaran || '' }),
+        queryFn: async () => {
+          const { data, error } = await supabase
+            .from('organisasi_anggota')
+            .select('*')
+            .eq('organisasi_id', orgSel)
+            .order('jabatan', { ascending: false })
+            .order('nama')
 
-      if (error) throw error
+          if (error) throw error
 
-      if (!data || data.length === 0) {
-        setOrgAnggota([])
-        return
-      }
+          if (!data || data.length === 0) return []
 
-      const siswaIds = [...new Set(data.map((r) => r.siswa_id).filter(Boolean))]
+          const siswaIds = [...new Set(data.map((r) => r.siswa_id).filter(Boolean))]
 
-      let activeMap = new Map()
-      if (siswaIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, nama, kelas')
-          .in('id', siswaIds)
-          .eq('status', 'active')
-          
-        if (profiles) {
-          activeMap = new Map(profiles.map(p => [String(p.id), p]))
-        }
-      }
+          let activeMap = new Map()
+          if (siswaIds.length > 0) {
+            const { data: profiles } = await supabase
+              .from('profiles')
+              .select('id, nama, kelas')
+              .in('id', siswaIds)
+              .eq('status', 'active')
 
-      const rows = data
-        .map((row) => {
-          const siswa = activeMap.get(String(row.siswa_id || ''))
-          if (!siswa) return null // Filter out inactive/deleted students
-          return {
-            ...row,
-            nama: siswa.nama || row.nama,
-            kelas: siswa.kelas || row.kelas || ''
+            if (profiles) {
+              activeMap = new Map(profiles.map(p => [String(p.id), p]))
+            }
           }
-        })
-        .filter(Boolean)
+
+          return data
+            .map((row) => {
+              const siswa = activeMap.get(String(row.siswa_id || ''))
+              if (!siswa) return null // Filter out inactive/deleted students
+              return {
+                ...row,
+                nama: siswa.nama || row.nama,
+                kelas: siswa.kelas || row.kelas || ''
+              }
+            })
+            .filter(Boolean)
+        },
+        staleTime: force ? 0 : 30 * 1000
+      })
 
       setOrgAnggota(rows)
     } catch (error) {
       console.error('Error loading anggota:', error)
       pushToast('error', 'Gagal memuat anggota organisasi')
     } finally {
-      setLoading(false)
+      setLoadingMembers(false)
     }
   }
 
@@ -253,7 +288,8 @@ export default function OrganisasiTab({
 
       pushToast('success', `Organisasi "${nama}" berhasil ditambahkan`)
       setOrgSel(id)
-      await loadOrgList()
+      queryClient.invalidateQueries({ queryKey: ['admin', 'organizations'] })
+      await loadOrgList({ silent: true, force: true })
     } catch (error) {
       console.error('Error adding organisasi:', error)
       pushToast('error', error.message || 'Gagal menambah organisasi')
@@ -288,7 +324,9 @@ export default function OrganisasiTab({
       if (error) throw error
 
       pushToast('success', 'Organisasi berhasil disimpan')
-      await loadOrgList()
+      queryClient.invalidateQueries({ queryKey: ['admin', 'organizations'] })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'organization-detail'] })
+      await loadOrgList({ silent: true, force: true })
     } catch (error) {
       console.error('Error saving organisasi:', error)
       pushToast('error', error.message || 'Gagal menyimpan organisasi')
@@ -328,7 +366,10 @@ export default function OrganisasiTab({
       setAddMemberJabatan('')
       setEditAnggotaId(null)
       setEditAnggotaData({})
-      await loadOrgList()
+      queryClient.invalidateQueries({ queryKey: ['admin', 'organizations'] })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'organization-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['admin', 'organization-members'] })
+      await loadOrgList({ silent: true, force: true })
     } catch (error) {
       console.error('Error deleting organisasi:', error)
       pushToast('error', error.message || 'Gagal menghapus organisasi')
@@ -371,7 +412,8 @@ export default function OrganisasiTab({
       pushToast('success', 'Anggota berhasil ditambahkan')
       setAddMemberUid('')
       setAddMemberJabatan('')
-      await loadOrgAnggota()
+      queryClient.invalidateQueries({ queryKey: ['admin', 'organization-members'] })
+      await loadOrgAnggota({ force: true })
     } catch (error) {
       console.error('Error adding anggota:', error)
       pushToast('error', error.message || 'Gagal menambah anggota')
@@ -393,7 +435,8 @@ export default function OrganisasiTab({
       if (error) throw error
 
       pushToast('success', 'Anggota berhasil dihapus')
-      await loadOrgAnggota()
+      queryClient.invalidateQueries({ queryKey: ['admin', 'organization-members'] })
+      await loadOrgAnggota({ force: true })
     } catch (error) {
       console.error('Error deleting anggota:', error)
       pushToast('error', error.message || 'Gagal menghapus anggota')
@@ -436,7 +479,8 @@ export default function OrganisasiTab({
       pushToast('success', 'Data anggota berhasil diupdate')
       setEditAnggotaId(null)
       setEditAnggotaData({})
-      await loadOrgAnggota()
+      queryClient.invalidateQueries({ queryKey: ['admin', 'organization-members'] })
+      await loadOrgAnggota({ force: true })
     } catch (error) {
       console.error('Error updating anggota:', error)
       pushToast('error', error.message || 'Gagal mengupdate anggota')
@@ -460,6 +504,11 @@ export default function OrganisasiTab({
             <p className="text-gray-600 text-sm mt-1">
               Kelola organisasi, pembina, serta anggota siswa
             </p>
+            {(loadingList || refreshingList) && (
+              <p className="mt-1 text-xs font-semibold text-green-700">
+                {hasOrgListCache ? 'Memperbarui daftar organisasi...' : 'Memuat daftar organisasi...'}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -506,7 +555,9 @@ export default function OrganisasiTab({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500">Opsi Siswa</p>
-              <p className="text-2xl font-bold text-gray-900">{memberOptionsLoading ? '...' : memberOptions.length}</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {memberOptionsLoading ? '...' : memberOptionsTouched ? memberOptions.length : '—'}
+              </p>
             </div>
             <div className="p-3 bg-yellow-100 rounded-lg">
               <span className="text-xl">📋</span>
@@ -525,9 +576,16 @@ export default function OrganisasiTab({
                 <span className="p-1.5 bg-blue-100 rounded-lg">📂</span>
                 <span>Daftar Organisasi</span>
               </h3>
-              <span className="text-xs text-gray-500">{orgList.length}</span>
+              <span className="text-xs text-gray-500">
+                {refreshingList ? 'refresh...' : orgList.length}
+              </span>
             </div>
             <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+              {loadingList && !orgList.length && (
+                <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
+                  Memuat daftar organisasi...
+                </div>
+              )}
               {orgList.map(o => (
                 <button
                   key={o.id}
@@ -551,7 +609,7 @@ export default function OrganisasiTab({
                   )}
                 </button>
               ))}
-              {!orgList.length && (
+              {!loadingList && !orgList.length && (
                 <div className="text-center py-8 text-gray-500">
                   <div className="w-12 h-12 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center">
                     <span>📂</span>
@@ -586,7 +644,11 @@ export default function OrganisasiTab({
                 <span className="p-1.5 bg-green-100 rounded-lg">📝</span>
                 <span>{isEditingOrg ? 'Detail Organisasi' : 'Organisasi Baru'}</span>
               </h3>
-              {isEditingOrg && (
+              {loadingDetail ? (
+                <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
+                  Memuat detail
+                </span>
+              ) : isEditingOrg && (
                 <span className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded-full">
                   Sedang diedit
                 </span>
@@ -719,7 +781,11 @@ export default function OrganisasiTab({
                 <input
                   className="mb-2 block w-full px-3 py-2 text-sm border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
                   value={memberSearch}
+                  onFocus={() => {
+                    if (!memberOptionsTouched) loadMemberOptions(memberSearch)
+                  }}
                   onChange={(event) => {
+                    setMemberOptionsTouched(true)
                     setMemberSearch(event.target.value)
                     setAddMemberUid('')
                   }}
@@ -729,6 +795,9 @@ export default function OrganisasiTab({
                   className="block w-full px-3 py-2 text-sm border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
                   value={addMemberUid}
                   onChange={e => setAddMemberUid(e.target.value)}
+                  onFocus={() => {
+                    if (!memberOptionsTouched) loadMemberOptions(memberSearch)
+                  }}
                   disabled={memberOptionsLoading}
                 >
                   <option value="">{memberOptionsLoading ? 'Memuat siswa...' : 'Pilih siswa'}</option>
@@ -799,6 +868,13 @@ export default function OrganisasiTab({
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
+                {loadingMembers && !orgAnggota.length && (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-6 text-center text-sm font-semibold text-blue-700">
+                      Memuat anggota organisasi...
+                    </td>
+                  </tr>
+                )}
                 {orgAnggota.map(a => (
                   <tr key={a.id} className="hover:bg-gray-50 transition-colors duration-150">
                     <td className="px-4 py-3">
@@ -877,7 +953,7 @@ export default function OrganisasiTab({
                     </td>
                   </tr>
                 ))}
-                {!orgAnggota.length && (
+                {!loadingMembers && !orgAnggota.length && (
                   <tr>
                     <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
                       <div className="w-16 h-16 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center">

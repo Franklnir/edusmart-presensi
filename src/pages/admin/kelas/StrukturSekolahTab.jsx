@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   Briefcase,
@@ -17,6 +17,8 @@ import {
   X
 } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
+import { queryClient, queryKeys } from '../../../lib/queryClient'
+import { useLocalCache } from '../../../hooks/useLocalCache'
 
 const DEFAULT_POS = [
   'Kepala Sekolah',
@@ -75,6 +77,10 @@ const includesQuery = (query, ...values) => {
 }
 
 const confirmDelete = (message = 'Yakin mau dihapus?') => window.confirm(message)
+
+const cacheKeyPart = (value = 'active') => (
+  normalizeSpaces(value || 'active').replace(/[^\w-]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '') || 'active'
+)
 
 function StatCard({ icon: Icon, label, value, description, tone = 'slate' }) {
   const toneClass = {
@@ -186,12 +192,18 @@ export default function StrukturSekolahTab({
   pushToast,
   showHeader = true
 }) {
-  const [struktur, setStruktur] = useState([])
-  const [waliKelas, setWaliKelas] = useState([])
-  const [summaryGuruList, setSummaryGuruList] = useState([])
+  const periodKey = useMemo(() => cacheKeyPart(academicPeriod?.tahunAjaran || 'active'), [academicPeriod?.tahunAjaran])
+  const [cachedSummary, setCachedSummary, hasSummaryCache] = useLocalCache(`admin_struktur_sekolah_summary_${periodKey}`, {
+    struktur: [],
+    waliKelas: [],
+    guruList: []
+  })
+  const [struktur, setStruktur] = useState(() => Array.isArray(cachedSummary?.struktur) ? cachedSummary.struktur : [])
+  const [waliKelas, setWaliKelas] = useState(() => Array.isArray(cachedSummary?.waliKelas) ? cachedSummary.waliKelas : [])
+  const [summaryGuruList, setSummaryGuruList] = useState(() => Array.isArray(cachedSummary?.guruList) ? cachedSummary.guruList : [])
   const [posBaru, setPosBaru] = useState('')
   const [posGuru, setPosGuru] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => !hasSummaryCache)
   const [refreshing, setRefreshing] = useState(false)
   const [savingKey, setSavingKey] = useState('')
   const [positionSearch, setPositionSearch] = useState('')
@@ -226,12 +238,25 @@ export default function StrukturSekolahTab({
     return teacherById.get(guruId)?.name || ''
   }, [teacherById])
 
-  const loadData = useCallback(async ({ silent = false } = {}) => {
+  useEffect(() => {
+    const cachedStruktur = Array.isArray(cachedSummary?.struktur) ? cachedSummary.struktur : []
+    const cachedWaliKelas = Array.isArray(cachedSummary?.waliKelas) ? cachedSummary.waliKelas : []
+    const cachedGuruList = Array.isArray(cachedSummary?.guruList) ? cachedSummary.guruList : []
+
+    setStruktur(cachedStruktur)
+    setWaliKelas(cachedWaliKelas)
+    setSummaryGuruList(cachedGuruList)
+    setLoading(!hasSummaryCache && !cachedStruktur.length && !cachedWaliKelas.length && !cachedGuruList.length)
+  }, [cachedSummary, hasSummaryCache])
+
+  const loadData = useCallback(async ({ silent = false, force = false } = {}) => {
     try {
-      if (silent) {
-        setRefreshing(true)
-      } else {
+      const shouldBlock = !silent && !hasSummaryCache
+
+      if (shouldBlock) {
         setLoading(true)
+      } else {
+        setRefreshing(true)
       }
 
       const params = {
@@ -243,8 +268,15 @@ export default function StrukturSekolahTab({
         params.tahun_ajaran = academicPeriod.tahunAjaran
       }
 
-      const { data, error } = await supabase.admin.academicSummary(params)
-      if (error) throw error
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.admin.academicSummary(params),
+        queryFn: async () => {
+          const { data: summaryData, error } = await supabase.admin.academicSummary(params)
+          if (error) throw error
+          return summaryData || {}
+        },
+        staleTime: force ? 0 : 60 * 1000
+      })
 
       const strukturRows = (data?.struktur_sekolah || []).map((row) => ({
         ...row,
@@ -277,14 +309,21 @@ export default function StrukturSekolahTab({
 
       setStruktur(strukturRows)
       setWaliKelas(waliRows)
-      setSummaryGuruList((data?.guru || []).map((guru) => {
+      const guruRows = (data?.guru || []).map((guru) => {
         const name = guru.nama || guru.email || guru.id
         return {
           ...guru,
           name,
           label: `${name}${guru.email ? ` (${guru.email})` : ''}`
         }
-      }))
+      })
+
+      setSummaryGuruList(guruRows)
+      setCachedSummary({
+        struktur: strukturRows,
+        waliKelas: waliRows,
+        guruList: guruRows
+      })
     } catch (error) {
       console.error('Error loading struktur sekolah:', error)
       pushToast('error', error?.message || 'Gagal memuat struktur sekolah')
@@ -292,11 +331,14 @@ export default function StrukturSekolahTab({
       setLoading(false)
       setRefreshing(false)
     }
-  }, [academicPeriod?.tahunAjaran, pushToast])
+  }, [academicPeriod?.tahunAjaran, hasSummaryCache, pushToast, setCachedSummary])
 
+  const loadedPeriodRef = useRef('')
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    if (loadedPeriodRef.current === periodKey) return
+    loadedPeriodRef.current = periodKey
+    loadData({ silent: hasSummaryCache })
+  }, [hasSummaryCache, loadData, periodKey])
 
   const formatNamaKelas = useCallback((kelas) => {
     if (kelas.nama_kelas) return kelas.nama_kelas
@@ -382,7 +424,7 @@ export default function StrukturSekolahTab({
       pushToast('success', `Jabatan "${jabatan}" berhasil ditambahkan`)
       setPosBaru('')
       setPosGuru('')
-      await loadData({ silent: true })
+      await loadData({ silent: true, force: true })
     } catch (error) {
       console.error('Error adding posisi:', error)
       pushToast('error', error?.message || 'Gagal menambah jabatan')
@@ -415,7 +457,7 @@ export default function StrukturSekolahTab({
 
       pushToast('success', 'Penanggung jawab jabatan berhasil disimpan')
       setEditingPosition({ id: '', guruId: '' })
-      await loadData({ silent: true })
+      await loadData({ silent: true, force: true })
     } catch (error) {
       console.error('Error updating posisi:', error)
       pushToast('error', error?.message || 'Gagal menyimpan jabatan')
@@ -437,7 +479,7 @@ export default function StrukturSekolahTab({
       if (error) throw error
 
       pushToast('success', 'Jabatan berhasil dihapus')
-      await loadData({ silent: true })
+      await loadData({ silent: true, force: true })
     } catch (error) {
       console.error('Error deleting posisi:', error)
       pushToast('error', error?.message || 'Gagal menghapus jabatan')
@@ -470,7 +512,7 @@ export default function StrukturSekolahTab({
 
       pushToast('success', 'Wali kelas berhasil disimpan')
       setEditingWali({ id: '', guruId: '' })
-      await loadData({ silent: true })
+      await loadData({ silent: true, force: true })
     } catch (error) {
       console.error('Error updating wali kelas:', error)
       pushToast('error', error?.message || 'Gagal menyimpan wali kelas')
@@ -480,17 +522,7 @@ export default function StrukturSekolahTab({
   }
 
   const busy = loading || Boolean(savingKey)
-
-  if (loading) {
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="flex items-center justify-center gap-3 text-sm font-semibold text-slate-500">
-          <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-          Memuat struktur sekolah...
-        </div>
-      </div>
-    )
-  }
+  const initialLoading = loading && !struktur.length && !waliKelas.length && !guruOptions.length
 
   return (
     <div className="space-y-6">
@@ -511,7 +543,7 @@ export default function StrukturSekolahTab({
             <button
               type="button"
               className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => loadData({ silent: true })}
+              onClick={() => loadData({ silent: true, force: true })}
               disabled={busy || refreshing}
             >
               <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
@@ -519,6 +551,15 @@ export default function StrukturSekolahTab({
             </button>
           </div>
         </section>
+      )}
+
+      {(initialLoading || refreshing) && (
+        <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm font-semibold text-blue-700">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {initialLoading ? 'Memuat data struktur sekolah...' : 'Memperbarui data struktur sekolah...'}
+          </div>
+        </div>
       )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -608,7 +649,7 @@ export default function StrukturSekolahTab({
             <button
               type="button"
               className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => loadData({ silent: true })}
+              onClick={() => loadData({ silent: true, force: true })}
               disabled={busy || refreshing}
             >
               <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
@@ -629,7 +670,14 @@ export default function StrukturSekolahTab({
           </div>
         </div>
 
-        {filteredStruktur.length ? (
+        {initialLoading ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-8 text-center">
+            <div className="flex items-center justify-center gap-2 text-sm font-semibold text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+              Memuat jabatan sekolah...
+            </div>
+          </div>
+        ) : filteredStruktur.length ? (
           <div className="overflow-hidden rounded-2xl border border-slate-200">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -766,7 +814,14 @@ export default function StrukturSekolahTab({
           </select>
         </div>
 
-        {filteredWaliKelas.length ? (
+        {initialLoading ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-8 text-center">
+            <div className="flex items-center justify-center gap-2 text-sm font-semibold text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+              Memuat wali kelas...
+            </div>
+          </div>
+        ) : filteredWaliKelas.length ? (
           <div className="overflow-hidden rounded-2xl border border-slate-200">
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-slate-200 text-sm">

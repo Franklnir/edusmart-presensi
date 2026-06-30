@@ -1145,7 +1145,7 @@ export default function BackupAdmin() {
                 </div>
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">Mode Super Admin</p>
-                  <h2 className="mt-1 text-lg font-extrabold text-slate-950">Pilih Sekolah</h2>
+                  <h2 className="mt-1 text-lg font-semibold text-slate-950">Pilih Sekolah</h2>
                   <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
                     Pilih tenant sekolah untuk preview, download, restore, sinkron status Drive, dan menjalankan backup bulanan dengan konteks tenant yang tepat.
                   </p>
@@ -1181,7 +1181,7 @@ export default function BackupAdmin() {
             <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-indigo-50 text-indigo-700">
               <Building2 className="h-6 w-6" />
             </div>
-            <h3 className="mt-4 text-lg font-extrabold text-slate-950">Pilih sekolah terlebih dahulu</h3>
+            <h3 className="mt-4 text-lg font-semibold text-slate-950">Pilih sekolah terlebih dahulu</h3>
             <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
               Data backup, status Drive, jadwal bulanan, dan restore akan tampil setelah tenant sekolah dipilih.
             </p>

@@ -511,7 +511,7 @@ function SuperWhatsAppCenter() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-extrabold text-slate-900">Koneksi Nomor Pusat</h2>
+                <h2 className="text-lg font-semibold text-slate-900">Koneksi Nomor Pusat</h2>
                 <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-bold ${currentMeta.badge}`}>
                   {currentMeta.label}
                 </span>
@@ -607,7 +607,7 @@ function SuperWhatsAppCenter() {
             </div>
 
             <form onSubmit={sendCentralTest} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-              <h3 className="text-base font-extrabold text-slate-900">Tes Kirim Pesan</h3>
+              <h3 className="text-base font-semibold text-slate-900">Tes Kirim Pesan</h3>
               <p className="mt-1 text-sm text-slate-600">
                 Pakai ini untuk memastikan nomor pusat dan queue bisa mengirim pesan sebelum notifikasi Alpha dijalankan.
               </p>
@@ -647,7 +647,7 @@ function SuperWhatsAppCenter() {
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-extrabold text-slate-900">Log Nomor Pusat</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Log Nomor Pusat</h2>
           <div className="mt-4 space-y-3">
             {(central.logs || []).length ? central.logs.slice(0, 6).map((item) => (
               <article key={item.id} className="rounded-2xl border border-slate-200 p-4">
@@ -690,7 +690,7 @@ function SuperWhatsAppCenter() {
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-lg font-extrabold text-slate-900">Aturan Kirim Alpha</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Aturan Kirim Alpha</h2>
             <p className="mt-1 text-sm text-slate-600">
               Mulai bekerja setelah jam pelajaran atau scan pulang terakhir selesai. Jika pesan sedikit, dikirim tiap {settings.fast_interval_seconds || 15} detik sampai jam {settings.fast_max_send_hour || 23}.00. Jika banyak, disebar sampai jam {settings.batch_max_send_hour || 21}.00.
               Gateway juga punya jeda global minimal {settings.send_min_interval_seconds || 10} detik per nomor pusat supaya antrean aman dan tidak menumpuk di Baileys.
@@ -734,7 +734,7 @@ function SuperWhatsAppCenter() {
       ) : (
         <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-extrabold text-slate-900">Status per Sekolah</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Status per Sekolah</h2>
             <div className="mt-4 grid gap-3">
               {(payload.tenants || []).length ? payload.tenants.map((tenant) => (
                 <article key={tenant.tenant_id} className="rounded-2xl border border-slate-200 p-4">
@@ -797,7 +797,7 @@ function SuperWhatsAppCenter() {
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-extrabold text-slate-900">Log Pengiriman Terbaru</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Log Pengiriman Terbaru</h2>
             <div className="mt-4 space-y-3">
               {(payload.logs || []).length ? payload.logs.map((item) => (
                 <article key={item.id} className="rounded-2xl border border-slate-200 p-4">
