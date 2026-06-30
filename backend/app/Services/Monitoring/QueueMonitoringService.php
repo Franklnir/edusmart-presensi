@@ -2,7 +2,9 @@
 
 namespace App\Services\Monitoring;
 
+use App\Jobs\QuizWorkerHeartbeatJob;
 use Composer\InstalledVersions;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -271,12 +273,14 @@ class QueueMonitoringService
             ];
         }
 
-        $query = DB::table('failed_jobs');
+        $allFailedJobsQuery = DB::table('failed_jobs');
+        $query = $this->withoutIgnoredFailedJobs(DB::table('failed_jobs'));
         $hasFailedAt = Schema::hasColumn('failed_jobs', 'failed_at');
         $total = (int) (clone $query)->count();
         $lastHour = $hasFailedAt ? (int) (clone $query)->where('failed_at', '>=', now()->subHour())->count() : $total;
         $lastDay = $hasFailedAt ? (int) (clone $query)->where('failed_at', '>=', now()->subDay())->count() : $total;
         $recentQuery = (clone $query)->select('id', 'uuid', 'connection', 'queue', 'payload', 'exception', 'failed_at');
+        $ignoredTotal = max(0, (int) (clone $allFailedJobsQuery)->count() - $total);
         if ($hasFailedAt) {
             $recentQuery->orderByDesc('failed_at');
         } else {
@@ -293,6 +297,7 @@ class QueueMonitoringService
         return [
             'available' => true,
             'total' => $total,
+            'ignored_total' => $ignoredTotal,
             'last_hour' => $lastHour,
             'last_24h' => $lastDay,
             'recent' => $recent,
@@ -387,6 +392,30 @@ class QueueMonitoringService
                 default => 'Sehat',
             },
             'issues' => $issues,
+        ];
+    }
+
+    private function withoutIgnoredFailedJobs(Builder $query): Builder
+    {
+        foreach ($this->ignoredFailedJobNeedles() as $needle) {
+            $query->where(function (Builder $scope) use ($needle): void {
+                $scope
+                    ->where(function (Builder $payload) use ($needle): void {
+                        $payload->whereNull('payload')->orWhere('payload', 'not like', '%'.$needle.'%');
+                    })
+                    ->where(function (Builder $exception) use ($needle): void {
+                        $exception->whereNull('exception')->orWhere('exception', 'not like', '%'.$needle.'%');
+                    });
+            });
+        }
+
+        return $query;
+    }
+
+    private function ignoredFailedJobNeedles(): array
+    {
+        return [
+            class_basename(QuizWorkerHeartbeatJob::class),
         ];
     }
 

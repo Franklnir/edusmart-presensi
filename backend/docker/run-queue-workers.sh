@@ -30,8 +30,9 @@ fi
 
 pids=""
 
-if php artisan list --raw 2>/dev/null | grep -qx 'horizon'; then
-  exec php artisan horizon
+if php artisan help horizon >/dev/null 2>&1; then
+  horizon_environment="${HORIZON_ENVIRONMENT:-${APP_ENV:-production}}"
+  exec php artisan horizon --environment="$horizon_environment"
 fi
 
 start_worker() {
