@@ -259,9 +259,9 @@ export default function SAbsensi() {
       <div className="max-w-full mx-auto space-y-6">
         {/* Header */}
         <div className="page-title-card">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-3 h-12 bg-gradient-to-b from-blue-500 to-purple-600 rounded-full"></div>
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-700">✓</div>
               <div>
                 <h1 className="page-title-heading">Absensi Siswa</h1>
                 <p className="page-title-description">
@@ -273,7 +273,7 @@ export default function SAbsensi() {
               </div>
             </div>
 
-            <div className="flex flex-col lg:flex-row gap-3">
+            <div className="page-title-actions">
               {/* Jam Realtime + info RFID */}
               <div className="flex flex-col gap-1">
                 <RealTimeClock />

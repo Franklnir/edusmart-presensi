@@ -2470,9 +2470,9 @@ export default function AGuru() {
 
         {/* Header */}
         <div className="page-title-card">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-md">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-600">
                 <span className="text-2xl">👨‍🏫</span>
               </div>
               <div>

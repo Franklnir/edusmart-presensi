@@ -20,9 +20,9 @@ export default function StrukturSekolahPage() {
   return (
     <div className="w-full space-y-6 px-4 pb-8 pt-2 sm:px-6 lg:px-8">
       <div className="page-title-card">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-700">
+        <div className="page-title-layout">
+          <div className="page-title-main">
+            <div className="page-title-icon bg-blue-100 text-blue-700">
               <Building2 className="h-6 w-6" />
             </div>
             <div>

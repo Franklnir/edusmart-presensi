@@ -1490,13 +1490,13 @@ function StorageManager() {
     <div className="page-wrapper">
       <div className="w-full space-y-6">
         <section className="page-title-card">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-indigo-100 text-indigo-700">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-indigo-100 text-indigo-700">
                 <HardDrive size={26} />
               </div>
               <div>
-                <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">Storage Manager</p>
+                <p className="page-title-kicker">Storage Manager</p>
                 <h1 className="page-title-heading">Storage Neva Cloud S3</h1>
                 <p className="page-title-description">
                   {isSuperAdmin
@@ -1505,7 +1505,7 @@ function StorageManager() {
                 </p>
               </div>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="page-title-actions">
               {isSuperAdmin && (
                 <button
                   type="button"

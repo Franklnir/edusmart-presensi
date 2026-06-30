@@ -175,15 +175,17 @@ const SuperAdmins = () => {
   return (
     <div className="p-6 space-y-6">
       <div className="page-title-card">
-        <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-sm font-bold text-blue-700">
+        <div className="page-title-layout">
+          <div className="page-title-main">
+            <div className="page-title-icon bg-blue-100 text-sm font-bold text-blue-700">
             SA
-          </div>
-          <div>
-            <h1 className="page-title-heading">Super Admin Management</h1>
-            <p className="page-title-description">
-              Tambah atau hapus super admin dengan aman.
-            </p>
+            </div>
+            <div>
+              <h1 className="page-title-heading">Super Admin Management</h1>
+              <p className="page-title-description">
+                Tambah atau hapus super admin dengan aman.
+              </p>
+            </div>
           </div>
         </div>
       </div>

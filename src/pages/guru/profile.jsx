@@ -864,9 +864,9 @@ export default function ProfileGuru() {
   return (
     <div className="space-y-6 p-4 sm:p-6">
         <div className="page-title-card">
-          <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon border border-slate-200 bg-white text-slate-700 shadow-sm">
                 <UserRound className="h-6 w-6" />
               </div>
               <div>
@@ -874,14 +874,16 @@ export default function ProfileGuru() {
                 <p className="page-title-description">Kelola identitas akun, keamanan login, dan data pribadi Anda.</p>
               </div>
             </div>
-            <div className="inline-flex w-fit items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-              <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${emailVerified ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                {emailVerified ? <CheckCircle2 className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
-              </div>
-              <div>
-                <div className="text-xs font-medium text-slate-500">Status Email</div>
-                <div className={`text-sm font-semibold ${emailVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
-                {emailVerified ? 'Terverifikasi' : 'Belum Terverifikasi'}
+            <div className="page-title-actions">
+              <div className="inline-flex w-fit items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${emailVerified ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                  {emailVerified ? <CheckCircle2 className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-500">Status Email</div>
+                  <div className={`text-sm font-semibold ${emailVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {emailVerified ? 'Terverifikasi' : 'Belum Terverifikasi'}
+                  </div>
                 </div>
               </div>
             </div>

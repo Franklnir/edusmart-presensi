@@ -2321,10 +2321,10 @@ export default function TugasGuru() {
       <div className="max-w-full mx-auto space-y-6">
         {/* HEADER */}
         <div className="page-title-card">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg">
-                <span className="text-2xl text-white">📚</span>
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-700">
+                <span>📚</span>
               </div>
               <div>
                 <h1 className="page-title-heading">Kelola Tugas</h1>
@@ -2332,7 +2332,7 @@ export default function TugasGuru() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <div className="page-title-actions">
               <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
                 <div className="text-xs text-slate-500">Guru Pengampu</div>
                 <div className="font-semibold text-slate-800">{profile?.nama || '-'}</div>

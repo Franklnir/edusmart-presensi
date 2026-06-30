@@ -773,9 +773,9 @@ export default function RapotSiswa() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 sm:p-6">
       <div className="mx-auto max-w-full space-y-6">
         <section className="page-title-card">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-2xl text-white shadow-lg">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-700">
                 📘
               </div>
               <div>
@@ -784,7 +784,8 @@ export default function RapotSiswa() {
                 <p className="page-title-description">Kelola rapot UTS dan UAS siswa wali secara terstruktur.</p>
               </div>
             </div>
-            <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:w-[380px]">
+            <div className="page-title-actions w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:w-[380px]">
+              <div className="w-full">
               <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Kelas / Riwayat Wali</label>
               <select
                 value={selectedContext}
@@ -800,6 +801,7 @@ export default function RapotSiswa() {
               {!waliHistoryOptions.length && (
                 <p className="mt-2 text-xs text-slate-500">Belum ada kelas wali atau riwayat rapot.</p>
               )}
+              </div>
             </div>
           </div>
         </section>

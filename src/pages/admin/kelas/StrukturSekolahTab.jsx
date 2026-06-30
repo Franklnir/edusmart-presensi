@@ -606,9 +606,9 @@ export default function StrukturSekolahTab({
     <div className="space-y-6">
       {showHeader && (
         <section className="page-title-card">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-700">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-700">
                 <Building2 className="h-6 w-6" />
               </div>
               <div>
@@ -618,15 +618,17 @@ export default function StrukturSekolahTab({
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => loadData({ silent: true, force: true })}
-              disabled={busy || refreshing}
-            >
-              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-              Muat ulang
-            </button>
+            <div className="page-title-actions">
+              <button
+                type="button"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => loadData({ silent: true, force: true })}
+                disabled={busy || refreshing}
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                Muat ulang
+              </button>
+            </div>
           </div>
         </section>
       )}

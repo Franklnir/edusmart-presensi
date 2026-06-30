@@ -3395,15 +3395,16 @@ export default function SiswaQuiz() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50/40 to-blue-50/50 py-6 px-4 sm:px-6">
       <div className="max-w-full mx-auto space-y-6">
         <div className="page-title-card">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-3 h-12 bg-gradient-to-b from-cyan-500 to-blue-600 rounded-full"></div>
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-cyan-100 text-cyan-700">?</div>
               <div>
                 <h1 className="page-title-heading">Quiz Siswa</h1>
                 <p className="page-title-description">Kerjakan quiz sesuai jadwal yang ditentukan guru.</p>
               </div>
             </div>
-            <div className="sismu-toolbar-filters sismu-toolbar-filters--student w-full lg:w-auto">
+            <div className="page-title-actions w-full lg:w-auto">
+              <div className="sismu-toolbar-filters sismu-toolbar-filters--student w-full">
               <div className="sismu-toolbar-card bg-gradient-to-r from-slate-50 to-indigo-50 border-indigo-100">
                 <div className="text-xs text-slate-500">Siswa</div>
                 <div className="truncate font-semibold text-slate-800">{profile?.nama || '-'}</div>
@@ -3456,6 +3457,7 @@ export default function SiswaQuiz() {
               >
                 Muat Ulang
               </button>
+              </div>
             </div>
           </div>
         </div>

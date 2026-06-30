@@ -1152,9 +1152,9 @@ export default function AHome() {
       <div className="w-full space-y-6">
         {/* ── Header ── */}
         <div className="page-title-card">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-2xl text-blue-600">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-600">
                 📊
               </div>
               <div>

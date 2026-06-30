@@ -2368,9 +2368,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
         <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8 pt-2">
           {/* Header */}
           <div className="page-title-card">
-            <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-              <div className="flex items-center space-x-4">
-                <div className={`p-3 rounded-2xl ${isSchedulePage ? 'bg-orange-100' : 'bg-blue-100'}`}>
+            <div className="page-title-layout">
+              <div className="page-title-main">
+                <div className={`page-title-icon ${isSchedulePage ? 'bg-orange-100' : 'bg-blue-100'}`}>
                   <span className={`text-2xl ${isSchedulePage ? 'text-orange-600' : 'text-blue-600'}`}>
                     {isSchedulePage ? '📅' : '🏫'}
                   </span>

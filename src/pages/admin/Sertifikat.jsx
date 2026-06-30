@@ -734,16 +734,16 @@ const AdminSertifikat = () => {
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
         {/* Navbar */}
         <div className="page-title-card">
-          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-blue-600 rounded-xl shadow-sm text-white text-2xl">🎓</div>
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-700">🎓</div>
               <div>
                 <h1 className="page-title-heading">Certificate Pro</h1>
                 <p className="page-title-description">Admin Dashboard Sertifikat</p>
               </div>
             </div>
 
-            <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
+            <div className="page-title-actions rounded-xl border border-gray-200 bg-gray-100 p-1">
               {[
                 { id: 'generator', label: 'Generator Massal' },
                 { id: 'template', label: 'Desainer Template' },

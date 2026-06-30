@@ -2784,15 +2784,15 @@ function AbsensiGuru() {
       <div className="max-w-full mx-auto space-y-6">
         {/* Header */}
         <div className="page-title-card">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-3 h-12 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full"></div>
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-700">✓</div>
               <div>
                 <h1 className="page-title-heading">Absensi Guru</h1>
                 <p className="page-title-description">Sistem manajemen kehadiran siswa real-time.</p>
               </div>
             </div>
-            <div className="flex flex-col items-stretch lg:items-end gap-3">
+            <div className="page-title-actions flex-col items-stretch lg:items-end">
               <RealTimeClock />
               <div className="flex flex-wrap gap-2">
               <span

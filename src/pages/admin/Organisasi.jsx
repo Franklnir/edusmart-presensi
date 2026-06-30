@@ -50,9 +50,9 @@ export default function OrganisasiPage() {
   return (
     <div className="w-full space-y-6 px-4 pb-8 pt-2 sm:px-6 lg:px-8">
       <div className="page-title-card">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="rounded-2xl bg-emerald-100 p-3 text-emerald-700">
+        <div className="page-title-layout">
+          <div className="page-title-main">
+            <div className="page-title-icon bg-emerald-100 text-emerald-700">
               <span className="text-2xl">👥</span>
             </div>
             <div>

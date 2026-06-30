@@ -200,40 +200,40 @@ const PermissionAdmin = () => {
     <div className="page-wrapper">
       <div className="w-full space-y-6">
         <section className="page-title-card">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-indigo-100 text-indigo-700">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-indigo-100 text-indigo-700">
                 <ShieldCheck size={26} />
               </div>
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">Sistem</p>
-              <h1 className="page-title-heading">Permission Admin</h1>
-              <p className="page-title-description">
-                Delegasikan fitur admin sekolah tertentu ke guru, jabatan, atau wali kelas tanpa mengubah role akun utama.
-              </p>
+              <div>
+                <p className="page-title-kicker">Sistem</p>
+                <h1 className="page-title-heading">Permission Admin</h1>
+                <p className="page-title-description">
+                  Delegasikan fitur admin sekolah tertentu ke guru, jabatan, atau wali kelas tanpa mengubah role akun utama.
+                </p>
+              </div>
+            </div>
+            <div className="page-title-actions">
+              <button
+                type="button"
+                onClick={loadPermissions}
+                className={`${actionButtonClass} border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50`}
+                disabled={loading}
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCreate(true)}
+                className={`${actionButtonClass} bg-brand-600 text-white shadow-brand-sm hover:bg-brand-700`}
+              >
+                <Plus className="h-4 w-4" />
+                Tambah Permission
+              </button>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={loadPermissions}
-              className={`${actionButtonClass} border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50`}
-              disabled={loading}
-            >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowCreate(true)}
-              className={`${actionButtonClass} bg-brand-600 text-white shadow-brand-sm hover:bg-brand-700`}
-            >
-              <Plus className="h-4 w-4" />
-              Tambah Permission
-            </button>
-          </div>
-        </div>
-      </section>
+        </section>
 
       <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-card">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">

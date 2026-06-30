@@ -1561,9 +1561,9 @@ export default function Scan() {
       <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="page-title-card">
-          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-            <div className="flex items-center space-x-4">
-              <div className="p-3 rounded-2xl bg-blue-100 text-blue-600">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-600">
                 <ScanLine className="h-6 w-6" />
               </div>
               <div>

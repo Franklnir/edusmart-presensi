@@ -10,9 +10,9 @@ function StudentPageHeader({
 }) {
   return (
     <div className="page-title-card">
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-4">
-          <div className="p-3 bg-blue-100 rounded-lg">
+      <div className="page-title-layout">
+        <div className="page-title-main">
+          <div className="page-title-icon bg-blue-100 text-blue-600">
             <span className="text-2xl text-blue-600">👨‍🎓</span>
           </div>
           <div>

@@ -464,33 +464,37 @@ function SuperWhatsAppCenter() {
 
   return (
     <div className="page-wrapper space-y-6">
-      <section className="page-title-card flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">
-            <ShieldCheck className="h-4 w-4" />
-            WhatsApp Pusat
+      <section className="page-title-card">
+        <div className="page-title-layout">
+          <div className="page-title-main">
+            <div className="page-title-icon bg-emerald-100 text-emerald-700">
+              <MessageCircle className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="page-title-kicker">WhatsApp Pusat</p>
+              <h1 className="page-title-heading">WA Gateway Alpha Multi Sekolah</h1>
+              <p className="page-title-description max-w-3xl">
+                Satu nomor Baileys/Evolution milik Super Admin mengirim rekap Alpha harian ke wali murid. Satu siswa hanya menerima satu pesan per hari berisi daftar mapel yang Alpha.
+              </p>
+            </div>
           </div>
-          <h1 className="page-title-heading mt-3">WA Gateway Alpha Multi Sekolah</h1>
-          <p className="page-title-description max-w-3xl">
-            Satu nomor Baileys/Evolution milik Super Admin mengirim rekap Alpha harian ke wali murid. Satu siswa hanya menerima satu pesan per hari berisi daftar mapel yang Alpha.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="date"
-            value={date}
-            onChange={(event) => setDate(event.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-          />
-          <button
-            type="button"
-            onClick={() => loadData()}
-            disabled={loading}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
-          >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-            Refresh
-          </button>
+          <div className="page-title-actions">
+            <input
+              type="date"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+            />
+            <button
+              type="button"
+              onClick={() => loadData()}
+              disabled={loading}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+            >
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+              Refresh
+            </button>
+          </div>
         </div>
       </section>
 
@@ -840,14 +844,20 @@ function TenantWhatsAppNotice() {
   return (
     <div className="page-wrapper">
       <section className="page-title-card">
-        <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-slate-600">
-          <ShieldCheck className="h-4 w-4" />
-          Dikelola Pusat
+        <div className="page-title-layout">
+          <div className="page-title-main">
+            <div className="page-title-icon bg-slate-100 text-slate-700">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="page-title-kicker text-slate-600">Dikelola Pusat</p>
+              <h1 className="page-title-heading">WhatsApp dikelola Super Admin</h1>
+              <p className="page-title-description max-w-3xl">
+                Notifikasi WhatsApp memakai satu nomor pusat agar lebih stabil dan tidak membebani setiap sekolah. Admin sekolah cukup memastikan nomor wali murid di data siswa sudah benar.
+              </p>
+            </div>
+          </div>
         </div>
-        <h1 className="page-title-heading mt-3">WhatsApp dikelola Super Admin</h1>
-        <p className="page-title-description max-w-3xl">
-          Notifikasi WhatsApp memakai satu nomor pusat agar lebih stabil dan tidak membebani setiap sekolah. Admin sekolah cukup memastikan nomor wali murid di data siswa sudah benar.
-        </p>
       </section>
     </div>
   )
@@ -1140,32 +1150,36 @@ function LegacyTenantWhatsApp() {
 
   return (
     <div className="p-6 space-y-6">
-        <div className="page-title-card whatsapp-page-header flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="whatsapp-page-eyebrow inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">
-              <ShieldCheck className="h-4 w-4" />
-              Notifikasi Tenant
+        <div className="page-title-card whatsapp-page-header">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-emerald-100 text-emerald-700">
+                <MessageCircle className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="whatsapp-page-eyebrow page-title-kicker text-emerald-700">Notifikasi Tenant</p>
+                <h1 className="whatsapp-page-title page-title-heading">WhatsApp Sekolah</h1>
+                <p className="whatsapp-page-description page-title-description max-w-3xl">
+                  Hubungkan WhatsApp per sekolah via QR, atur jenis notifikasi yang dikirim,
+                  dan pantau log pengiriman agar operasional admin tetap stabil.
+                </p>
+              </div>
             </div>
-            <h1 className="whatsapp-page-title page-title-heading mt-3">WhatsApp Sekolah</h1>
-            <p className="whatsapp-page-description page-title-description max-w-3xl">
-              Hubungkan WhatsApp per sekolah via QR, atur jenis notifikasi yang dikirim,
-              dan pantau log pengiriman agar operasional admin tetap stabil.
-            </p>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${currentMeta.badge}`}>
-              {currentMeta.label}
-            </span>
-            <button
-              type="button"
-              onClick={handleSync}
-              disabled={syncing || loading}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              Sinkronkan
-            </button>
+            <div className="page-title-actions">
+              <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${currentMeta.badge}`}>
+                {currentMeta.label}
+              </span>
+              <button
+                type="button"
+                onClick={handleSync}
+                disabled={syncing || loading}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                Sinkronkan
+              </button>
+            </div>
           </div>
         </div>
 

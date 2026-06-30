@@ -1038,9 +1038,9 @@ export default function EditProfile() {
     <div className="space-y-6 p-4 sm:p-6">
         {/* HEADER */}
         <div className="page-title-card">
-          <div className="flex flex-col justify-between gap-6 md:flex-row md:items-center">
-            <div className="flex items-center gap-5">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon border border-slate-200 bg-white text-slate-700 shadow-sm">
                 <UserRound className="h-6 w-6" />
               </div>
               <div>
@@ -1051,7 +1051,7 @@ export default function EditProfile() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="page-title-actions flex-col gap-3">
               <div className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                 <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${profile?.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
                   <CheckCircle2 className="h-4 w-4" />

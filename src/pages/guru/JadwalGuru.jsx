@@ -2497,12 +2497,10 @@ export default function JadwalGuru() {
       <div className="w-full space-y-6">
 
         {/* HEADER */}
-        <div className="page-title-card relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-full blur-3xl -mr-16 -mt-16 opacity-50 pointer-events-none"></div>
-
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
-            <div className="flex items-start gap-5">
-              <div className="p-3.5 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl shadow-lg shadow-blue-500/20 text-white shrink-0">
+        <div className="page-title-card">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-700">
                 <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
@@ -2532,7 +2530,7 @@ export default function JadwalGuru() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+            <div className="page-title-actions">
               <div className="bg-gray-900 text-white px-5 py-3 rounded-xl shadow-lg flex flex-col items-center justify-center min-w-[140px]">
                 <div className="text-2xl font-mono font-bold leading-none">
                   {currentTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}

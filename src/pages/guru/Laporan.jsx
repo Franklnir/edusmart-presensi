@@ -3934,19 +3934,21 @@ export default function LaporanRekap() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 sm:p-6 print:bg-white print:p-0">
       <div className="max-w-full mx-auto space-y-6">
         <div className="page-title-card print:hidden">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
-                <span className="text-2xl text-white">📊</span>
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-700">
+                <span>📊</span>
               </div>
               <div>
                 <h1 className="page-title-heading">Laporan Guru</h1>
                 <p className="page-title-description">Rekap absensi, tugas, quiz, dan laporan wali kelas dalam satu panel.</p>
               </div>
             </div>
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
+            <div className="page-title-actions">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
               <div className="text-xs text-slate-500">Akun Aktif</div>
               <div className="font-semibold text-slate-800">{user?.email || '-'}</div>
+              </div>
             </div>
           </div>
         </div>

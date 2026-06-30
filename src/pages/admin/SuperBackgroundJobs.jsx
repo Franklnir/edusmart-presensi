@@ -45,20 +45,20 @@ export default function SuperBackgroundJobs() {
     <PageGate superAdminChecked={superAdminChecked} isSuperAdmin={isSuperAdmin}>
       <div className="space-y-6 p-4 sm:p-6">
         <div className="page-title-card">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-indigo-100 text-indigo-700">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-indigo-100 text-indigo-700">
                 <ServerCog size={24} />
               </div>
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">Monitoring</p>
+                <p className="page-title-kicker">Monitoring</p>
                 <h1 className="page-title-heading">Background Job</h1>
                 <p className="page-title-description">
                   Pantau Horizon, Redis, worker queue, heartbeat scheduler, dan failed job dari satu tempat.
                 </p>
               </div>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="page-title-actions">
               <p className="text-xs font-semibold text-slate-500">
                 Update: {data?.generated_at ? formatDateTime(data.generated_at) : '-'}
               </p>

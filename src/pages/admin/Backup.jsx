@@ -1189,9 +1189,9 @@ export default function BackupAdmin() {
         ) : (
           <>
             <section className="page-title-card">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 text-blue-700">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-blue-100 text-blue-700">
                 <Database className="h-7 w-7" />
               </div>
               <div>
@@ -1201,7 +1201,7 @@ export default function BackupAdmin() {
                 </p>
               </div>
             </div>
-            <div className="text-xs text-slate-500">
+            <div className="page-title-actions text-xs text-slate-500">
               Format: Excel, JSON, CSV, HTML
             </div>
           </div>

@@ -179,28 +179,30 @@ export default function SuperServerMonitoring() {
     <PageGate superAdminChecked={superAdminChecked} isSuperAdmin={isSuperAdmin}>
       <div className="space-y-6 p-4 sm:p-6">
         <div className="page-title-card">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-slate-900 text-white">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-slate-900 text-white">
                 <Server size={24} />
               </div>
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">Monitoring Server</p>
+                <p className="page-title-kicker">Monitoring Server</p>
                 <h1 className="page-title-heading">Monitoring Server & Performa</h1>
                 <p className="page-title-description">
                   Pantau IP, RAM, storage, jaringan, kecepatan respon, dan estimasi kapasitas akses.
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => loadData()}
-              disabled={loading}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
-            >
-              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-              Refresh
-            </button>
+            <div className="page-title-actions">
+              <button
+                type="button"
+                onClick={() => loadData()}
+                disabled={loading}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
 

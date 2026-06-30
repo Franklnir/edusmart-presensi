@@ -526,53 +526,51 @@ export default function AnimasiFlow() {
       <div className="space-y-6 p-4 sm:p-6">
         {/* ── Header ── */}
         <div className="page-title-card relative z-[100] !overflow-visible">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
-            <div className="flex items-center gap-4">
-              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-lg">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-violet-100 text-violet-700">
                 <Workflow size={24} />
               </div>
-              <div className="pr-[140px]">
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-violet-600">
-                  Monitoring
-                </p>
+              <div>
+                <p className="page-title-kicker">Monitoring</p>
                 <h1 className="page-title-heading">Animasi Flow</h1>
                 <p className="page-title-description">
                   Visualisasi alur proses EduSmart dengan animasi flowchart interaktif — powered by ArtisanFlow concept.
                 </p>
               </div>
             </div>
-            
-            {/* Theme Toggle Button - Absolute right */}
-            <div className="absolute top-6 right-6 z-[100]">
-              <button
-                type="button"
-                onClick={() => setThemeOpen((o) => !o)}
-                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-violet-400 hover:text-violet-600"
-                style={{ minWidth: 120 }}
-              >
-                <span>{theme === 'dark' ? '🌙' : '☀️'}</span>
-                <span>{theme === 'dark' ? 'Dark' : 'Light'}</span>
-                <span className="ml-auto opacity-50">▾</span>
-              </button>
-              {themeOpen && (
-                <div className="absolute right-0 top-12 z-[100] w-36 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
-                  {[
-                    { value: 'dark', emoji: '🌙', label: 'Dark' },
-                    { value: 'light', emoji: '☀️', label: 'Light' },
-                  ].map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => { setTheme(opt.value); setThemeOpen(false) }}
-                      className={`flex w-full items-center gap-3 px-4 py-2.5 text-sm font-medium transition hover:bg-violet-50 hover:text-violet-700 ${theme === opt.value ? 'bg-violet-50 text-violet-700' : 'text-slate-700'}`}
-                    >
-                      <span>{opt.emoji}</span>
-                      <span>{opt.label}</span>
-                      {theme === opt.value && <span className="ml-auto text-violet-500">✓</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
+            <div className="page-title-actions">
+              <div className="relative z-[100]">
+                <button
+                  type="button"
+                  onClick={() => setThemeOpen((o) => !o)}
+                  className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-violet-400 hover:text-violet-600"
+                  style={{ minWidth: 120 }}
+                >
+                  <span>{theme === 'dark' ? '🌙' : '☀️'}</span>
+                  <span>{theme === 'dark' ? 'Dark' : 'Light'}</span>
+                  <span className="ml-auto opacity-50">▾</span>
+                </button>
+                {themeOpen && (
+                  <div className="absolute right-0 top-12 z-[100] w-36 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                    {[
+                      { value: 'dark', emoji: '🌙', label: 'Dark' },
+                      { value: 'light', emoji: '☀️', label: 'Light' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => { setTheme(opt.value); setThemeOpen(false) }}
+                        className={`flex w-full items-center gap-3 px-4 py-2.5 text-sm font-medium transition hover:bg-violet-50 hover:text-violet-700 ${theme === opt.value ? 'bg-violet-50 text-violet-700' : 'text-slate-700'}`}
+                      >
+                        <span>{opt.emoji}</span>
+                        <span>{opt.label}</span>
+                        {theme === opt.value && <span className="ml-auto text-violet-500">✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -1584,10 +1584,10 @@ export default function TugasSiswa() {
       <div className="max-w-full mx-auto space-y-6">
         {/* HEADER */}
         <div className="page-title-card">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
-                <span className="text-2xl text-white">🧑‍🎓</span>
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-purple-100 text-purple-700">
+                <span>🧑‍🎓</span>
               </div>
               <div>
                 <h1 className="page-title-heading">Tugas Saya</h1>
@@ -1595,7 +1595,8 @@ export default function TugasSiswa() {
               </div>
             </div>
 
-            <div className="sismu-toolbar-filters sismu-toolbar-filters--compact w-full lg:w-auto">
+            <div className="page-title-actions w-full lg:w-auto">
+              <div className="sismu-toolbar-filters sismu-toolbar-filters--compact w-full">
               <div className="sismu-toolbar-card">
                 <div className="text-xs text-slate-500">Siswa</div>
                 <div className="truncate font-semibold text-slate-800">{profile?.nama || '-'}</div>
@@ -1626,6 +1627,7 @@ export default function TugasSiswa() {
               >
                 {isListLoading ? '⏳ Memuat...' : '🔄 Refresh'}
               </button>
+              </div>
             </div>
           </div>
         </div>

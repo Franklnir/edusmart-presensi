@@ -486,10 +486,16 @@ const SkeletonLoader = () => (
   <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-4">
     <div className="w-full px-3 sm:px-4 lg:px-5 space-y-4">
       {/* Header Skeleton */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <div className="animate-pulse">
-          <div className="h-7 bg-gray-200 rounded-lg w-1/3 mb-2"></div>
-          <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+      <div className="page-title-card">
+        <div className="page-title-layout animate-pulse">
+          <div className="page-title-main">
+            <div className="page-title-icon bg-gray-100" />
+            <div className="min-w-0 flex-1">
+              <div className="h-3 w-24 rounded bg-gray-200 mb-3"></div>
+              <div className="h-7 bg-gray-200 rounded-lg w-1/3 mb-2"></div>
+              <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1165,16 +1171,19 @@ export default function SHome() {
       <div className="w-full space-y-6">
 
         {/* ── Greeting Header ── */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-brand-600 via-brand-700 to-indigo-700 p-6 text-white shadow-brand">
-          <div className="relative z-10">
-            <p className="text-sm font-semibold text-brand-200 mb-0.5">{greeting} 👋</p>
-            <h1 className="text-2xl font-semibold">{profile?.nama || 'Siswa'}</h1>
-            <p className="text-sm text-brand-200 mt-1">
-              Kelas <span className="font-bold text-white">{dashboardClass || profileClass || '—'}</span>
-            </p>
+        <div className="page-title-card">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-brand-100 text-brand-700">👋</div>
+              <div>
+                <p className="page-title-kicker">{greeting}</p>
+                <h1 className="page-title-heading">{profile?.nama || 'Siswa'}</h1>
+                <p className="page-title-description">
+                  Kelas <span className="font-semibold text-slate-800">{dashboardClass || profileClass || '—'}</span>
+                </p>
+              </div>
+            </div>
           </div>
-          <div className="absolute -right-8 -top-8 w-40 h-40 rounded-full bg-white/5" />
-          <div className="absolute -right-4 -bottom-10 w-28 h-28 rounded-full bg-white/5" />
         </div>
 
         {/* ── Main grid ── */}

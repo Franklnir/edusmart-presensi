@@ -2337,16 +2337,16 @@ export default function GuruQuiz() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-4 sm:p-6">
       <div className="max-w-full mx-auto space-y-6">
         <div className="page-title-card">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-3 h-12 bg-gradient-to-b from-indigo-500 to-blue-600 rounded-full"></div>
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-indigo-100 text-indigo-700">?</div>
               <div>
                 <h1 className="page-title-heading">Kelola Quiz</h1>
                 <p className="page-title-description">Atur quiz untuk kelas yang Anda ampu dengan jadwal terstruktur.</p>
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <div className="page-title-actions">
               <div className="bg-gradient-to-r from-gray-50 to-indigo-50 border border-indigo-100 rounded-2xl px-4 py-3">
                 <div className="text-xs text-slate-500">Guru Aktif</div>
                 <div className="font-semibold text-slate-800">{user?.email || '-'}</div>

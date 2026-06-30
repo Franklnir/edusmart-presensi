@@ -308,28 +308,30 @@ export default function SuperMonitorLog() {
     <PageGate superAdminChecked={superAdminChecked} isSuperAdmin={isSuperAdmin}>
       <div className="space-y-6 p-4 sm:p-6">
         <div className="page-title-card">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-slate-950 text-white">
+          <div className="page-title-layout">
+            <div className="page-title-main">
+              <div className="page-title-icon bg-slate-950 text-white">
                 <TerminalSquare size={24} />
               </div>
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">Monitor Log</p>
+                <p className="page-title-kicker">Monitor Log</p>
                 <h1 className="page-title-heading">Monitor Log Backend</h1>
                 <p className="page-title-description">
                   Pantau error dan aktivitas Laravel tanpa membuka file log VPS. Data sensitif otomatis disembunyikan.
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => loadLogs(queryFilters)}
-              disabled={loading}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
-            >
-              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-              Refresh
-            </button>
+            <div className="page-title-actions">
+              <button
+                type="button"
+                onClick={() => loadLogs(queryFilters)}
+                disabled={loading}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
 
