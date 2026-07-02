@@ -959,15 +959,6 @@ export default function LaporanRekap() {
 
     const requestId = startReportLoad('mapel')
     try {
-      const dateStrings = getDatesInPeriod(tahun, selectedBulan)
-      if (!dateStrings.length) {
-        setMapelReportData(null)
-        setMapelManualDrafts({})
-        return
-      }
-
-      const startDate = `${dateStrings[0]}T00:00:00`
-      const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
       const kelasNama = getNamaKelasFromList(selectedKelas, kelasList)
       const kelasAliases = Array.from(new Set([
         String(selectedKelas || '').trim(),
@@ -976,74 +967,62 @@ export default function LaporanRekap() {
         String(kelasNama || '').trim().replace(/-/g, ' ')
       ].filter(Boolean)))
 
-      const kelasAliasSet = new Set(kelasAliases.map((value) => normalizeKelasKey(value)))
-      let tugasQuery = supabase
-        .from('tugas')
-        .select('id, judul, mapel, kelas, created_at')
-        .eq('mapel', selectedMapel)
-        .in('kelas', kelasAliases)
-        .gte('created_at', startDate)
-        .lte('created_at', endDate)
-      tugasQuery = applyReportAcademicFilters(tugasQuery)
-      let quizQuery = supabase
-        .from('quizzes')
-        .select('id, nama, mapel, mode, is_live, created_at')
-        .in('kelas_id', kelasAliases)
-        .eq('mapel', selectedMapel)
-        .gte('created_at', startDate)
-        .lte('created_at', endDate)
-      quizQuery = applyReportAcademicFilters(quizQuery)
-      const initialBatch = await supabase.batch([
-        { key: 'tugas', query: tugasQuery },
-        { key: 'quiz', query: quizQuery }
+      const taskParams = buildTeacherSummaryParams('tugas')
+      const quizParams = buildTeacherSummaryParams('quiz')
+      const [taskSummary, quizSummary] = await Promise.all([
+        queryClient.fetchQuery({
+          queryKey: queryKeys.reports.taskSummary(taskParams),
+          queryFn: async () => {
+            const { data, error } = await supabase.reports.taskSummary(taskParams)
+            if (error?.code === 'REQUEST_ABORTED') {
+              const aborted = new Error('Request aborted')
+              aborted.code = 'REQUEST_ABORTED'
+              throw aborted
+            }
+            if (error) throw error
+            return normalizeTeacherSummaryData(data)
+          },
+          staleTime: 60 * 1000,
+        }),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.reports.quizSummary(quizParams),
+          queryFn: async () => {
+            const { data, error } = await supabase.reports.quizSummary(quizParams)
+            if (error?.code === 'REQUEST_ABORTED') {
+              const aborted = new Error('Request aborted')
+              aborted.code = 'REQUEST_ABORTED'
+              throw aborted
+            }
+            if (error) throw error
+            return normalizeTeacherSummaryData(data)
+          },
+          staleTime: 60 * 1000,
+        })
       ])
-      const tugasResult = initialBatch.data?.tugas
-      const quizResult = initialBatch.data?.quiz
-      if (tugasResult?.error) throw tugasResult.error
-      if (quizResult?.error) throw quizResult.error
 
-      const tugasRows = (tugasResult?.data || []).filter((row) => kelasAliasSet.has(normalizeKelasKey(row.kelas)))
-      const tugasIds = (tugasRows || []).map((row) => row.id).filter(Boolean)
+      if (!isCurrentReportLoad(requestId)) return
 
-      const scoreBatchItems = []
-      if (tugasIds.length) {
-        let jawabanQuery = supabase
-          .from('tugas_jawaban')
-          .select('tugas_id, user_id, nilai')
-          .in('tugas_id', tugasIds)
-        jawabanQuery = applyReportAcademicFilters(jawabanQuery, 'tugas_jawaban')
-        scoreBatchItems.push({ key: 'jawaban', query: jawabanQuery })
-      }
+      const taskData = normalizeTeacherSummaryData(taskSummary)
+      const quizData = normalizeTeacherSummaryData(quizSummary)
+      const tugasRows = toArray(taskData?.tugas)
+      const quizRows = toArray(quizData?.quizzes || quizData?.quiz)
 
-      const quizRows = quizResult?.data || []
-      const quizIds = (quizRows || []).map((row) => row.id).filter(Boolean)
+      const studentsById = new Map()
+      ;[...toArray(taskData?.siswa), ...toArray(quizData?.siswa)].forEach((student) => {
+        const id = String(student?.id || '').trim()
+        if (!id || studentsById.has(id)) return
+        studentsById.set(id, {
+          id,
+          nama: student?.nama || '-',
+          nis: student?.nis || '',
+          kelas: student?.kelas || kelasNama || selectedKelas
+        })
+      })
 
-      if (quizIds.length) {
-        let submissionQuery = supabase
-          .from('quiz_submissions')
-          .select('quiz_id, siswa_id, score')
-          .in('quiz_id', quizIds)
-        submissionQuery = applyReportAcademicFilters(submissionQuery, 'quiz_submissions')
-        scoreBatchItems.push({ key: 'submissions', query: submissionQuery })
-      }
-
-      const scoreBatch = scoreBatchItems.length ? await supabase.batch(scoreBatchItems) : { data: {} }
-      const jawabanResult = scoreBatch.data?.jawaban
-      const submissionResult = scoreBatch.data?.submissions
-      if (jawabanResult?.error) throw jawabanResult.error
-      if (submissionResult?.error) throw submissionResult.error
-      let jawabanRows = jawabanResult?.data || []
-      let submissionRows = submissionResult?.data || []
-
-      const recordStudentIds = Array.from(new Set([
-        ...jawabanRows.map((row) => row.user_id),
-        ...submissionRows.map((row) => row.siswa_id)
-      ].map((id) => String(id || '').trim()).filter(Boolean)))
-      const students = await loadSiswaForReport(selectedKelas, recordStudentIds, kelasAliases)
+      const students = Array.from(studentsById.values()).sort((a, b) =>
+        String(a.nama || '').localeCompare(String(b.nama || ''), 'id')
+      )
       const studentIds = students.map((s) => s.id).filter(Boolean)
-      const studentIdSet = new Set(studentIds.map((id) => String(id || '')))
-      jawabanRows = jawabanRows.filter((row) => studentIdSet.has(String(row.user_id || '')))
-      submissionRows = submissionRows.filter((row) => studentIdSet.has(String(row.siswa_id || '')))
 
       const detailBatchItems = []
       const tahunAjaran = selectedTahunAjaran || reportPeriod.tahunAjaran
@@ -1098,28 +1077,36 @@ export default function LaporanRekap() {
       const weightValidation = getMapelWeightValidation(bobotMapel)
       const sisaBobot = weightValidation.remaining
       const jawabanByStudent = new Map()
-      ;(jawabanRows || []).forEach((row) => {
-        const key = String(row.user_id || '')
-        if (!jawabanByStudent.has(key)) jawabanByStudent.set(key, [])
-        const nilai = toNumberOrNull(row.nilai)
-        if (nilai != null) jawabanByStudent.get(key).push(nilai)
+      ;(taskData.siswa || []).forEach((student) => {
+        const key = String(student?.id || '')
+        if (!key) return
+        const nilaiRows = Object.values(student?.nilaiTugas || {})
+        nilaiRows.forEach((item) => {
+          const nilai = toNumberOrNull(item?.nilai)
+          if (nilai == null) return
+          if (!jawabanByStudent.has(key)) jawabanByStudent.set(key, [])
+          jawabanByStudent.get(key).push(nilai)
+        })
       })
 
       const quizById = new Map((quizRows || []).map((row) => [String(row.id), row]))
       const quizScoreByStudent = new Map()
-      ;(submissionRows || []).forEach((row) => {
-        const studentId = String(row.siswa_id || '')
-        const quiz = quizById.get(String(row.quiz_id || ''))
-        const nilai = toNumberOrNull(row.score)
-        if (!studentId || nilai == null || !quiz) return
-        if (!quizScoreByStudent.has(studentId)) {
-          quizScoreByStudent.set(studentId, { regular: [], uts: [], uas: [] })
-        }
-        const bucket = quizScoreByStudent.get(studentId)
-        const mode = normalizeQuizMode(quiz)
-        if (mode === 'uas') bucket.uas.push(nilai)
-        else if (mode === 'uts') bucket.uts.push(nilai)
-        else bucket.regular.push(nilai)
+      ;(quizData.siswa || []).forEach((student) => {
+        const studentId = String(student?.id || '')
+        if (!studentId) return
+        Object.values(student?.nilaiQuiz || {}).forEach((item) => {
+          const quiz = quizById.get(String(item?.quiz_id || ''))
+          const nilai = toNumberOrNull(item?.nilai)
+          if (nilai == null || !quiz) return
+          if (!quizScoreByStudent.has(studentId)) {
+            quizScoreByStudent.set(studentId, { regular: [], uts: [], uas: [] })
+          }
+          const bucket = quizScoreByStudent.get(studentId)
+          const mode = normalizeQuizMode(quiz)
+          if (mode === 'uas') bucket.uas.push(nilai)
+          else if (mode === 'uts') bucket.uts.push(nilai)
+          else bucket.regular.push(nilai)
+        })
       })
 
       const manualByStudent = new Map((manualRows || []).map((row) => [String(row.siswa_id), row]))
@@ -1203,7 +1190,7 @@ export default function LaporanRekap() {
       finishReportLoad(requestId, 'mapel')
     }
   }, [
-    applyReportAcademicFilters,
+    buildTeacherSummaryParams,
     finishReportLoad,
     isCurrentReportLoad,
     kelasList,
@@ -1211,7 +1198,6 @@ export default function LaporanRekap() {
     mapelRapotTargetType,
     monthLabelByValue,
     isActiveReportPeriod,
-    loadSiswaForReport,
     pushToast,
     reportPeriod.tahunAjaran,
     reportPeriodLabel,
@@ -1220,7 +1206,6 @@ export default function LaporanRekap() {
     selectedMapel,
     selectedTahunAjaran,
     startReportLoad,
-    tahun,
     user?.email,
     user?.id,
     user?.nama

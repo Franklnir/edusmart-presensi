@@ -1,10 +1,12 @@
 # Dokumentasi Endpoint API EduSmart
 
-Tanggal audit: 21 Juni 2026
+Tanggal audit: 2026-07-02
 
 Dokumen ini merangkum kontrak endpoint API backend EduSmart dari source
 `backend/routes/api.php`, hasil verifikasi `php artisan route:list --path=api`,
-dan pembacaan controller utama. Total endpoint API aktif saat audit: 200 route.
+dan pembacaan controller utama. Total endpoint API aplikasi aktif saat audit:
+205 route. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai
+API aplikasi.
 
 ## Status Kualitas Dokumen
 
@@ -19,6 +21,8 @@ Alasan nilainya 9/10:
 - Endpoint kritikal memiliki kontrak request/response dan guardrail bisnis.
 - Periode akademik, DB proxy, quiz, storage, RFID, dan super admin diberi
   catatan operasional.
+- Ada regression test yang membandingkan katalog endpoint dengan route Laravel
+  aktif agar dokumentasi tidak diam-diam basi.
 - Ada checklist audit dan perawatan untuk mencegah dokumentasi basi.
 
 Batas menuju 10/10:
@@ -27,8 +31,8 @@ Batas menuju 10/10:
 - Generate Swagger UI/Postman collection dari OpenAPI.
 - Tambahkan contract test yang memastikan schema response tidak berubah tanpa
   update dokumentasi.
-- Tambahkan automated diff dari `php artisan route:list --json --path=api`
-  ke CI agar route baru wajib didokumentasikan.
+- Tambahkan generator OpenAPI atau Postman collection dari route/controller
+  agar katalog dan schema dapat dipublikasikan otomatis untuk QA internal.
 
 ## Ringkasan Kontrak
 
@@ -71,8 +75,9 @@ Header tambahan:
 
 - `X-Tenant: <tenant-slug>` hanya relevan jika override tenant via header
   diaktifkan.
-- `X-Admin-Feature: <feature_key>` dipakai guru yang diberi akses fitur admin
-  terdelegasi.
+- `X-Admin-Feature: <feature_key>` hanya kompatibilitas/hint client lama.
+  Server tidak menjadikan header ini sebagai bukti admin; akses delegasi harus
+  dicek eksplisit oleh controller dan database permission.
 - Endpoint device RFID memakai otorisasi device dari service RFID, biasanya
   melalui kredensial device yang disiapkan per perangkat.
 
@@ -124,8 +129,9 @@ Keterangan:
 
 - `Policy` berarti akses ditentukan oleh policy controller, tenant, ownership,
   kelas, jadwal, atau relasi guru/siswa.
-- `Delegasi fitur` berarti guru harus memiliki permission aktif dan mengirim
-  `X-Admin-Feature`.
+- `Delegasi fitur` berarti guru harus memiliki permission aktif untuk fitur
+  yang dicek eksplisit oleh endpoint server. Header client tidak cukup dan tidak
+  dipercaya sebagai boundary keamanan.
 - Super admin dapat membaca lintas tenant hanya melalui endpoint `/api/super/*`
   atau policy yang memang mengizinkan.
 
@@ -618,7 +624,6 @@ Fitur utama:
 - WhatsApp global.
 - admin platform.
 - audit trail.
-- plugin inspect/upload/status/download.
 
 ## Kontrak Endpoint Kritikal
 
@@ -780,7 +785,8 @@ Response sukses ringkas:
 
 Security and logic notes:
 
-- Admin only atau guru dengan delegasi fitur yang valid.
+- Admin sekolah atau super admin only. Guru dengan delegasi fitur tidak boleh
+  mengubah periode akademik.
 - Maju tahun ajaran hanya boleh tepat satu tahun dan via `auto_rollover`.
 - Mundur tahun ajaran harus memakai snapshot kelas siswa.
 - Semua operasi berjalan dalam transaksi.
@@ -1024,16 +1030,20 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 
 ## Katalog Endpoint Lengkap
 
+Katalog ini digenerate ulang pada 2026-07-02 dari `php artisan route:list --json --path=api` dan hanya memasukkan route aplikasi dengan URI `api/*`. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai API aplikasi.
+
+Total route API aplikasi aktif: 205.
+
 ### Admin
 
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
 | `POST` | `/api/admin/academic-period/apply` | `AdminController@applyAcademicPeriod` | Sanctum |
+| `POST` | `/api/admin/academic-period/copy-structure` | `AdminController@copyAcademicStructure` | Sanctum |
 | `POST` | `/api/admin/academic-period/restore-roster` | `AdminController@restoreAcademicPeriodRoster` | Sanctum |
+| `GET` | `/api/admin/academic-rollover-exceptions` | `AdminController@academicRolloverExceptions` | Sanctum |
+| `PUT` | `/api/admin/academic-rollover-exceptions` | `AdminController@replaceAcademicRolloverExceptions` | Sanctum |
 | `GET` | `/api/admin/academic-summary` | `AdminController@academicSummary` | Sanctum |
-| `GET` | `/api/admin/approvals` | `ApprovalController@index` | Sanctum |
-| `POST` | `/api/admin/approvals/{id}/approve` | `ApprovalController@approve` | Sanctum |
-| `POST` | `/api/admin/approvals/{id}/reject` | `ApprovalController@reject` | Sanctum |
 | `GET` | `/api/admin/backup` | `AdminBackupController@backup` | Sanctum |
 | `POST` | `/api/admin/backup/google-drive` | `AdminBackupController@saveToGoogleDrive` | Sanctum |
 | `POST` | `/api/admin/backup/google-drive/monthly` | `AdminBackupController@saveMonthlyToGoogleDrive` | Sanctum |
@@ -1057,8 +1067,13 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 | `POST` | `/api/admin/google-drive/connect-url` | `GoogleDriveController@connectUrl` | Sanctum |
 | `POST` | `/api/admin/google-drive/disconnect` | `GoogleDriveController@disconnect` | Sanctum |
 | `GET` | `/api/admin/google-drive/files` | `GoogleDriveController@files` | Sanctum |
+| `POST` | `/api/admin/google-drive/recover` | `GoogleDriveController@recover` | Sanctum |
 | `POST` | `/api/admin/google-drive/sync` | `GoogleDriveController@sync` | Sanctum |
+| `GET` | `/api/admin/home-bootstrap` | `AdminController@homeBootstrap` | Sanctum |
 | `GET` | `/api/admin/monitoring` | `AdminController@monitoring` | Sanctum |
+| `GET` | `/api/admin/organisasi-bootstrap` | `AdminController@organisasiBootstrap` | Sanctum |
+| `GET` | `/api/admin/rfid-devices` | `AdminController@rfidDevices` | Sanctum |
+| `GET` | `/api/admin/rfid-events/stream` | `AdminController@rfidEventsStream` | Sanctum |
 | `GET` | `/api/admin/scan-session-summary` | `AdminController@scanSessionSummary` | Sanctum |
 | `GET` | `/api/admin/scan-settings` | `SettingsController@scanShow` | Sanctum |
 | `PATCH` | `/api/admin/scan-settings` | `SettingsController@scanUpdate` | Sanctum |
@@ -1067,9 +1082,12 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 | `POST` | `/api/admin/storage-manager/cleanup/preview` | `StorageManagementController@adminCleanupPreview` | Sanctum |
 | `POST` | `/api/admin/storage-manager/object-storage/sync` | `StorageManagementController@adminObjectStorageSync` | Sanctum |
 | `POST` | `/api/admin/storage-manager/trash/{fileId}/restore` | `StorageManagementController@restoreTrashFile` | Sanctum |
+| `GET` | `/api/admin/struktur-bootstrap` | `AdminController@strukturBootstrap` | Sanctum |
 | `GET` | `/api/admin/student-options` | `AdminController@studentOptions` | Sanctum |
 | `GET` | `/api/admin/students` | `AdminController@students` | Sanctum |
+| `POST` | `/api/admin/students/import` | `AdminController@importStudents` | Sanctum |
 | `GET` | `/api/admin/students/{id}` | `AdminController@studentDetail` | Sanctum |
+| `GET` | `/api/admin/teacher-options` | `AdminController@teacherOptions` | Sanctum |
 | `GET` | `/api/admin/teachers` | `AdminController@teachers` | Sanctum |
 | `PATCH` | `/api/admin/teachers/{id}/name` | `AdminController@updateTeacherName` | Sanctum |
 | `PATCH` | `/api/admin/teachers/{id}/profile` | `AdminController@updateTeacherProfile` | Sanctum |
@@ -1125,8 +1143,8 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
-| `POST` | `/api/db` | `DbController@handle` | Sanctum |
-| `POST` | `/api/db/batch` | `DbController@batch` | Sanctum |
+| `POST` | `/api/db` | `DbController@handle` | Auth/policy, guests concealed |
+| `POST` | `/api/db/batch` | `DbController@batch` | Auth/policy, guests concealed |
 
 ### General
 
@@ -1142,7 +1160,7 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
-| `GET` | `/api/internal/tls/authorize` | `InfrastructureController@authorizeTlsDomain` | Public |
+| `GET` | `/api/internal/tls/authorize` | `InfrastructureController@authorizeTlsDomain` | TLS ask secret |
 
 ### Mobile
 
@@ -1203,16 +1221,20 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
-| `POST` | `/api/rfid/heartbeat` | `RfidController@heartbeat` | Device credential, rfid throttle |
-| `GET` | `/api/rfid/mode` | `RfidController@mode` | Device credential, rfid throttle |
-| `POST` | `/api/rfid/scan` | `RfidController@scan` | Device credential, rfid throttle |
+| `POST` | `/api/rfid/heartbeat` | `RfidController@heartbeat` | Device credential |
+| `GET` | `/api/rfid/mode` | `RfidController@mode` | Device credential |
+| `POST` | `/api/rfid/scan` | `RfidController@scan` | Device credential |
 | `POST` | `/api/rfid/set-mode` | `RfidController@setMode` | Sanctum |
-| `POST` | `/api/rfid/sync` | `RfidController@sync` | Device credential, rfid throttle |
+| `POST` | `/api/rfid/sync` | `RfidController@sync` | Device credential |
 
 ### Reports
 
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
+| `GET` | `/api/reports/attendance-summary` | `ReportController@attendanceSummary` | Sanctum |
+| `GET` | `/api/reports/homeroom-summary` | `ReportController@homeroomSummary` | Sanctum |
+| `GET` | `/api/reports/quiz-summary` | `ReportController@quizSummaryEndpoint` | Sanctum |
+| `GET` | `/api/reports/task-summary` | `ReportController@taskSummary` | Sanctum |
 | `GET` | `/api/reports/teacher-summary` | `ReportController@teacherSummary` | Sanctum |
 
 ### Storage
@@ -1231,66 +1253,59 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
-| `GET` | `/api/super/admins` | `SuperAdminController@admins` | Sanctum, super |
-| `POST` | `/api/super/admins` | `SuperAdminController@storeAdmin` | Sanctum, super |
-| `DELETE` | `/api/super/admins/{id}` | `SuperAdminController@deleteAdmin` | Sanctum, super |
-| `GET` | `/api/super/audit-trail` | `SuperAdminController@auditTrail` | Sanctum, super |
-| `GET` | `/api/super/domains` | `SuperAdminController@platformDomains` | Sanctum, super |
-| `POST` | `/api/super/domains` | `SuperAdminController@storePlatformDomain` | Sanctum, super |
-| `DELETE` | `/api/super/domains/{domainId}` | `SuperAdminController@deleteDomain` | Sanctum, super |
-| `POST` | `/api/super/domains/{domainId}/check` | `SuperAdminController@checkDomain` | Sanctum, super |
-| `GET` | `/api/super/me` | `SuperAdminController@me` | Sanctum, super |
-| `GET` | `/api/super/monitoring` | `SuperAdminController@monitoringOverview` | Sanctum, super |
-| `GET` | `/api/super/monitoring/logs` | `SuperLogController@index` | Sanctum, super |
-| `GET` | `/api/super/monitoring/logs/{id}` | `SuperLogController@show` | Sanctum, super |
-| `GET` | `/api/super/monitoring/server` | `SuperAdminController@serverMonitoring` | Sanctum, super |
-| `GET` | `/api/super/plugins` | `SuperPluginController@index` | Sanctum, super |
-| `POST` | `/api/super/plugins` | `SuperPluginController@store` | Sanctum, super |
-| `POST` | `/api/super/plugins/inspect` | `SuperPluginController@inspect` | Sanctum, super |
-| `DELETE` | `/api/super/plugins/{id}` | `SuperPluginController@destroy` | Sanctum, super |
-| `GET` | `/api/super/plugins/{id}/download` | `SuperPluginController@download` | Sanctum, super |
-| `PATCH` | `/api/super/plugins/{id}/status` | `SuperPluginController@updateStatus` | Sanctum, super |
-| `GET` | `/api/super/storage` | `StorageManagementController@superOverview` | Sanctum, super |
-| `POST` | `/api/super/storage/object-storage/sync` | `StorageManagementController@superObjectStorageSync` | Sanctum, super |
-| `POST` | `/api/super/storage/trash/purge-expired` | `StorageManagementController@superPurgeExpiredTrash` | Sanctum, super |
-| `GET` | `/api/super/tenants` | `SuperAdminController@index` | Sanctum, super |
-| `POST` | `/api/super/tenants` | `SuperAdminController@store` | Sanctum, super |
-| `GET` | `/api/super/tenants/{id}` | `SuperAdminController@showTenant` | Sanctum, super |
-| `GET` | `/api/super/tenants/{id}/backup` | `SuperAdminController@backupTenant` | Sanctum, super |
-| `POST` | `/api/super/tenants/{id}/backup/google-drive` | `SuperAdminController@saveTenantBackupToGoogleDrive` | Sanctum, super |
-| `POST` | `/api/super/tenants/{id}/backup/google-drive/monthly` | `SuperAdminController@saveTenantMonthlyBackupToGoogleDrive` | Sanctum, super |
-| `POST` | `/api/super/tenants/{id}/backup/google-drive/monthly/auto` | `SuperAdminController@autoTenantMonthlyBackupToGoogleDrive` | Sanctum, super |
-| `GET` | `/api/super/tenants/{id}/backup/google-drive/monthly/jobs/{jobId}` | `SuperAdminController@tenantMonthlyBackupJobStatus` | Sanctum, super |
-| `GET` | `/api/super/tenants/{id}/backup/monthly-status` | `SuperAdminController@backupTenantMonthlyStatus` | Sanctum, super |
-| `POST` | `/api/super/tenants/{id}/restore` | `SuperAdminController@restoreTenant` | Sanctum, super |
-| `PATCH` | `/api/super/tenants/{id}/status` | `SuperAdminController@updateTenantStatus` | Sanctum, super |
-| `PATCH` | `/api/super/tenants/{tenantId}/admins/{userId}/primary` | `SuperAdminController@setTenantPrimaryAdmin` | Sanctum, super |
-| `POST` | `/api/super/tenants/{tenantId}/admins/{userId}/reset-password` | `SuperAdminController@resetTenantAdminPassword` | Sanctum, super |
-| `POST` | `/api/super/tenants/{tenantId}/domains` | `SuperAdminController@storeTenantDomain` | Sanctum, super |
-| `GET` | `/api/super/tenants/{tenantId}/google-drive` | `StorageManagementController@superTenantDriveSummary` | Sanctum, super |
-| `GET` | `/api/super/tenants/{tenantId}/google-drive/files` | `StorageManagementController@superTenantDriveFiles` | Sanctum, super |
-| `POST` | `/api/super/tenants/{tenantId}/google-drive/sync` | `StorageManagementController@superTenantDriveSync` | Sanctum, super |
-| `GET` | `/api/super/tenants/{tenantId}/rfid-devices` | `SuperAdminController@tenantRfidDevices` | Sanctum, super |
-| `POST` | `/api/super/tenants/{tenantId}/rfid-devices` | `SuperAdminController@storeTenantRfidDevice` | Sanctum, super |
-| `DELETE` | `/api/super/tenants/{tenantId}/rfid-devices/{deviceId}` | `SuperAdminController@deleteTenantRfidDevice` | Sanctum, super |
-| `PATCH` | `/api/super/tenants/{tenantId}/rfid-mqtt` | `SuperAdminController@updateTenantRfidMqtt` | Sanctum, super |
-| `POST` | `/api/super/tenants/{tenantId}/rfid-mqtt/mosquitto` | `SuperAdminController@provisionTenantRfidMosquitto` | Sanctum, super |
-| `GET` | `/api/super/tenants/{tenantId}/storage` | `StorageManagementController@superTenantSummary` | Sanctum, super |
-| `POST` | `/api/super/tenants/{tenantId}/storage/cleanup/execute` | `StorageManagementController@superCleanupExecute` | Sanctum, super |
-| `POST` | `/api/super/tenants/{tenantId}/storage/cleanup/preview` | `StorageManagementController@superCleanupPreview` | Sanctum, super |
-| `POST` | `/api/super/tenants/{tenantId}/storage/object-storage/sync` | `StorageManagementController@superTenantObjectStorageSync` | Sanctum, super |
-| `PATCH` | `/api/super/tenants/{tenantId}/storage/quota` | `StorageManagementController@superUpdateQuota` | Sanctum, super |
-| `POST` | `/api/super/tenants/{tenantId}/storage/trash/purge-all` | `StorageManagementController@superPurgeAllTenantTrash` | Sanctum, super |
-| `DELETE` | `/api/super/tenants/{tenantId}/storage/trash/{fileId}` | `StorageManagementController@superDeleteTrashFile` | Sanctum, super |
-| `POST` | `/api/super/tenants/{tenantId}/storage/trash/{fileId}/restore` | `StorageManagementController@superRestoreTrashFile` | Sanctum, super |
-| `GET` | `/api/super/whatsapp` | `WhatsAppController@superOverview` | Sanctum, super |
-| `POST` | `/api/super/whatsapp/connect` | `WhatsAppController@superConnect` | Sanctum, super |
-| `POST` | `/api/super/whatsapp/daily-alpha/run` | `WhatsAppController@superRunDailyAlpha` | Sanctum, super |
-| `POST` | `/api/super/whatsapp/logout` | `WhatsAppController@superLogout` | Sanctum, super |
-| `POST` | `/api/super/whatsapp/retry-failed` | `WhatsAppController@superRetryFailed` | Sanctum, super |
-| `POST` | `/api/super/whatsapp/sync` | `WhatsAppController@superSync` | Sanctum, super |
-| `PATCH` | `/api/super/whatsapp/tenants/{tenantId}/status` | `WhatsAppController@superUpdateTenantSettings` | Sanctum, super |
-| `POST` | `/api/super/whatsapp/test` | `WhatsAppController@superSendTest` | Sanctum, super |
+| `GET` | `/api/super/admins` | `SuperAdminController@admins` | Super admin |
+| `POST` | `/api/super/admins` | `SuperAdminController@storeAdmin` | Super admin |
+| `DELETE` | `/api/super/admins/{id}` | `SuperAdminController@deleteAdmin` | Super admin |
+| `GET` | `/api/super/audit-trail` | `SuperAdminController@auditTrail` | Super admin |
+| `GET` | `/api/super/domains` | `SuperAdminController@platformDomains` | Super admin |
+| `POST` | `/api/super/domains` | `SuperAdminController@storePlatformDomain` | Super admin |
+| `DELETE` | `/api/super/domains/{domainId}` | `SuperAdminController@deleteDomain` | Super admin |
+| `POST` | `/api/super/domains/{domainId}/check` | `SuperAdminController@checkDomain` | Super admin |
+| `GET` | `/api/super/me` | `SuperAdminController@me` | Super admin |
+| `GET` | `/api/super/monitoring` | `SuperAdminController@monitoringOverview` | Super admin |
+| `GET` | `/api/super/monitoring/logs` | `SuperLogController@index` | Super admin |
+| `GET` | `/api/super/monitoring/logs/{id}` | `SuperLogController@show` | Super admin |
+| `GET` | `/api/super/monitoring/server` | `SuperAdminController@serverMonitoring` | Super admin |
+| `GET` | `/api/super/storage` | `StorageManagementController@superOverview` | Super admin |
+| `POST` | `/api/super/storage/object-storage/sync` | `StorageManagementController@superObjectStorageSync` | Super admin |
+| `POST` | `/api/super/storage/trash/purge-expired` | `StorageManagementController@superPurgeExpiredTrash` | Super admin |
+| `GET` | `/api/super/tenants` | `SuperAdminController@index` | Super admin |
+| `POST` | `/api/super/tenants` | `SuperAdminController@store` | Super admin |
+| `GET` | `/api/super/tenants/{id}` | `SuperAdminController@showTenant` | Super admin |
+| `GET` | `/api/super/tenants/{id}/backup` | `SuperAdminController@backupTenant` | Super admin |
+| `POST` | `/api/super/tenants/{id}/backup/google-drive` | `SuperAdminController@saveTenantBackupToGoogleDrive` | Super admin |
+| `POST` | `/api/super/tenants/{id}/backup/google-drive/monthly` | `SuperAdminController@saveTenantMonthlyBackupToGoogleDrive` | Super admin |
+| `POST` | `/api/super/tenants/{id}/backup/google-drive/monthly/auto` | `SuperAdminController@autoTenantMonthlyBackupToGoogleDrive` | Super admin |
+| `GET` | `/api/super/tenants/{id}/backup/google-drive/monthly/jobs/{jobId}` | `SuperAdminController@tenantMonthlyBackupJobStatus` | Super admin |
+| `GET` | `/api/super/tenants/{id}/backup/monthly-status` | `SuperAdminController@backupTenantMonthlyStatus` | Super admin |
+| `POST` | `/api/super/tenants/{id}/restore` | `SuperAdminController@restoreTenant` | Super admin |
+| `PATCH` | `/api/super/tenants/{id}/status` | `SuperAdminController@updateTenantStatus` | Super admin |
+| `POST` | `/api/super/tenants/{tenantId}/admins/{userId}/reset-password` | `SuperAdminController@resetTenantAdminPassword` | Super admin |
+| `POST` | `/api/super/tenants/{tenantId}/domains` | `SuperAdminController@storeTenantDomain` | Super admin |
+| `GET` | `/api/super/tenants/{tenantId}/google-drive` | `StorageManagementController@superTenantDriveSummary` | Super admin |
+| `GET` | `/api/super/tenants/{tenantId}/google-drive/files` | `StorageManagementController@superTenantDriveFiles` | Super admin |
+| `POST` | `/api/super/tenants/{tenantId}/google-drive/sync` | `StorageManagementController@superTenantDriveSync` | Super admin |
+| `GET` | `/api/super/tenants/{tenantId}/rfid-devices` | `SuperAdminController@tenantRfidDevices` | Super admin |
+| `POST` | `/api/super/tenants/{tenantId}/rfid-devices` | `SuperAdminController@storeTenantRfidDevice` | Super admin |
+| `DELETE` | `/api/super/tenants/{tenantId}/rfid-devices/{deviceId}` | `SuperAdminController@deleteTenantRfidDevice` | Super admin |
+| `PATCH` | `/api/super/tenants/{tenantId}/rfid-mqtt` | `SuperAdminController@updateTenantRfidMqtt` | Super admin |
+| `POST` | `/api/super/tenants/{tenantId}/rfid-mqtt/mosquitto` | `SuperAdminController@provisionTenantRfidMosquitto` | Super admin |
+| `GET` | `/api/super/tenants/{tenantId}/storage` | `StorageManagementController@superTenantSummary` | Super admin |
+| `POST` | `/api/super/tenants/{tenantId}/storage/cleanup/execute` | `StorageManagementController@superCleanupExecute` | Super admin |
+| `POST` | `/api/super/tenants/{tenantId}/storage/cleanup/preview` | `StorageManagementController@superCleanupPreview` | Super admin |
+| `POST` | `/api/super/tenants/{tenantId}/storage/object-storage/sync` | `StorageManagementController@superTenantObjectStorageSync` | Super admin |
+| `PATCH` | `/api/super/tenants/{tenantId}/storage/quota` | `StorageManagementController@superUpdateQuota` | Super admin |
+| `POST` | `/api/super/tenants/{tenantId}/storage/trash/purge-all` | `StorageManagementController@superPurgeAllTenantTrash` | Super admin |
+| `DELETE` | `/api/super/tenants/{tenantId}/storage/trash/{fileId}` | `StorageManagementController@superDeleteTrashFile` | Super admin |
+| `POST` | `/api/super/tenants/{tenantId}/storage/trash/{fileId}/restore` | `StorageManagementController@superRestoreTrashFile` | Super admin |
+| `GET` | `/api/super/whatsapp` | `WhatsAppController@superOverview` | Super admin |
+| `POST` | `/api/super/whatsapp/connect` | `WhatsAppController@superConnect` | Super admin |
+| `POST` | `/api/super/whatsapp/daily-alpha/run` | `WhatsAppController@superRunDailyAlpha` | Super admin |
+| `POST` | `/api/super/whatsapp/logout` | `WhatsAppController@superLogout` | Super admin |
+| `POST` | `/api/super/whatsapp/retry-failed` | `WhatsAppController@superRetryFailed` | Super admin |
+| `POST` | `/api/super/whatsapp/sync` | `WhatsAppController@superSync` | Super admin |
+| `PATCH` | `/api/super/whatsapp/tenants/{tenantId}/status` | `WhatsAppController@superUpdateTenantSettings` | Super admin |
+| `POST` | `/api/super/whatsapp/test` | `WhatsAppController@superSendTest` | Super admin |
 
 ### Tugas
 
@@ -1298,15 +1313,16 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 |---|---|---|---|
 | `POST` | `/api/tugas/jawaban/submit` | `TugasController@submitJawaban` | Sanctum |
 
-### Webhook
+### WhatsApp Webhook
 
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
-| `POST` | `/api/whatsapp/webhook/{secret}/{event?}` | `WhatsAppWebhookController@handle` | Public, webhook throttle |
+| `POST` | `/api/whatsapp/webhook/{secret}/{event?}` | `WhatsAppWebhookController@handle` | Webhook secret |
 
 ## Checklist Perawatan Dokumentasi
 
-- Jalankan `php artisan route:list --path=api` setiap menambah route.
+- Jalankan `php artisan route:list --json --path=api` setiap menambah route,
+  lalu cocokkan route aplikasi `api/*` dengan katalog ini.
 - Update bagian payload ketika validasi controller berubah.
 - Update bagian periode akademik jika tabel akademik atau snapshot baru
   ditambahkan.
@@ -1331,7 +1347,8 @@ Sebelum perubahan API dianggap siap deploy, checklist ini harus hijau:
 [ ] Endpoint file/storage memvalidasi bucket, path, mime, size, quota, dan TTL.
 [ ] Endpoint device/webhook punya secret, credential, signature, atau idempotency key.
 [ ] Test backend relevan ditambah/diupdate.
-[ ] `php artisan route:list --path=api` tetap valid.
+[ ] `php artisan route:list --json --path=api` tetap valid.
+[ ] `ApiDocumentationRouteCoverageTest` hijau.
 [ ] `php artisan test` atau test target relevan hijau.
 [ ] `./vendor/bin/pint --test` hijau.
 [ ] Frontend check/build hijau di CI.
@@ -1345,6 +1362,7 @@ Jalankan dari root repo:
 cd backend
 php artisan route:list --path=api
 php artisan route:list --json --path=api
+php artisan test --filter=ApiDocumentationRouteCoverageTest
 php artisan test
 ./vendor/bin/pint --test
 ```

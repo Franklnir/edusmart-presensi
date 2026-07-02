@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { BookOpenCheck } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { queryClient } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -15,6 +16,13 @@ const RAPOT_TYPES = [
 const SOURCE_LABELS = {
   laporan_mapel: 'Dikirim guru mapel'
 }
+
+const metricLabelClass = 'text-xs font-semibold uppercase tracking-wide text-slate-500'
+const metricValueClass = 'mt-1 text-lg font-semibold text-slate-950'
+const tableHeaderClass = 'px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500'
+const modalTableHeaderClass = 'px-3 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500'
+const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100'
+const secondaryButtonClass = 'rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50'
 
 const buildKelasAliases = (kelasId, kelasMeta) => {
   const base = [
@@ -770,13 +778,13 @@ export default function RapotSiswa() {
   ])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 sm:p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-4 font-sans text-slate-900 sm:p-6">
       <div className="mx-auto max-w-full space-y-6">
         <section className="page-title-card">
           <div className="page-title-layout">
             <div className="page-title-main">
               <div className="page-title-icon bg-blue-100 text-blue-700">
-                📘
+                <BookOpenCheck className="h-6 w-6" aria-hidden="true" />
               </div>
               <div>
                 <p className="page-title-kicker">Wali Kelas</p>
@@ -786,21 +794,21 @@ export default function RapotSiswa() {
             </div>
             <div className="page-title-actions w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:w-[380px]">
               <div className="w-full">
-              <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Kelas / Riwayat Wali</label>
-              <select
-                value={selectedContext}
-                onChange={(event) => setSelectedContext(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
-              >
-                {waliHistoryOptions.map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {getKelasDisplayName(item.kelasMeta)} - {item.tahunPelajaran || 'Tanpa periode'}{item.status === 'aktif' ? ' (Aktif)' : ' (Riwayat)'}
-                  </option>
-                ))}
-              </select>
-              {!waliHistoryOptions.length && (
-                <p className="mt-2 text-xs text-slate-500">Belum ada kelas wali atau riwayat rapot.</p>
-              )}
+                <label className={metricLabelClass}>Kelas / Riwayat Wali</label>
+                <select
+                  value={selectedContext}
+                  onChange={(event) => setSelectedContext(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                >
+                  {waliHistoryOptions.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {getKelasDisplayName(item.kelasMeta)} - {item.tahunPelajaran || 'Tanpa periode'}{item.status === 'aktif' ? ' (Aktif)' : ' (Riwayat)'}
+                    </option>
+                  ))}
+                </select>
+                {!waliHistoryOptions.length && (
+                  <p className="mt-2 text-xs text-slate-500">Belum ada kelas wali atau riwayat rapot.</p>
+                )}
               </div>
             </div>
           </div>
@@ -809,37 +817,37 @@ export default function RapotSiswa() {
         <section className="rounded-2xl border border-slate-200/60 bg-white p-5 shadow-sm">
           <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-bold uppercase text-slate-500">Kelas</p>
-              <p className="mt-1 text-lg font-black text-slate-950">{getKelasDisplayName(selectedKelasMeta) || '-'}</p>
+              <p className={metricLabelClass}>Kelas</p>
+              <p className={metricValueClass}>{getKelasDisplayName(selectedKelasMeta) || '-'}</p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-bold uppercase text-slate-500">Tahun Pelajaran</p>
-              <p className="mt-1 text-lg font-black text-slate-950">{tahunPelajaran || '-'}</p>
+              <p className={metricLabelClass}>Tahun Pelajaran</p>
+              <p className={metricValueClass}>{tahunPelajaran || '-'}</p>
             </div>
             <div className={`rounded-2xl border p-4 ${
               selectedHistory?.status === 'riwayat'
                 ? 'border-amber-200 bg-amber-50'
                 : 'border-emerald-200 bg-emerald-50'
             }`}>
-              <p className={`text-xs font-bold uppercase ${
+              <p className={`text-xs font-semibold uppercase tracking-wide ${
                 selectedHistory?.status === 'riwayat' ? 'text-amber-700' : 'text-emerald-700'
               }`}>Status Wali</p>
-              <p className="mt-1 text-lg font-black text-slate-950">
+              <p className={metricValueClass}>
                 {selectedHistory?.status === 'riwayat' ? 'Riwayat' : 'Aktif'}
               </p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-bold uppercase text-slate-500">Jumlah Siswa</p>
-              <p className="mt-1 text-lg font-black text-slate-950">{students.length}</p>
+              <p className={metricLabelClass}>Jumlah Siswa</p>
+              <p className={metricValueClass}>{students.length}</p>
             </div>
             <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4">
-              <p className="text-xs font-bold uppercase text-indigo-600">Format Rapot</p>
-              <p className="mt-1 text-lg font-black text-slate-950">UTS & UAS</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Format Rapot</p>
+              <p className={metricValueClass}>UTS & UAS</p>
             </div>
           </div>
 
           <div className="mb-4 flex flex-col gap-1 border-b border-slate-100 pb-4">
-            <h2 className="text-xl font-black text-slate-950">Daftar Siswa Wali</h2>
+            <h2 className="text-lg font-semibold text-slate-950">Daftar Siswa Wali</h2>
             <p className="text-sm text-slate-500">Klik detail UTS atau UAS untuk membuka overlay pengisian rapot siswa.</p>
           </div>
 
@@ -853,12 +861,12 @@ export default function RapotSiswa() {
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
-              <thead className="bg-slate-50 text-slate-700">
+              <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-4 py-3 text-left">Nama</th>
-                  <th className="px-4 py-3 text-left">NIS</th>
-                  <th className="px-4 py-3 text-center">UTS</th>
-                  <th className="px-4 py-3 text-center">UAS</th>
+                  <th className={`${tableHeaderClass} text-left`}>Nama</th>
+                  <th className={`${tableHeaderClass} text-left`}>NIS</th>
+                  <th className={`${tableHeaderClass} text-center`}>UTS</th>
+                  <th className={`${tableHeaderClass} text-center`}>UAS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -876,7 +884,7 @@ export default function RapotSiswa() {
                           <button
                             type="button"
                             onClick={() => openRapot(student, type.key)}
-                            className={`rounded-xl border px-4 py-2 text-sm font-bold ${
+                            className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
                               rapot
                                 ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                                 : 'border-indigo-200 bg-indigo-50 text-indigo-700'
@@ -904,141 +912,147 @@ export default function RapotSiswa() {
         {activeModal && (
           <div className="fixed inset-0 z-50 bg-slate-950/60 p-4 overflow-y-auto">
             <div className="mx-auto my-6 max-w-6xl rounded-2xl bg-white shadow-2xl overflow-hidden">
-            <div className="border-b border-slate-200 bg-slate-50/80 p-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-600">Rapot {String(activeModal.type).toUpperCase()}</p>
-                <h2 className="text-2xl font-black text-slate-950">{activeModal.student.nama}</h2>
-                <div className="mt-2 grid gap-2 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-5">
-                  <span>NIS: <b>{activeModal.student.nis || '-'}</b></span>
-                  <span>NISN: <b>{activeModal.student.nisn || '-'}</b></span>
-                  <span>Kelas: <b>{getKelasDisplayName(selectedKelasMeta)}</b></span>
-                  <span>Tahun: <b>{tahunPelajaran || '-'}</b></span>
-                  <span>Semester: <b>{semesterText || '-'}</b></span>
+              <div className="border-b border-slate-200 bg-slate-50/80 p-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Rapot {String(activeModal.type).toUpperCase()}</p>
+                  <h2 className="mt-1 text-xl font-semibold text-slate-950">{activeModal.student.nama}</h2>
+                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
+                    {[
+                      ['NIS', activeModal.student.nis || '-'],
+                      ['NISN', activeModal.student.nisn || '-'],
+                      ['Kelas', getKelasDisplayName(selectedKelasMeta) || '-'],
+                      ['Tahun', tahunPelajaran || '-'],
+                      ['Semester', semesterText || '-']
+                    ].map(([label, value]) => (
+                      <span key={label} className="text-slate-500">
+                        {label}: <span className="font-semibold text-slate-800">{value}</span>
+                      </span>
+                    ))}
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Tutup
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setActiveModal(null)}
-                className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Tutup
-              </button>
-            </div>
 
-            <div className="p-5 overflow-x-auto">
-              <table className="w-full min-w-[840px] text-sm">
-                <thead className="bg-slate-100 text-slate-700">
-                  <tr>
-                    <th className="px-3 py-3 text-center w-16">No</th>
-                    <th className="px-3 py-3 text-left">Mapel</th>
-                    <th className="px-3 py-3 text-center w-28">KKM</th>
-                    <th className="px-3 py-3 text-center w-32">Nilai</th>
-                    <th className="px-3 py-3 text-center w-28">Predikat</th>
-                    <th className="px-3 py-3 text-left">Keterangan</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {rapotRows.map((row, index) => (
-                    <tr key={row.id}>
-                      <td className="px-3 py-3 text-center font-semibold">{index + 1}</td>
-                      <td className="px-3 py-3">
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                          <div className="font-semibold text-slate-900">{row.mapel || '-'}</div>
-                          <div className="mt-1 text-[11px] text-slate-500">
-                            {SOURCE_LABELS[row.source] || (toNumberOrNull(row.nilai) != null ? 'Tersimpan di rapot' : 'Belum dikirim guru mapel')}
-                            {row.sent_at ? ` • ${new Date(row.sent_at).toLocaleString('id-ID')}` : ''}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.01"
-                          value={row.kkm ?? ''}
-                          onChange={(event) => updateRow(row.id, 'kkm', event.target.value)}
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-center font-semibold text-slate-900"
-                          placeholder="KKM"
-                        />
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className={`rounded-lg border px-3 py-2 text-center font-bold ${buildScoreTone(row.nilai, row.kkm)}`}>
-                          {toNumberOrNull(row.nilai) != null ? row.nilai : '-'}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        <span className={`inline-flex min-w-[42px] justify-center rounded-lg border px-2 py-1 font-bold ${buildScoreTone(row.nilai, row.kkm)}`}>
-                          {getPredikat(row.nilai, row.kkm) || '-'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3">
-                        <input
-                          value={row.keterangan}
-                          onChange={(event) => updateRow(row.id, 'keterangan', event.target.value)}
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2"
-                          placeholder="Opsional"
-                        />
-                      </td>
+              <div className="p-5 overflow-x-auto">
+                <table className="w-full min-w-[840px] text-sm">
+                  <thead className="bg-slate-100">
+                    <tr>
+                      <th className={`${modalTableHeaderClass} w-16 text-center`}>No</th>
+                      <th className={`${modalTableHeaderClass} text-left`}>Mapel</th>
+                      <th className={`${modalTableHeaderClass} w-28 text-center`}>KKM</th>
+                      <th className={`${modalTableHeaderClass} w-32 text-center`}>Nilai</th>
+                      <th className={`${modalTableHeaderClass} w-28 text-center`}>Predikat</th>
+                      <th className={`${modalTableHeaderClass} text-left`}>Keterangan</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {rapotRows.map((row, index) => (
+                      <tr key={row.id}>
+                        <td className="px-3 py-3 text-center font-semibold">{index + 1}</td>
+                        <td className="px-3 py-3">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            <div className="font-semibold text-slate-900">{row.mapel || '-'}</div>
+                            <div className="mt-1 text-[11px] text-slate-500">
+                              {SOURCE_LABELS[row.source] || (toNumberOrNull(row.nilai) != null ? 'Tersimpan di rapot' : 'Belum dikirim guru mapel')}
+                              {row.sent_at ? ` • ${new Date(row.sent_at).toLocaleString('id-ID')}` : ''}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={row.kkm ?? ''}
+                            onChange={(event) => updateRow(row.id, 'kkm', event.target.value)}
+                            className={`${inputClass} text-center`}
+                            placeholder="KKM"
+                          />
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className={`rounded-lg border px-3 py-2 text-center text-sm font-semibold ${buildScoreTone(row.nilai, row.kkm)}`}>
+                            {toNumberOrNull(row.nilai) != null ? row.nilai : '-'}
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <span className={`inline-flex min-w-[42px] justify-center rounded-lg border px-2 py-1 text-sm font-semibold ${buildScoreTone(row.nilai, row.kkm)}`}>
+                            {getPredikat(row.nilai, row.kkm) || '-'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3">
+                          <input
+                            value={row.keterangan}
+                            onChange={(event) => updateRow(row.id, 'keterangan', event.target.value)}
+                            className={inputClass}
+                            placeholder="Opsional"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
 
-              <div className="mt-5 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <div className="text-xs font-bold uppercase text-slate-500">Jumlah</div>
-                    <div className="text-2xl font-black text-slate-950">{computedTotal}</div>
+                <div className="mt-5 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <div className={metricLabelClass}>Jumlah</div>
+                      <div className="text-2xl font-semibold text-slate-950">{computedTotal}</div>
+                    </div>
+                    <div>
+                      <div className={metricLabelClass}>Rata-rata</div>
+                      <div className="text-2xl font-semibold text-slate-950">{displayedAverage ?? '-'}</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs font-bold uppercase text-slate-500">Rata-rata</div>
-                    <div className="text-2xl font-black text-slate-950">{displayedAverage ?? '-'}</div>
+                  <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700">
+                    Nilai rapot otomatis dari kiriman guru mapel. Wali kelas dapat mengatur KKM, keterangan, dan mengunci arsip rapot.
                   </div>
-                </div>
-                <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700">
-                  Nilai rapot otomatis dari kiriman guru mapel. Wali kelas dapat mengatur KKM, keterangan, dan mengunci arsip rapot.
                 </div>
               </div>
-            </div>
 
-            <div className="border-t border-slate-200 p-5 flex justify-end gap-3">
-              <button
-                type="button"
-                disabled={exportingRapot}
-                onClick={exportActiveRapotToExcel}
-                className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
-              >
-                {exportingRapot ? 'Menyiapkan...' : 'Export Excel'}
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={toggleRapotLock}
-                className={`rounded-xl px-5 py-3 font-semibold disabled:opacity-60 ${
-                  activeModal.rapot?.locked_at
-                    ? 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                    : 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
-                }`}
-              >
-                {activeModal.rapot?.locked_at ? 'Buka Kunci' : 'Kunci Rapot'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveModal(null)}
-                className="rounded-xl border border-slate-200 px-5 py-3 font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={saveRapot}
-                className="rounded-xl bg-indigo-600 px-5 py-3 font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-              >
-                {saving ? 'Menyimpan...' : 'Simpan Rapot'}
-              </button>
-            </div>
+              <div className="border-t border-slate-200 p-5 flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={exportingRapot}
+                  onClick={exportActiveRapotToExcel}
+                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
+                >
+                  {exportingRapot ? 'Menyiapkan...' : 'Export Excel'}
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={toggleRapotLock}
+                  className={`rounded-xl px-5 py-3 text-sm font-semibold transition disabled:opacity-60 ${
+                    activeModal.rapot?.locked_at
+                      ? 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                      : 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                  }`}
+                >
+                  {activeModal.rapot?.locked_at ? 'Buka Kunci' : 'Kunci Rapot'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className={secondaryButtonClass}
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={saveRapot}
+                  className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {saving ? 'Menyimpan...' : 'Simpan Rapot'}
+                </button>
+              </div>
             </div>
           </div>
         )}
