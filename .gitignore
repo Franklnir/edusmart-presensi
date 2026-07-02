@@ -13,6 +13,10 @@ build/
 # Logs
 *.log
 
+# Local security audit artifacts may contain sensitive findings or redacted secrets.
+docs/LAPORAN_AUDIT_KEAMANAN.md
+docs/security-audits/
+
 # Environment files
 .env
 .env.local

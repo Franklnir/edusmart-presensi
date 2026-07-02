@@ -16,6 +16,7 @@ Jalankan dari root project:
 
 ```bash
 npm ci
+npm run security:env
 npm run security:audit
 npm run check
 ```
@@ -33,6 +34,8 @@ cd ..
 Kriteria lolos:
 
 - `npm run security:audit` lolos (tidak ada vulnerability high/critical production dependency).
+- `npm run security:env` lolos (tidak ada credential SMTP/ZeptoMail nyata di
+  `.env` lokal atau dokumen audit yang akan dibackup/dibagikan).
 - Frontend build lolos.
 - Test backend lolos.
 - Pint backend lolos.

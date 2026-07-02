@@ -4,6 +4,8 @@ node_modules
 dist
 build
 *.log
+docs/LAPORAN_AUDIT_KEAMANAN.md
+docs/security-audits/
 
 # local/dev env files
 .env

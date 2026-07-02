@@ -4,6 +4,12 @@ Gunakan checklist ini sebelum dan sesudah deploy supaya hardening IDOR/BOLA dan 
 
 ## 1. Environment Variables (Wajib)
 
+- Jalankan secret preflight sebelum backup/deploy:
+  - `npm run security:env`
+- Jika preflight menemukan `MAIL_PASSWORD`, `SMTP_PASSWORD`, `MAILER_DSN`, atau
+  key ZeptoMail nyata di `.env`/dokumen, hentikan release dan redact file lokal.
+- Jika key mail pernah terlihat di backup/laporan/chat, revoke dan regenerate
+  key dari dashboard provider sebelum mengaktifkan SMTP lagi.
 - `APP_ENV=production`
 - `APP_DEBUG=false`
 - `SESSION_SECURE_COOKIE=true`

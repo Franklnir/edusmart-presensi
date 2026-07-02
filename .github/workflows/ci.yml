@@ -10,6 +10,17 @@ permissions:
   packages: write
 
 jobs:
+  secret-preflight:
+    name: Secret Preflight
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check env and docs for leaked mail secrets
+        run: bash scripts/security/check-env-secrets.sh
+
   frontend-build:
     name: Frontend Build
     runs-on: ubuntu-latest
@@ -70,6 +81,7 @@ jobs:
     name: Build Release Images
     runs-on: ubuntu-latest
     needs:
+      - secret-preflight
       - frontend-build
       - backend-quality
     if: >
