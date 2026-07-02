@@ -83,13 +83,13 @@ class SettingsController extends ApiController
 
     public function scanShow(Request $request)
     {
-        if (! $this->isAdmin($request)) {
-            return $this->deny();
-        }
-
         $tenantId = $this->resolveOwnedTenantId($request);
         if (! $tenantId) {
             return $this->deny('Tenant tidak valid', 400);
+        }
+
+        if (! $this->canViewScanSettings($request, (string) $tenantId)) {
+            return $this->deny();
         }
 
         return $this->ok($this->scanSettingsPayload($request, (string) $tenantId));
@@ -97,10 +97,6 @@ class SettingsController extends ApiController
 
     public function scanUpdate(Request $request)
     {
-        if (! $this->isAdmin($request)) {
-            return $this->deny();
-        }
-
         $tenantId = $this->resolveOwnedTenantId($request);
         if (! $tenantId) {
             return $this->deny('Tenant tidak valid', 400);
@@ -300,6 +296,12 @@ class SettingsController extends ApiController
         return array_merge($this->scanSettingsForTenant($tenantId), [
             'can_update_settings' => $this->canUpdateScanSettings($request, $tenantId),
         ]);
+    }
+
+    private function canViewScanSettings(Request $request, string $tenantId): bool
+    {
+        return $this->canUpdateScanSettings($request, $tenantId)
+            || $this->hasDelegatedAdminFeatureAccess($request, 'scan-kehadiran');
     }
 
     private function canUpdateScanSettings(Request $request, string $tenantId): bool

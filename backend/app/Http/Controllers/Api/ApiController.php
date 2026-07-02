@@ -51,16 +51,7 @@ class ApiController extends Controller
             return true;
         }
 
-        $role = $this->role($request);
-        if ($role === 'admin') {
-            return true;
-        }
-
-        if ($role === 'guru' || $role === 'teacher') {
-            return $this->hasDelegatedAdminFeatureAccess($request);
-        }
-
-        return false;
+        return $this->role($request) === 'admin';
     }
 
     protected function isSuperAdmin(Request $request): bool
@@ -100,7 +91,7 @@ class ApiController extends Controller
             return false;
         }
 
-        $feature = trim((string) ($featureKey ?: $request->headers->get('X-Admin-Feature', '')));
+        $feature = trim((string) $featureKey);
         if ($feature === '') {
             return false;
         }

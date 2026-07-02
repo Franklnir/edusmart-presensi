@@ -4,6 +4,7 @@ vendor/
 
 # Local runtime tools/data
 .local/
+scratch_ssh.exp
 
 # Build outputs
 dist/

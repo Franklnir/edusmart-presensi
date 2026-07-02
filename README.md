@@ -205,13 +205,7 @@ chmod 600 ~/.ssh/authorized_keys
 cat ~/.ssh/github_actions_edusmart
 ```
 
-Copy output private key yang tampil:
-
-```text
------BEGIN OPENSSH PRIVATE KEY-----
-...
------END OPENSSH PRIVATE KEY-----
-```
+Copy output private key yang tampil dan masukkan langsung ke GitHub secret. Jangan simpan private key di repo, README, issue, chat, atau file deployment biasa.
 
 Masukkan ke GitHub secret:
 
