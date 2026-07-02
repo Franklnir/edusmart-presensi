@@ -70,10 +70,8 @@ class MobileDirectoryController extends ApiController
             $url = $host !== '' ? $this->tenantDomainService->makeUrl($host) : null;
 
             return [
-                'id' => $tenantId,
                 'name' => $name !== '' ? $name : (string) $tenant->slug,
                 'slug' => (string) $tenant->slug,
-                'status' => (string) ($tenant->status ?? 'active'),
                 'host' => $host !== '' ? $host : null,
                 'apiBaseUrl' => $url,
                 'logoUrl' => $this->publicLogoUrl($settings),

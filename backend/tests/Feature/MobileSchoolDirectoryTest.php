@@ -66,6 +66,8 @@ class MobileSchoolDirectoryTest extends TestCase
             ->assertJsonPath('data.0.slug', 'sma-bali')
             ->assertJsonPath('data.0.host', 'sma-bali.sismu.biz.id')
             ->assertJsonPath('data.0.apiBaseUrl', 'https://sma-bali.sismu.biz.id')
-            ->assertJsonPath('data.0.logoUrl', 'https://cdn.example.test/logo.png');
+            ->assertJsonPath('data.0.logoUrl', 'https://cdn.example.test/logo.png')
+            ->assertJsonMissingPath('data.0.id')
+            ->assertJsonMissingPath('data.0.status');
     }
 }
