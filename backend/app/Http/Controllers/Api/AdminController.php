@@ -152,6 +152,111 @@ class AdminController extends ApiController
         ]);
     }
 
+    public function schedulePeriodDecisionStatus(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        return $this->ok($this->buildSchedulePeriodDecisionStatus($tenantId, $request->query()));
+    }
+
+    public function resolveSchedulePeriodDecision(Request $request)
+    {
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $validated = Validator::make($request->all(), [
+            'target_tahun_ajaran' => ['nullable', 'string', 'max:32'],
+            'source_tahun_ajaran' => ['nullable', 'string', 'max:32'],
+            'action' => ['required', 'in:start_empty,use_previous'],
+        ])->validate();
+
+        $settings = $this->firstTenantRow('settings', $tenantId);
+        $activePeriod = AcademicPeriod::fromSettings($settings);
+        $targetYear = AcademicPeriod::normalizeAcademicYear($validated['target_tahun_ajaran'] ?? null)
+            ?: ($activePeriod['tahun_ajaran'] ?? null);
+        $activeYear = AcademicPeriod::normalizeAcademicYear($activePeriod['tahun_ajaran'] ?? null);
+        $targetSemester = AcademicPeriod::normalizeSemester($activePeriod['semester'] ?? null)
+            ?: AcademicPeriod::SEMESTER_GANJIL;
+
+        if (! $targetYear || ! $activeYear) {
+            return $this->deny('Periode aktif belum valid.', 422);
+        }
+
+        if ($targetYear !== $activeYear) {
+            return $this->deny('Keputusan jadwal hanya bisa dilakukan untuk periode aktif sekolah.', 422);
+        }
+
+        if (! Schema::hasTable('academic_schedule_period_decisions')) {
+            return $this->deny('Tabel keputusan jadwal periode belum tersedia. Jalankan migration terbaru di VPS.', 422);
+        }
+
+        $targetScheduleCount = $this->scheduleCountForAcademicYear($tenantId, $targetYear);
+        if ($targetScheduleCount > 0) {
+            return $this->ok($this->buildSchedulePeriodDecisionStatus($tenantId, [
+                'target_tahun_ajaran' => $targetYear,
+            ]));
+        }
+
+        $action = (string) $validated['action'];
+        $sourceYear = AcademicPeriod::normalizeAcademicYear($validated['source_tahun_ajaran'] ?? null)
+            ?: $this->previousAcademicYear($targetYear);
+        $copied = 0;
+
+        if ($action === 'use_previous') {
+            if (! $sourceYear || $sourceYear === $targetYear) {
+                return $this->deny('Periode sumber jadwal tidak valid.', 422);
+            }
+
+            $sourceScheduleCount = $this->scheduleCountForAcademicYear($tenantId, $sourceYear);
+            if ($sourceScheduleCount <= 0) {
+                return $this->deny('Jadwal periode sebelumnya belum tersedia untuk disalin.', 422);
+            }
+
+            $copied = $this->copyJadwalToNewPeriod($tenantId, $sourceYear, $targetYear, $targetSemester);
+        }
+
+        $this->recordSchedulePeriodDecision(
+            $tenantId,
+            $targetYear,
+            $action === 'use_previous' ? $sourceYear : null,
+            $action === 'use_previous' ? 'copy_previous' : 'start_empty',
+            $copied,
+            (string) ($request->user()?->id ?? '')
+        );
+
+        $this->refreshAdminPageCache(
+            $tenantId,
+            [AdminPageCacheService::SCOPE_STRUCTURE],
+            array_values(array_filter([$sourceYear, $targetYear]))
+        );
+        $this->logAudit($request, 'jadwal', $targetYear, 'SCHEDULE_PERIOD_DECISION', null, [
+            'target_tahun_ajaran' => $targetYear,
+            'source_tahun_ajaran' => $sourceYear,
+            'decision' => $action,
+            'copied_count' => $copied,
+        ], $tenantId);
+
+        $status = $this->buildSchedulePeriodDecisionStatus($tenantId, [
+            'target_tahun_ajaran' => $targetYear,
+        ]);
+        $status['copied_count'] = $copied;
+
+        return $this->ok($status);
+    }
+
     public function academicRolloverExceptions(Request $request)
     {
         if (! $this->isAdmin($request)) {
@@ -1785,7 +1890,6 @@ class AdminController extends ApiController
         $yearChanged = $previousYear !== $tahunAjaran;
         $autoRollover = filter_var($payload['auto_rollover'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $carryEskulMembers = filter_var($payload['carry_eskul_members'] ?? false, FILTER_VALIDATE_BOOLEAN);
-        $carryJadwal = filter_var($payload['carry_jadwal'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         $previousStartYear = (int) substr($previousYear, 0, 4);
         $targetStartYear = (int) substr($tahunAjaran, 0, 4);
@@ -1866,9 +1970,7 @@ class AdminController extends ApiController
                 $isCalendarCorrection,
                 $calendarPeriod,
                 $serverNow,
-                $carryEskulMembers,
-                $carryJadwal,
-                $tahunAjaran
+                $carryEskulMembers
             ) {
                 $rollover = null;
                 $classesSynced = 0;
@@ -1876,7 +1978,6 @@ class AdminController extends ApiController
                 $previousClassHistorySnapshots = 0;
                 $studentProfileRestores = 0;
                 $studentProfilesOutsidePeriod = 0;
-                $jadwalCopied = 0;
 
                 if ($yearChanged) {
                     $previousClassHistorySnapshots = $this->snapshotStudentClassHistoriesForPeriod(
@@ -1905,15 +2006,6 @@ class AdminController extends ApiController
                         $carryEskulMembers
                     );
                     $classesSynced = (int) ($rollover['classes_synced'] ?? 0);
-
-                    if ($carryJadwal) {
-                        $jadwalCopied = $this->copyJadwalToNewPeriod(
-                            $tenantId,
-                            $previousYear,
-                            $tahunAjaran,
-                            $activePeriod['semester'] ?? null
-                        );
-                    }
                 } elseif ($yearChanged || $isCalendarCorrection) {
                     $classesSynced = $this->syncClassPeriodMetadata($tenantId, $activePeriod);
                 }
@@ -1943,8 +2035,6 @@ class AdminController extends ApiController
                     'period_snapshot_restored' => $restoreFromClassSnapshot,
                     'student_profile_restores' => $studentProfileRestores,
                     'student_profiles_outside_period' => $studentProfilesOutsidePeriod,
-                    'jadwal_copy_requested' => $carryJadwal && $requiresRollover,
-                    'jadwal_copied' => $jadwalCopied,
                     'previous_class_history_snapshots' => $previousClassHistorySnapshots,
                     'class_history_snapshots' => $classHistorySnapshots,
                     'server_calendar' => [
@@ -4264,6 +4354,137 @@ class AdminController extends ApiController
         }
 
         return count($insertRows);
+    }
+
+    private function buildSchedulePeriodDecisionStatus(string $tenantId, array $params = []): array
+    {
+        $settings = $this->firstTenantRow('settings', $tenantId);
+        $activePeriod = AcademicPeriod::fromSettings($settings);
+        $activeYear = AcademicPeriod::normalizeAcademicYear($activePeriod['tahun_ajaran'] ?? null);
+        $targetYear = AcademicPeriod::normalizeAcademicYear($params['target_tahun_ajaran'] ?? $params['tahun_ajaran'] ?? null)
+            ?: $activeYear;
+        $sourceYear = $this->previousAcademicYear($targetYear);
+        $targetScheduleCount = $targetYear ? $this->scheduleCountForAcademicYear($tenantId, $targetYear) : 0;
+        $sourceScheduleCount = $sourceYear ? $this->scheduleCountForAcademicYear($tenantId, $sourceYear) : 0;
+        $decision = $targetYear ? $this->scheduleDecisionForAcademicYear($tenantId, $targetYear) : null;
+        $isActivePeriod = $targetYear !== null && $activeYear !== null && $targetYear === $activeYear;
+        $schemaReady = Schema::hasTable('academic_schedule_period_decisions');
+
+        return [
+            'schema_ready' => $schemaReady,
+            'active_tahun_ajaran' => $activeYear,
+            'active_semester' => AcademicPeriod::normalizeSemester($activePeriod['semester'] ?? null),
+            'target_tahun_ajaran' => $targetYear,
+            'source_tahun_ajaran' => $sourceYear,
+            'is_active_period' => $isActivePeriod,
+            'target_schedule_count' => $targetScheduleCount,
+            'source_schedule_count' => $sourceScheduleCount,
+            'has_target_schedule' => $targetScheduleCount > 0,
+            'has_source_schedule' => $sourceScheduleCount > 0,
+            'decision' => $decision,
+            'requires_decision' => $schemaReady && $isActivePeriod && $targetScheduleCount === 0 && $decision === null,
+        ];
+    }
+
+    private function scheduleCountForAcademicYear(string $tenantId, ?string $academicYear): int
+    {
+        $academicYear = AcademicPeriod::normalizeAcademicYear($academicYear);
+        if (! $academicYear || ! Schema::hasTable('jadwal') || ! Schema::hasColumn('jadwal', 'tahun_ajaran')) {
+            return 0;
+        }
+
+        return (int) $this->tenantQuery('jadwal', $tenantId)
+            ->where('tahun_ajaran', $academicYear)
+            ->count();
+    }
+
+    private function previousAcademicYear(?string $academicYear): ?string
+    {
+        $academicYear = AcademicPeriod::normalizeAcademicYear($academicYear);
+        if (! $academicYear) {
+            return null;
+        }
+
+        $startYear = (int) substr($academicYear, 0, 4);
+        if ($startYear <= 1) {
+            return null;
+        }
+
+        return ($startYear - 1).'/'.$startYear;
+    }
+
+    private function scheduleDecisionForAcademicYear(string $tenantId, string $targetYear): ?array
+    {
+        if (! Schema::hasTable('academic_schedule_period_decisions')) {
+            return null;
+        }
+
+        $row = $this->tenantQuery('academic_schedule_period_decisions', $tenantId)
+            ->where('target_tahun_ajaran', $targetYear)
+            ->first($this->existingColumns('academic_schedule_period_decisions', [
+                'id', 'target_tahun_ajaran', 'source_tahun_ajaran', 'decision',
+                'copied_count', 'decided_by', 'created_at', 'updated_at',
+            ]));
+
+        if (! $row) {
+            return null;
+        }
+
+        return [
+            'id' => (string) ($row->id ?? ''),
+            'target_tahun_ajaran' => (string) ($row->target_tahun_ajaran ?? ''),
+            'source_tahun_ajaran' => $row->source_tahun_ajaran ?? null,
+            'decision' => (string) ($row->decision ?? ''),
+            'copied_count' => (int) ($row->copied_count ?? 0),
+            'decided_by' => $row->decided_by ?? null,
+            'created_at' => $row->created_at ?? null,
+            'updated_at' => $row->updated_at ?? null,
+        ];
+    }
+
+    private function recordSchedulePeriodDecision(
+        string $tenantId,
+        string $targetYear,
+        ?string $sourceYear,
+        string $decision,
+        int $copiedCount,
+        ?string $userId = null
+    ): void {
+        if (! Schema::hasTable('academic_schedule_period_decisions')) {
+            return;
+        }
+
+        $now = now();
+        $existing = $this->tenantQuery('academic_schedule_period_decisions', $tenantId)
+            ->where('target_tahun_ajaran', $targetYear)
+            ->first(['id']);
+
+        $payload = $this->filterExistingPayload('academic_schedule_period_decisions', [
+            'tenant_id' => $tenantId,
+            'target_tahun_ajaran' => $targetYear,
+            'source_tahun_ajaran' => $sourceYear,
+            'decision' => $decision,
+            'copied_count' => $copiedCount,
+            'decided_by' => $userId ?: null,
+            'updated_at' => $now,
+        ]);
+
+        if ($existing?->id) {
+            $this->tenantQuery('academic_schedule_period_decisions', $tenantId)
+                ->where('id', $existing->id)
+                ->update($payload);
+
+            return;
+        }
+
+        $payload = $this->filterExistingPayload('academic_schedule_period_decisions', array_merge($payload, [
+            'id' => (string) Str::uuid(),
+            'created_at' => $now,
+        ]));
+
+        if ($payload !== []) {
+            DB::table('academic_schedule_period_decisions')->insert($payload);
+        }
     }
 
     /**

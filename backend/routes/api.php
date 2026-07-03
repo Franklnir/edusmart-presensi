@@ -230,6 +230,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::post('/students/import', [AdminController::class, 'importStudents']);
     Route::get('/academic-summary', [AdminController::class, 'academicSummary']);
     Route::post('/academic-period/apply', [AdminController::class, 'applyAcademicPeriod']);
+    Route::get('/academic-period/schedule-decision', [AdminController::class, 'schedulePeriodDecisionStatus']);
+    Route::post('/academic-period/schedule-decision', [AdminController::class, 'resolveSchedulePeriodDecision']);
     Route::post('/academic-period/restore-roster', [AdminController::class, 'restoreAcademicPeriodRoster']);
     Route::post('/academic-period/copy-structure', [AdminController::class, 'copyAcademicStructure']);
     Route::get('/academic-rollover-exceptions', [AdminController::class, 'academicRolloverExceptions']);

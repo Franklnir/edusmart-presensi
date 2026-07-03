@@ -6,7 +6,7 @@ import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useUIStore } from '../../store/useUIStore'
 import PasswordInput from '../../components/PasswordInput'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
-import { Trash2 } from 'lucide-react'
+import { CalendarClock, Copy, Loader2, PlusCircle, Trash2 } from 'lucide-react'
 import { verifyCurrentUserPassword as verifyPassword } from '../../services/authService'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
@@ -83,6 +83,86 @@ function RolloverExceptionStudentRow({
           </span>
         </span>
       </label>
+    </div>
+  )
+}
+
+function SchedulePeriodDecisionOverlay({
+  status,
+  loading = false,
+  actionLoading = '',
+  onStartEmpty,
+  onUsePrevious
+}) {
+  if (!status?.requires_decision) return null
+
+  const targetYear = status.target_tahun_ajaran || status.active_tahun_ajaran || '-'
+  const sourceYear = status.source_tahun_ajaran || '-'
+  const sourceCount = Number(status.source_schedule_count || 0)
+  const canUsePrevious = sourceCount > 0
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="schedule-period-decision-title"
+        className="w-full max-w-xl rounded-2xl border border-orange-200 bg-white p-6 shadow-2xl"
+      >
+        <div className="flex items-start gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-orange-100 text-orange-700">
+            <CalendarClock className="h-6 w-6" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-wide text-orange-600">Jadwal Periode Baru</p>
+            <h2 id="schedule-period-decision-title" className="mt-1 text-xl font-bold text-slate-900">
+              Periode telah berubah ke {targetYear}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Jadwal pelajaran untuk periode ini belum diset ulang. Pilih salah satu agar halaman Jadwal bisa dibuka.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+          <div className="flex items-center justify-between gap-3">
+            <span>Jadwal periode {targetYear}</span>
+            <strong>{Number(status.target_schedule_count || 0).toLocaleString('id-ID')} baris</strong>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span>Jadwal periode sebelumnya ({sourceYear})</span>
+            <strong>{sourceCount.toLocaleString('id-ID')} baris</strong>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={onStartEmpty}
+            disabled={loading || Boolean(actionLoading)}
+          >
+            {actionLoading === 'start_empty' ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
+            <span>Ya, buat baru</span>
+          </button>
+          <button
+            type="button"
+            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={onUsePrevious}
+            disabled={loading || Boolean(actionLoading) || !canUsePrevious}
+            title={canUsePrevious ? 'Pakai jadwal periode sebelumnya' : 'Jadwal periode sebelumnya belum tersedia'}
+          >
+            {actionLoading === 'use_previous' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+            <span>Tidak, pakai jadwal lama</span>
+          </button>
+        </div>
+
+        {!canUsePrevious && (
+          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+            Jadwal periode sebelumnya belum ditemukan, jadi admin perlu memilih buat baru.
+          </p>
+        )}
+      </div>
     </div>
   )
 }
@@ -389,6 +469,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const [kelasSelected, setKelasSelected] = useState('')
   const [jadwal, setJadwal] = useState([])
   const [jadwalLoadedKey, setJadwalLoadedKey] = useState('')
+  const [scheduleDecisionStatus, setScheduleDecisionStatus] = useState(null)
+  const [scheduleDecisionLoading, setScheduleDecisionLoading] = useState(false)
+  const [scheduleDecisionAction, setScheduleDecisionAction] = useState('')
   const [filterHari, setFilterHari] = useState('')
   const [academicPeriod, setAcademicPeriod] = useState(() => resolveAcademicPeriod())
   const [scheduleDefaultScope, setScheduleDefaultScope] = useState(SCHEDULE_SCOPE_YEAR)
@@ -523,6 +606,72 @@ export default function AKelas({ initialTab = 'kelas' }) {
     selectedStudentsLoadedKey
   ])
 
+  const refreshScheduleDecisionStatus = useCallback(async () => {
+    if (!isSchedulePage || isViewingScheduleArchive) {
+      setScheduleDecisionStatus(null)
+      return null
+    }
+
+    setScheduleDecisionLoading(true)
+    try {
+      const { data, error } = await supabase.admin.schedulePeriodDecisionStatus({
+        target_tahun_ajaran: schedulePeriod.tahunAjaran
+      })
+      if (error) throw error
+
+      setScheduleDecisionStatus(data || null)
+      return data || null
+    } catch (error) {
+      console.error('Error loading schedule period decision:', error)
+      pushToast('error', error?.message || 'Gagal memeriksa status jadwal periode')
+      setScheduleDecisionStatus(null)
+      return null
+    } finally {
+      setScheduleDecisionLoading(false)
+    }
+  }, [isSchedulePage, isViewingScheduleArchive, pushToast, schedulePeriod.tahunAjaran])
+
+  const resolveScheduleDecision = useCallback(async (action) => {
+    if (!isSchedulePage || !scheduleDecisionStatus?.requires_decision || scheduleDecisionAction) return
+
+    setScheduleDecisionAction(action)
+    try {
+      const { data, error } = await supabase.admin.resolveSchedulePeriodDecision({
+        action,
+        target_tahun_ajaran: scheduleDecisionStatus.target_tahun_ajaran || schedulePeriod.tahunAjaran,
+        source_tahun_ajaran: scheduleDecisionStatus.source_tahun_ajaran || undefined
+      })
+      if (error) throw error
+
+      setScheduleDecisionStatus(data || null)
+      queryClient.invalidateQueries({ queryKey: ['admin', 'academic-summary'] })
+
+      if (action === 'use_previous') {
+        const copied = Number(data?.copied_count || 0)
+        pushToast('success', copied > 0
+          ? `Jadwal periode sebelumnya berhasil dipasang (${copied} baris).`
+          : 'Keputusan jadwal lama disimpan. Tidak ada baris baru yang perlu disalin.')
+        setJadwal([])
+        setJadwalLoadedKey('')
+        await loadSelectedClassData({ includeSchedule: true, force: true })
+      } else {
+        pushToast('success', 'Mode buat jadwal baru diaktifkan. Silakan isi jadwal periode ini.')
+      }
+    } catch (error) {
+      console.error('Error resolving schedule period decision:', error)
+      pushToast('error', error?.message || 'Gagal menyimpan keputusan jadwal periode')
+    } finally {
+      setScheduleDecisionAction('')
+    }
+  }, [
+    isSchedulePage,
+    loadSelectedClassData,
+    pushToast,
+    scheduleDecisionAction,
+    scheduleDecisionStatus,
+    schedulePeriod.tahunAjaran
+  ])
+
   /* ====== EFFECTS ====== */
   useEffect(() => {
     setTab(isSchedulePage ? 'jadwal' : 'kelas')
@@ -628,6 +777,26 @@ export default function AKelas({ initialTab = 'kelas' }) {
     schedulePeriod.semester,
     schedulePeriod.tahunAjaran,
     tab
+  ])
+
+  useEffect(() => {
+    if (!isAuthorized || !isSchedulePage) {
+      setScheduleDecisionStatus(null)
+      return
+    }
+
+    if (isViewingScheduleArchive) {
+      setScheduleDecisionStatus(null)
+      return
+    }
+
+    void refreshScheduleDecisionStatus()
+  }, [
+    isAuthorized,
+    isSchedulePage,
+    isViewingScheduleArchive,
+    refreshScheduleDecisionStatus,
+    schedulePeriod.tahunAjaran
   ])
 
   useEffect(() => {
@@ -1817,6 +1986,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       })
       invalidateAcademicQueries()
       await loadJadwal()
+      void refreshScheduleDecisionStatus()
     } catch (error) {
       console.error('Error adding jadwal:', error)
       
@@ -1854,6 +2024,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       }
       invalidateAcademicQueries()
       await loadJadwal()
+      void refreshScheduleDecisionStatus()
     } catch (error) {
       console.error('Error deleting jadwal:', error)
       pushToast('error', 'Gagal menghapus jadwal')
@@ -1969,6 +2140,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       setEditData(null)
       invalidateAcademicQueries()
       await loadJadwal()
+      void refreshScheduleDecisionStatus()
     } catch (error) {
       console.error('Error saving jadwal:', error)
       pushToast('error', 'Gagal menyimpan jadwal')
@@ -2363,6 +2535,15 @@ export default function AKelas({ initialTab = 'kelas' }) {
         title={isSchedulePage ? 'Akses Jadwal Pelajaran' : 'Akses Manajemen Kelas'}
         loading={passwordLoading}
       />
+      {isAuthorized && isSchedulePage && (
+        <SchedulePeriodDecisionOverlay
+          status={scheduleDecisionStatus}
+          loading={scheduleDecisionLoading}
+          actionLoading={scheduleDecisionAction}
+          onStartEmpty={() => resolveScheduleDecision('start_empty')}
+          onUsePrevious={() => resolveScheduleDecision('use_previous')}
+        />
+      )}
 
       {/* Jika belum authorized: tampilkan layar kunci saja */}
       {!isAuthorized ? (

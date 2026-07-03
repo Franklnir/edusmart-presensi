@@ -170,6 +170,24 @@ const adminApi = {
       if (!res.error) invalidateDbSelectCache()
       return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
     },
+    async schedulePeriodDecisionStatus(params = {}) {
+      const res = await apiFetch(`/api/admin/academic-period/schedule-decision${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 0,
+        timeoutMs: 12000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
+    },
+    async resolveSchedulePeriodDecision(payload = {}) {
+      const res = await apiFetch('/api/admin/academic-period/schedule-decision', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 45000
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
+    },
     async academicRolloverExceptions(params = {}) {
       const res = await apiFetch(`/api/admin/academic-rollover-exceptions${buildQueryString(params)}`, {
         method: 'GET',

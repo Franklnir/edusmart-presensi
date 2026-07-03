@@ -210,7 +210,7 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         ]);
     }
 
-    public function test_auto_rollover_can_copy_schedule_to_new_academic_year(): void
+    public function test_schedule_copy_is_decided_from_schedule_page_after_rollover(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
 
@@ -226,19 +226,15 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         $this->insertSettingsPeriod($tenantId, '2025/2026', 'Genap');
         $this->insertSchedule($tenantId, 'jadwal-source-matematika', 'x-a', $teacher->id, 'MATEMATIKA', 'Senin', '07:00', '08:00', '2025/2026', 'Genap');
         $this->insertSchedule($tenantId, 'jadwal-source-ipa', 'x-a', $teacher->id, 'IPA', 'Selasa', '08:00', '09:00', '2025/2026', 'Genap');
-        $this->insertSchedule($tenantId, 'jadwal-target-ipa', 'x-a', $teacher->id, 'IPA', 'Selasa', '08:00', '09:00', '2026/2027', 'Ganjil');
 
         Sanctum::actingAs($admin);
         $response = $this->postJson('/api/admin/academic-period/apply', $this->periodPayload('2026/2027', 'Ganjil', [
             'auto_rollover' => true,
-            'carry_jadwal' => true,
             'calendar_confirmed' => true,
         ]));
 
         $response->assertOk()
-            ->assertJsonPath('data.rollover.promoted_students', 1)
-            ->assertJsonPath('data.jadwal_copy_requested', true)
-            ->assertJsonPath('data.jadwal_copied', 1);
+            ->assertJsonPath('data.rollover.promoted_students', 1);
 
         $this->assertDatabaseHas('profiles', [
             'id' => $student->id,
@@ -246,6 +242,29 @@ class AcademicPeriodProfileRestoreTest extends TestCase
             'kelas' => 'xi-a',
             'status' => 'active',
         ]);
+        $this->assertDatabaseMissing('jadwal', [
+            'tenant_id' => $tenantId,
+            'mapel' => 'MATEMATIKA',
+            'tahun_ajaran' => '2026/2027',
+        ]);
+
+        $this->getJson('/api/admin/academic-period/schedule-decision?target_tahun_ajaran=2026/2027')
+            ->assertOk()
+            ->assertJsonPath('data.requires_decision', true)
+            ->assertJsonPath('data.target_schedule_count', 0)
+            ->assertJsonPath('data.source_schedule_count', 2);
+
+        $copyResponse = $this->postJson('/api/admin/academic-period/schedule-decision', [
+            'action' => 'use_previous',
+            'target_tahun_ajaran' => '2026/2027',
+            'source_tahun_ajaran' => '2025/2026',
+        ]);
+
+        $copyResponse->assertOk()
+            ->assertJsonPath('data.requires_decision', false)
+            ->assertJsonPath('data.copied_count', 2)
+            ->assertJsonPath('data.decision.decision', 'copy_previous');
+
         $this->assertDatabaseHas('jadwal', [
             'tenant_id' => $tenantId,
             'kelas_id' => 'x-a',
@@ -259,6 +278,13 @@ class AcademicPeriodProfileRestoreTest extends TestCase
             'mapel' => 'MATEMATIKA',
             'tahun_ajaran' => '2025/2026',
             'semester' => 'Genap',
+        ]);
+        $this->assertDatabaseHas('academic_schedule_period_decisions', [
+            'tenant_id' => $tenantId,
+            'target_tahun_ajaran' => '2026/2027',
+            'source_tahun_ajaran' => '2025/2026',
+            'decision' => 'copy_previous',
+            'copied_count' => 2,
         ]);
         $this->assertSame(
             1,
