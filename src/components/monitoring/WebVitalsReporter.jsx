@@ -7,6 +7,10 @@ const FLUSH_DELAY_MS = 3200
 const MIN_FLUSH_GAP_MS = 8000
 const MAX_ROUTE_LENGTH = 191
 const MAX_HOST_LENGTH = 191
+const CLS_SESSION_GAP_MS = 1000
+const CLS_SESSION_WINDOW_MS = 5000
+const PROTECTED_ROUTE_PREFIXES = ['/admin', '/guru', '/siswa']
+const COLLECTOR_VERSION = 'route-v2'
 
 const clampNumber = (value, precision = 2) => {
   const number = Number(value)
@@ -18,6 +22,34 @@ const clampNumber = (value, precision = 2) => {
 const routeFromLocation = (location) => {
   const path = `${location.pathname || '/'}${location.search || ''}`
   return path.slice(0, MAX_ROUTE_LENGTH) || '/'
+}
+
+const createMetrics = (navigation, includeDocumentTiming = false) => ({
+  lcp_ms: null,
+  ttfb_ms: includeDocumentTiming ? navigation?.ttfb_ms ?? null : null,
+  inp_ms: null,
+  cls: 0,
+  fcp_ms: null,
+  route_ready_ms: null
+})
+
+const createClsSession = () => ({
+  value: 0,
+  startTime: 0,
+  lastTime: 0
+})
+
+const isProtectedRoute = (routePath = '') => {
+  const path = String(routePath || '/').split('?')[0] || '/'
+  return PROTECTED_ROUTE_PREFIXES.some((prefix) => (
+    path === prefix || path.startsWith(`${prefix}/`)
+  ))
+}
+
+const canReportRouteIdentity = (routePath, auth) => {
+  if (!isProtectedRoute(routePath)) return true
+  if (auth?.isSuperAdmin) return true
+  return Boolean(auth?.user?.id && auth?.profile?.role)
 }
 
 const getConnection = () => {
@@ -74,18 +106,15 @@ export default function WebVitalsReporter() {
   const sendingRef = useRef(false)
   const collectRef = useRef(Math.random() <= resolveSampleRate())
   const navigationRef = useRef(getNavigationTiming())
-  const metricsRef = useRef({
-    lcp_ms: null,
-    ttfb_ms: navigationRef.current?.ttfb_ms ?? null,
-    inp_ms: null,
-    cls: 0,
-    fcp_ms: null,
-    route_ready_ms: null
-  })
+  const metricsRef = useRef(createMetrics(navigationRef.current, true))
+  const clsSessionRef = useRef(createClsSession())
+  const interactionDurationsRef = useRef(new Map())
 
-  useEffect(() => {
-    authRef.current = { user, profile, isSuperAdmin }
-  }, [isSuperAdmin, profile, user])
+  const resetRouteMetrics = useCallback((includeDocumentTiming = false) => {
+    metricsRef.current = createMetrics(navigationRef.current, includeDocumentTiming)
+    clsSessionRef.current = createClsSession()
+    interactionDurationsRef.current.clear()
+  }, [])
 
   const measureRouteReady = useCallback(() => {
     if (typeof window === 'undefined') return
@@ -104,16 +133,23 @@ export default function WebVitalsReporter() {
     const now = Date.now()
     if (!force && now - lastFlushAtRef.current < MIN_FLUSH_GAP_MS) return
 
+    const { user: activeUser, profile: activeProfile, isSuperAdmin: activeSuperAdmin } = authRef.current
+    if (!canReportRouteIdentity(routePath, {
+      user: activeUser,
+      profile: activeProfile,
+      isSuperAdmin: activeSuperAdmin
+    })) {
+      return
+    }
+
     const metrics = {
       ...metricsRef.current,
-      ttfb_ms: metricsRef.current.ttfb_ms ?? navigationRef.current?.ttfb_ms ?? null,
       route_ready_ms: routeReadyMsRef.current
     }
     const hasMetric = Object.values(metrics).some((value) => value !== null && value !== undefined)
     if (!hasMetric) return
 
     const connection = getConnection()
-    const { user: activeUser, profile: activeProfile, isSuperAdmin: activeSuperAdmin } = authRef.current
     const role = activeSuperAdmin
       ? 'super_admin'
       : activeProfile?.role || (activeUser?.id ? 'authenticated' : 'guest')
@@ -137,6 +173,7 @@ export default function WebVitalsReporter() {
           metrics,
           metadata: {
             reason,
+            collector_version: COLLECTOR_VERSION,
             language: navigator.language || '',
             visibility_state: document.visibilityState || 'visible'
           }
@@ -160,6 +197,14 @@ export default function WebVitalsReporter() {
   }, [flush])
 
   useEffect(() => {
+    authRef.current = { user, profile, isSuperAdmin }
+    if (!collectRef.current) return
+    if (canReportRouteIdentity(routeRef.current, { user, profile, isSuperAdmin })) {
+      scheduleFlush('auth-ready')
+    }
+  }, [isSuperAdmin, profile, scheduleFlush, user])
+
+  useEffect(() => {
     if (!collectRef.current) return undefined
 
     const observers = []
@@ -180,9 +225,29 @@ export default function WebVitalsReporter() {
       try {
         const observer = new PerformanceObserver((list) => {
           list.getEntries().forEach((entry) => {
-            if (!entry.hadRecentInput) {
-              metricsRef.current.cls = clampNumber((metricsRef.current.cls || 0) + Number(entry.value || 0), 4)
+            if (entry.hadRecentInput) return
+
+            const shiftValue = Number(entry.value || 0)
+            if (!Number.isFinite(shiftValue) || shiftValue <= 0) return
+
+            const startTime = Number(entry.startTime || performance.now())
+            const currentSession = clsSessionRef.current
+            const withinGap = startTime - currentSession.lastTime < CLS_SESSION_GAP_MS
+            const withinWindow = startTime - currentSession.startTime < CLS_SESSION_WINDOW_MS
+
+            if (currentSession.value > 0 && withinGap && withinWindow) {
+              currentSession.value += shiftValue
+              currentSession.lastTime = startTime
+            } else {
+              currentSession.value = shiftValue
+              currentSession.startTime = startTime
+              currentSession.lastTime = startTime
             }
+
+            metricsRef.current.cls = clampNumber(
+              Math.max(Number(metricsRef.current.cls || 0), currentSession.value),
+              4
+            )
           })
         })
         observer.observe({ type: 'layout-shift', buffered: true })
@@ -192,7 +257,6 @@ export default function WebVitalsReporter() {
 
     if (supportsEntryType('event')) {
       try {
-        const interactionDurations = new Map()
         const observer = new PerformanceObserver((list) => {
           list.getEntries().forEach((entry) => {
             const duration = clampNumber(entry.duration)
@@ -200,11 +264,11 @@ export default function WebVitalsReporter() {
 
             const interactionId = Number(entry.interactionId || 0)
             if (interactionId > 0) {
-              interactionDurations.set(
+              interactionDurationsRef.current.set(
                 interactionId,
-                Math.max(Number(interactionDurations.get(interactionId) || 0), duration)
+                Math.max(Number(interactionDurationsRef.current.get(interactionId) || 0), duration)
               )
-              metricsRef.current.inp_ms = clampNumber(Math.max(...interactionDurations.values()))
+              metricsRef.current.inp_ms = clampNumber(Math.max(...interactionDurationsRef.current.values()))
               return
             }
 
@@ -249,11 +313,12 @@ export default function WebVitalsReporter() {
     }
 
     routeRef.current = nextRoute
+    resetRouteMetrics(false)
     routeStartedAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now()
     routeReadyMsRef.current = null
     measureRouteReady()
     scheduleFlush('route-view')
-  }, [flush, location, measureRouteReady, scheduleFlush])
+  }, [flush, location, measureRouteReady, resetRouteMetrics, scheduleFlush])
 
   useEffect(() => {
     if (!collectRef.current || typeof document === 'undefined') return undefined

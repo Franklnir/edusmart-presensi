@@ -180,6 +180,7 @@ class WebVitalsController extends ApiController
                 'ttfb_ms' => ['good' => 800, 'needs_attention' => 1800],
                 'inp_ms' => ['good' => 200, 'needs_attention' => 500],
                 'cls' => ['good' => 0.1, 'needs_attention' => 0.25],
+                'route_ready_ms' => ['good' => 2500, 'needs_attention' => 4000],
             ],
             'filters' => [
                 'tenants' => $this->tenantOptions(),
@@ -215,7 +216,7 @@ class WebVitalsController extends ApiController
     private function metadata(Request $request, array $metadata): array
     {
         $allowed = collect($metadata)
-            ->only(['reason', 'language', 'visibility_state'])
+            ->only(['reason', 'collector_version', 'language', 'visibility_state'])
             ->map(fn ($value) => is_scalar($value) ? Str::limit((string) $value, 120, '') : null)
             ->filter(fn ($value) => $value !== null)
             ->all();
@@ -343,6 +344,7 @@ class WebVitalsController extends ApiController
             'ttfb_ms' => $row->ttfb_ms === null ? null : (float) $row->ttfb_ms,
             'inp_ms' => $row->inp_ms === null ? null : (float) $row->inp_ms,
             'cls' => $row->cls === null ? null : (float) $row->cls,
+            'route_ready_ms' => $row->route_ready_ms === null ? null : (float) $row->route_ready_ms,
         ];
     }
 
@@ -382,6 +384,7 @@ class WebVitalsController extends ApiController
             $this->metricStatus('ttfb_ms', $metrics['ttfb_ms'] ?? null),
             $this->metricStatus('inp_ms', $metrics['inp_ms'] ?? null),
             $this->metricStatus('cls', $metrics['cls'] ?? null),
+            $this->metricStatus('route_ready_ms', $metrics['route_ready_ms'] ?? null),
         ];
 
         if (in_array('poor', $statuses, true)) {
@@ -406,6 +409,7 @@ class WebVitalsController extends ApiController
             'ttfb_ms' => [800, 1800],
             'inp_ms' => [200, 500],
             'cls' => [0.1, 0.25],
+            'route_ready_ms' => [2500, 4000],
         ][$metric] ?? [INF, INF];
 
         if ($value <= $thresholds[0]) {
@@ -422,7 +426,7 @@ class WebVitalsController extends ApiController
     private function score(array $metrics): int
     {
         $score = 100;
-        foreach (['lcp_ms', 'ttfb_ms', 'inp_ms', 'cls'] as $metric) {
+        foreach (['lcp_ms', 'ttfb_ms', 'inp_ms', 'cls', 'route_ready_ms'] as $metric) {
             $status = $this->metricStatus($metric, $metrics[$metric] ?? null);
             if ($status === 'needs_attention') {
                 $score -= 10;

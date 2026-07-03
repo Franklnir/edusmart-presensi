@@ -1588,16 +1588,16 @@ export default function Scan() {
       : 0
 
   const renderScanFeedTable = (rows, config) => (
-    <div>
+    <div className="min-h-[22rem]">
       <div className={`px-6 py-3 border-b border-gray-200 ${config.headerClass}`}>
         <h4 className={`font-semibold flex items-center gap-2 ${config.titleClass}`}>
           <div className={`w-2 h-2 rounded-full ${config.dotClass}`} />
           {config.title}
         </h4>
       </div>
-      <div className="overflow-x-auto">
+      <div className="max-h-[28rem] min-h-[18rem] overflow-auto">
         <table className="w-full">
-          <thead className="bg-gray-50 border-b border-gray-200">
+          <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Siswa
@@ -1728,13 +1728,13 @@ export default function Scan() {
           </div>
         </div>
 
-        <div className="space-y-6">
+        <div className="min-h-[44rem] space-y-6">
           {/* --- PENGATURAN SCAN --- */}
           {activeTab === 'pengaturan' && (
             <div className="space-y-6">
               {/* Quick Stats */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                <div className="min-h-[5.75rem] bg-white p-4 rounded-xl border border-gray-200">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-blue-50 rounded-lg">
                       <Users className="w-5 h-5 text-blue-600" />
@@ -1750,7 +1750,7 @@ export default function Scan() {
                   </div>
                 </div>
 
-                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                <div className="min-h-[5.75rem] bg-white p-4 rounded-xl border border-gray-200">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-green-50 rounded-lg">
                       <UserCheck className="w-5 h-5 text-green-600" />
@@ -1766,7 +1766,7 @@ export default function Scan() {
                   </div>
                 </div>
 
-                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                <div className="min-h-[5.75rem] bg-white p-4 rounded-xl border border-gray-200">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-orange-50 rounded-lg">
                       <UserCheck className="w-5 h-5 text-orange-600" />
@@ -1782,7 +1782,7 @@ export default function Scan() {
                   </div>
                 </div>
 
-                <div className="bg-white p-4 rounded-xl border border-gray-200">
+                <div className="min-h-[5.75rem] bg-white p-4 rounded-xl border border-gray-200">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-purple-50 rounded-lg">
                       <BarChart3 className="w-5 h-5 text-purple-600" />
@@ -1804,7 +1804,7 @@ export default function Scan() {
                 {/* Settings Panel */}
                 <div className="xl:col-span-2 space-y-6">
                   {/* Settings Card */}
-                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="min-h-[34rem] bg-white rounded-xl border border-gray-200 overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                       <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                         <Clock className="w-5 h-5 text-gray-600" />
@@ -2043,11 +2043,11 @@ export default function Scan() {
 
                 {/* Classes Panel */}
                 <div className="space-y-6">
-                  <div className="bg-white rounded-xl border border-gray-200 p-6">
+                  <div className="min-h-[34rem] bg-white rounded-xl border border-gray-200 p-6">
                     <h4 className="font-medium text-gray-900 mb-4">
                       Daftar Kelas
                     </h4>
-                    <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                    <div className="min-h-[26rem] space-y-3 max-h-[500px] overflow-y-auto pr-2">
                       {kelaslist.map((k) => (
                         <div
                           key={k.id}
@@ -2121,7 +2121,7 @@ export default function Scan() {
           {activeTab === 'live-scan' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-                <div className="bg-white rounded-xl border border-gray-200 p-6 xl:col-span-1">
+                <div className="min-h-[18rem] bg-white rounded-xl border border-gray-200 p-6 xl:col-span-1">
                   <div className="flex items-center justify-between gap-3">
                     <h3 className="text-lg font-semibold text-gray-900">
                       Status Scanner
@@ -2191,7 +2191,7 @@ export default function Scan() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 bg-white p-5 xl:col-span-2">
+                <div className="min-h-[18rem] rounded-xl border border-gray-200 bg-white p-5 xl:col-span-2">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -2290,7 +2290,7 @@ export default function Scan() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="min-h-[30rem] bg-white rounded-xl border border-gray-200 overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="text-lg font-semibold text-gray-900">
@@ -2334,7 +2334,7 @@ export default function Scan() {
 
           {/* --- RIWAYAT --- */}
           {activeTab === 'riwayat' && (
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="min-h-[34rem] bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div>
@@ -2381,9 +2381,9 @@ export default function Scan() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="max-h-[34rem] min-h-[26rem] overflow-auto">
                 <table className="w-full">
-                  <thead className="bg-gray-50 border-b border-gray-200">
+                  <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Siswa

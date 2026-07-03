@@ -181,6 +181,7 @@ function RouteTable({ rows = [] }) {
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Halaman</th>
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Sample</th>
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">LCP</th>
+              <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Ready</th>
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">TTFB</th>
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">INP</th>
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">CLS</th>
@@ -196,6 +197,7 @@ function RouteTable({ rows = [] }) {
                 </td>
                 <td className="px-5 py-4 text-sm font-semibold text-slate-700">{formatNumber(row.samples)}</td>
                 <td className="px-5 py-4 text-sm font-semibold text-slate-700">{formatMs(row.p75?.lcp_ms)}</td>
+                <td className="px-5 py-4 text-sm font-semibold text-slate-700">{formatMs(row.p75?.route_ready_ms)}</td>
                 <td className="px-5 py-4 text-sm font-semibold text-slate-700">{formatMs(row.p75?.ttfb_ms)}</td>
                 <td className="px-5 py-4 text-sm font-semibold text-slate-700">{formatMs(row.p75?.inp_ms)}</td>
                 <td className="px-5 py-4 text-sm font-semibold text-slate-700">{formatCls(row.p75?.cls)}</td>
@@ -348,9 +350,10 @@ export default function SuperWebVitals() {
           </div>
         </section>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <MetricCard label="Skor Platform" value={`${summary.score ?? 0}/100`} hint={`${formatNumber(summary.samples)} sample`} icon={Gauge} status={status} />
           <MetricCard label="LCP p75" value={formatMs(p75.lcp_ms)} hint="Target bagus <= 2.5s" icon={Zap} status={p75.lcp_ms == null ? 'unknown' : p75.lcp_ms <= 2500 ? 'good' : p75.lcp_ms <= 4000 ? 'needs_attention' : 'poor'} />
+          <MetricCard label="Ready p75" value={formatMs(p75.route_ready_ms)} hint="Target route <= 2.5s" icon={RefreshCw} status={p75.route_ready_ms == null ? 'unknown' : p75.route_ready_ms <= 2500 ? 'good' : p75.route_ready_ms <= 4000 ? 'needs_attention' : 'poor'} />
           <MetricCard label="TTFB p75" value={formatMs(p75.ttfb_ms)} hint="Target bagus <= 800ms" icon={Timer} status={p75.ttfb_ms == null ? 'unknown' : p75.ttfb_ms <= 800 ? 'good' : p75.ttfb_ms <= 1800 ? 'needs_attention' : 'poor'} />
           <MetricCard label="INP p75" value={formatMs(p75.inp_ms)} hint="Target bagus <= 200ms" icon={Activity} status={p75.inp_ms == null ? 'unknown' : p75.inp_ms <= 200 ? 'good' : p75.inp_ms <= 500 ? 'needs_attention' : 'poor'} />
           <MetricCard label="CLS p75" value={formatCls(p75.cls)} hint="Target bagus <= 0.100" icon={MonitorSmartphone} status={p75.cls == null ? 'unknown' : p75.cls <= 0.1 ? 'good' : p75.cls <= 0.25 ? 'needs_attention' : 'poor'} />
