@@ -32,6 +32,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'sismu-frontend-staging' }}
+      CLOUDFLARE_PAGES_BACKEND_RESOLVE_OVERRIDE: ${{ vars.CLOUDFLARE_PAGES_BACKEND_RESOLVE_OVERRIDE || 'origin.sismu.biz.id' }}
+      CLOUDFLARE_PAGES_PLATFORM_API_HOST: ${{ vars.CLOUDFLARE_PAGES_PLATFORM_API_HOST || 'sismu.biz.id' }}
       VITE_API_URL: ${{ vars.CLOUDFLARE_PAGES_STAGING_API_URL || 'https://sismu.biz.id' }}
       VITE_ROOT_DOMAIN: ${{ vars.VITE_ROOT_DOMAIN || 'sismu.biz.id' }}
       VITE_ADMIN_SUBDOMAIN: ${{ vars.VITE_ADMIN_SUBDOMAIN || 'admin26' }}
@@ -74,7 +76,7 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Add Cloudflare Pages headers and SPA fallback
+      - name: Add Cloudflare Pages headers, backend proxy, and SPA fallback
         run: |
           set -euo pipefail
           cat > dist/_headers <<'HEADERS'
@@ -91,6 +93,82 @@ jobs:
           cat > dist/_redirects <<'REDIRECTS'
           /* /index.html 200
           REDIRECTS
+
+          node <<'NODE'
+          const fs = require('fs')
+
+          const worker = String.raw`
+          const BACKEND_RESOLVE_OVERRIDE = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_BACKEND_RESOLVE_OVERRIDE || 'origin.sismu.biz.id')}
+          const PLATFORM_API_HOST = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_PLATFORM_API_HOST || 'sismu.biz.id')}
+          const ROOT_DOMAIN = ${JSON.stringify(process.env.VITE_ROOT_DOMAIN || 'sismu.biz.id')}
+
+          const BACKEND_PREFIXES = [
+            '/api',
+            '/sanctum',
+            '/storage',
+            '/broadcasting/auth'
+          ]
+
+          const isBackendPath = (pathname) => (
+            BACKEND_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'))
+          )
+
+          const isPlatformUtilityHost = (hostname) => {
+            const host = String(hostname || '').toLowerCase()
+            const root = String(ROOT_DOMAIN || '').toLowerCase()
+            return (
+              host.endsWith('.pages.dev') ||
+              (root && (host === root || host === 'www.' + root || host === 'frontend.' + root))
+            )
+          }
+
+          const backendRequestInit = (request, forwardedUrl) => {
+            const headers = new Headers(request.headers)
+            headers.set('X-Forwarded-Host', forwardedUrl.host)
+            headers.set('X-Forwarded-Proto', forwardedUrl.protocol.replace(':', ''))
+            headers.set('X-Forwarded-Port', forwardedUrl.port || (forwardedUrl.protocol === 'https:' ? '443' : '80'))
+            headers.set('X-Original-Host', forwardedUrl.host)
+
+            return {
+              method: request.method,
+              headers,
+              body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
+              redirect: 'manual'
+            }
+          }
+
+          const proxyBackend = (request) => {
+            const incomingUrl = new URL(request.url)
+            const backendUrl = new URL(request.url)
+            const init = backendRequestInit(request, incomingUrl)
+
+            if (isPlatformUtilityHost(incomingUrl.hostname)) {
+              backendUrl.hostname = PLATFORM_API_HOST
+              backendUrl.port = ''
+              return fetch(new Request(backendUrl.toString(), init))
+            }
+
+            return fetch(new Request(backendUrl.toString(), init), {
+              cf: {
+                resolveOverride: BACKEND_RESOLVE_OVERRIDE
+              }
+            })
+          }
+
+          export default {
+            async fetch(request, env) {
+              const url = new URL(request.url)
+              if (isBackendPath(url.pathname)) {
+                return proxyBackend(request)
+              }
+
+              return env.ASSETS.fetch(request)
+            }
+          }
+          `
+
+          fs.writeFileSync('dist/_worker.js', worker.trimStart())
+          NODE
 
       - name: Ensure Cloudflare Pages project exists
         run: |
