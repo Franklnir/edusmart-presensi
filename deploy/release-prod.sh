@@ -240,6 +240,26 @@ compose() {
   docker compose "${args[@]}" "$@"
 }
 
+retry_command() {
+  local label="$1"
+  local max_attempts="${2:-4}"
+  local delay="${3:-8}"
+  shift 3
+
+  local attempt=1
+  until "$@"; do
+    if [[ "$attempt" -ge "$max_attempts" ]]; then
+      echo "[retry] $label gagal setelah ${max_attempts} percobaan." >&2
+      return 1
+    fi
+
+    echo "[retry] $label gagal/timeout; retry $((attempt + 1))/${max_attempts} dalam ${delay}s..." >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
+
 validate_compose_files_available() {
   local file
 
@@ -768,7 +788,7 @@ if [[ "$PULL_IMAGES" == "true" ]]; then
   echo "[4/9] Bersihkan image/cache Docker tidak terpakai sebelum pull..."
   docker system prune -af || true
   echo "[4/9] Pull image registry..."
-  compose pull \
+  retry_command "pull image registry" 4 10 compose pull \
     "${IMAGE_SERVICES[@]}"
 else
   echo "[4/9] Lewati pull image registry (--no-pull-images)"
