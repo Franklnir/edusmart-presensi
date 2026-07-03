@@ -1,0 +1,107 @@
+name: Cloudflare Pages Staging
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - staging
+    paths:
+      - ".github/workflows/cloudflare-pages-staging.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.js"
+      - "index.html"
+      - "public/**"
+      - "src/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-pages-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy Frontend Staging
+    runs-on: ubuntu-latest
+    environment: cloudflare-pages-staging
+
+    env:
+      NODE_VERSION: "20.19.0"
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'sismu-frontend-staging' }}
+      VITE_API_URL: ${{ vars.CLOUDFLARE_PAGES_STAGING_API_URL || 'https://sismu.biz.id' }}
+      VITE_ROOT_DOMAIN: ${{ vars.VITE_ROOT_DOMAIN || 'sismu.biz.id' }}
+      VITE_ADMIN_SUBDOMAIN: ${{ vars.VITE_ADMIN_SUBDOMAIN || 'admin26' }}
+      VITE_TENANT_SLUG: ${{ vars.VITE_TENANT_SLUG }}
+      VITE_REALTIME_POLL_MS: ${{ vars.VITE_REALTIME_POLL_MS || '4000' }}
+      VITE_REALTIME_POLL_HIDDEN_MS: ${{ vars.VITE_REALTIME_POLL_HIDDEN_MS || '12000' }}
+      VITE_GOOGLE_AUTH_ENABLED: ${{ vars.VITE_GOOGLE_AUTH_ENABLED || 'false' }}
+      VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+      VITE_GOOGLE_AUTH_LOGIN_URL: ${{ vars.VITE_GOOGLE_AUTH_LOGIN_URL || 'https://sismu.biz.id/api/auth/google/redirect' }}
+      VITE_GOOGLE_AUTH_LINK_URL: ${{ vars.VITE_GOOGLE_AUTH_LINK_URL || 'https://sismu.biz.id/api/auth/google/link' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Validate Cloudflare secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing Cloudflare secret::${name} is required"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Frontend security audit
+        run: npm run security:audit
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Add Cloudflare Pages headers and SPA fallback
+        run: |
+          set -euo pipefail
+          cat > dist/_headers <<'HEADERS'
+          /*
+            Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:
+            Cross-Origin-Opener-Policy: same-origin-allow-popups
+            Cross-Origin-Resource-Policy: same-site
+            Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=()
+            Referrer-Policy: strict-origin-when-cross-origin
+            X-Content-Type-Options: nosniff
+            X-Frame-Options: DENY
+          HEADERS
+
+          cat > dist/_redirects <<'REDIRECTS'
+          /* /index.html 200
+          REDIRECTS
+
+      - name: Ensure Cloudflare Pages project exists
+        run: |
+          set -euo pipefail
+          npx --yes wrangler pages project create "$CLOUDFLARE_PAGES_PROJECT_NAME" \
+            --production-branch staging \
+            || true
+
+      - name: Deploy to Cloudflare Pages
+        run: |
+          set -euo pipefail
+          npx --yes wrangler pages deploy dist \
+            --project-name "$CLOUDFLARE_PAGES_PROJECT_NAME" \
+            --branch "${GITHUB_REF_NAME:-staging}"

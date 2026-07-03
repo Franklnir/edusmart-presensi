@@ -438,12 +438,17 @@ check_compose_service() {
   local now_ts
   local timeout
   local last_state
+  local running_since
+  local stable_seconds
 
   timeout="${2:-${DEPLOY_HEALTH_WAIT_SECONDS:-180}}"
+  stable_seconds="${DEPLOY_RUNNING_STABLE_SECONDS:-12}"
   start_ts="$(date +%s)"
   last_state=""
+  running_since=""
 
   while true; do
+    now_ts="$(date +%s)"
     container_id="$(compose ps -q "$service" 2>/dev/null || true)"
     if [[ -n "$container_id" ]]; then
       state="$(docker inspect --format '{{.State.Status}}{{if .State.Health}}/{{.State.Health.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
@@ -452,20 +457,38 @@ check_compose_service() {
     fi
 
     case "$state" in
-      running|running/healthy)
+      running/healthy)
         echo "[ok] service $service: $state"
         return 0
+        ;;
+      running)
+        if [[ -z "$running_since" ]]; then
+          running_since="$now_ts"
+        fi
+
+        if (( now_ts - running_since >= stable_seconds )); then
+          echo "[ok] service $service: running/stable ${stable_seconds}s"
+          return 0
+        fi
+        ;;
+      *)
+        running_since=""
         ;;
     esac
 
     if [[ "$state" != "$last_state" ]]; then
-      echo "[wait] service $service: $state"
+      if [[ "$state" == "running" ]]; then
+        echo "[wait] service $service: running/stabilizing"
+      else
+        echo "[wait] service $service: $state"
+      fi
       last_state="$state"
     fi
 
-    now_ts="$(date +%s)"
     if (( now_ts - start_ts >= timeout )); then
       echo "[fail] service $service tidak sehat setelah ${timeout}s: $state" >&2
+      compose ps "$service" >&2 || true
+      compose logs --tail="${DEPLOY_SERVICE_LOG_TAIL:-80}" "$service" >&2 || true
       return 1
     fi
 
@@ -566,10 +589,16 @@ array_contains() {
 stage_app_services() {
   local label="$1"
   local wait_mode="$2"
-  shift 2
+  local dependency_mode="$3"
+  shift 3
 
   local services=()
+  local compose_up_args=(-d --no-build)
   local service
+
+  if [[ "$dependency_mode" == "no-deps" ]]; then
+    compose_up_args+=(--no-deps)
+  fi
 
   for service in "$@"; do
     if ! array_contains "$service" "${APP_SERVICES[@]}"; then
@@ -589,7 +618,7 @@ stage_app_services() {
 
   echo "      - deploy ${label}: ${services[*]}"
   retry_command "compose up ${label}" 4 12 \
-    compose up -d --no-build "${services[@]}"
+    compose up "${compose_up_args[@]}" "${services[@]}"
 
   if [[ "$wait_mode" == "ready" ]]; then
     for service in "${services[@]}"; do
@@ -601,12 +630,12 @@ stage_app_services() {
 deploy_app_services() {
   STARTED_APP_SERVICES=()
 
-  stage_app_services "broker MQTT" ready mosquitto
-  stage_app_services "aplikasi Laravel" none backend worker scheduler rfid_bridge
-  stage_app_services "gateway HTTP internal" ready nginx
-  stage_app_services "gateway publik" ready caddy
-  stage_app_services "helper MQTT" none mosquitto_reloader
-  stage_app_services "sync sertifikat MQTT" none mosquitto_cert_sync
+  stage_app_services "broker MQTT" ready deps mosquitto
+  stage_app_services "aplikasi Laravel" none deps backend worker scheduler rfid_bridge
+  stage_app_services "gateway HTTP internal" ready deps nginx
+  stage_app_services "gateway publik" ready deps caddy
+  stage_app_services "helper MQTT" none no-deps mosquitto_reloader
+  stage_app_services "sync sertifikat MQTT" none no-deps mosquitto_cert_sync
 
   local remaining=()
   local service
