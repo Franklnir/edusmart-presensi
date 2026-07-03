@@ -378,7 +378,8 @@ recreate_mosquitto_after_config_change() {
   fi
 
   echo "      - recreate Mosquitto karena konfigurasi broker berubah"
-  compose up -d --no-build --force-recreate --no-deps "${services[@]}"
+  retry_command "recreate Mosquitto setelah config change" 3 12 \
+    compose up -d --no-build --force-recreate --no-deps "${services[@]}"
 }
 
 git_status_for_release() {
@@ -799,8 +800,8 @@ else
 fi
 DEPLOY_PHASE="restart_services"
 echo "[5/9] Deploy service tanpa build lokal..."
-compose up -d --no-build \
-  "${APP_SERVICES[@]}"
+retry_command "compose up app services" 3 15 \
+  compose up -d --no-build "${APP_SERVICES[@]}"
 recreate_mosquitto_after_config_change
 start_optional_services
 
