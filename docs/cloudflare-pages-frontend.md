@@ -16,7 +16,7 @@ Workflow: `.github/workflows/cloudflare-pages-staging.yml`
 Trigger:
 
 - manual dari GitHub Actions (`workflow_dispatch`)
-- otomatis saat push ke branch `staging`
+- otomatis saat push ke branch `staging-cloudflare`
 
 Alur:
 
@@ -36,6 +36,8 @@ Tambahkan di GitHub repository atau environment `cloudflare-pages-staging`:
 - `VITE_GOOGLE_CLIENT_ID` jika Google login frontend diaktifkan
 
 Token Cloudflare minimal perlu akses Cloudflare Pages untuk account SISMU. Jangan commit token ke repo.
+
+Branch `staging-cloudflare` khusus dipakai untuk deploy frontend ke Cloudflare Pages, sehingga tidak ikut jalur deploy VPS produksi.
 
 ## GitHub Variables
 

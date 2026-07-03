@@ -1,10 +1,10 @@
-name: Cloudflare Pages Staging
+name: Staging Cloudflare
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - staging
+      - staging-cloudflare
     paths:
       - ".github/workflows/cloudflare-pages-staging.yml"
       - "package.json"
@@ -96,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes wrangler pages project create "$CLOUDFLARE_PAGES_PROJECT_NAME" \
-            --production-branch staging \
+            --production-branch staging-cloudflare \
             || true
 
       - name: Deploy to Cloudflare Pages
@@ -104,4 +104,4 @@ jobs:
           set -euo pipefail
           npx --yes wrangler pages deploy dist \
             --project-name "$CLOUDFLARE_PAGES_PROJECT_NAME" \
-            --branch "${GITHUB_REF_NAME:-staging}"
+            --branch "${GITHUB_REF_NAME:-staging-cloudflare}"
