@@ -32,7 +32,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'sismu-frontend-staging' }}
-      CLOUDFLARE_PAGES_BACKEND_RESOLVE_OVERRIDE: ${{ vars.CLOUDFLARE_PAGES_BACKEND_RESOLVE_OVERRIDE || 'origin.sismu.biz.id' }}
+      CLOUDFLARE_PAGES_BACKEND_ORIGIN: ${{ vars.CLOUDFLARE_PAGES_BACKEND_ORIGIN || 'https://origin.sismu.biz.id' }}
+      CLOUDFLARE_PAGES_EDGE_PROXY_SECRET: ${{ secrets.CLOUDFLARE_PAGES_EDGE_PROXY_SECRET }}
       CLOUDFLARE_PAGES_PLATFORM_API_HOST: ${{ vars.CLOUDFLARE_PAGES_PLATFORM_API_HOST || 'sismu.biz.id' }}
       VITE_API_URL: ${{ vars.CLOUDFLARE_PAGES_STAGING_API_URL || 'https://sismu.biz.id' }}
       VITE_ROOT_DOMAIN: ${{ vars.VITE_ROOT_DOMAIN || 'sismu.biz.id' }}
@@ -59,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN; do
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_PAGES_EDGE_PROXY_SECRET; do
             if [ -z "${!name:-}" ]; then
               echo "::error title=Missing Cloudflare secret::${name} is required"
               missing=1
@@ -98,7 +99,8 @@ jobs:
           const fs = require('fs')
 
           const worker = String.raw`
-          const BACKEND_RESOLVE_OVERRIDE = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_BACKEND_RESOLVE_OVERRIDE || 'origin.sismu.biz.id')}
+          const BACKEND_ORIGIN = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_BACKEND_ORIGIN || 'https://origin.sismu.biz.id')}
+          const EDGE_PROXY_SECRET = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_EDGE_PROXY_SECRET || '')}
           const PLATFORM_API_HOST = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_PLATFORM_API_HOST || 'sismu.biz.id')}
           const ROOT_DOMAIN = ${JSON.stringify(process.env.VITE_ROOT_DOMAIN || 'sismu.biz.id')}
 
@@ -122,12 +124,16 @@ jobs:
             )
           }
 
-          const backendRequestInit = (request, forwardedUrl) => {
+          const backendRequestInit = (request, forwardedUrl, signForwardedHost) => {
             const headers = new Headers(request.headers)
             headers.set('X-Forwarded-Host', forwardedUrl.host)
             headers.set('X-Forwarded-Proto', forwardedUrl.protocol.replace(':', ''))
             headers.set('X-Forwarded-Port', forwardedUrl.port || (forwardedUrl.protocol === 'https:' ? '443' : '80'))
             headers.set('X-Original-Host', forwardedUrl.host)
+            if (signForwardedHost && EDGE_PROXY_SECRET) {
+              headers.set('X-Sismu-Forwarded-Host', forwardedUrl.host)
+              headers.set('X-Sismu-Edge-Secret', EDGE_PROXY_SECRET)
+            }
 
             return {
               method: request.method,
@@ -140,19 +146,20 @@ jobs:
           const proxyBackend = (request) => {
             const incomingUrl = new URL(request.url)
             const backendUrl = new URL(request.url)
-            const init = backendRequestInit(request, incomingUrl)
+            const platformUtilityHost = isPlatformUtilityHost(incomingUrl.hostname)
+            const backendOrigin = new URL(platformUtilityHost ? ('https://' + PLATFORM_API_HOST) : BACKEND_ORIGIN)
+            backendUrl.protocol = backendOrigin.protocol
+            backendUrl.hostname = backendOrigin.hostname
+            backendUrl.port = backendOrigin.port
 
-            if (isPlatformUtilityHost(incomingUrl.hostname)) {
+            const init = backendRequestInit(request, incomingUrl, !platformUtilityHost)
+
+            if (platformUtilityHost) {
               backendUrl.hostname = PLATFORM_API_HOST
               backendUrl.port = ''
-              return fetch(new Request(backendUrl.toString(), init))
             }
 
-            return fetch(new Request(backendUrl.toString(), init), {
-              cf: {
-                resolveOverride: BACKEND_RESOLVE_OVERRIDE
-              }
-            })
+            return fetch(new Request(backendUrl.toString(), init))
           }
 
           export default {

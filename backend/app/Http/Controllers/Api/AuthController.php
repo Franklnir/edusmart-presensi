@@ -74,7 +74,7 @@ class AuthController extends ApiController
         $profile = $this->profile($request);
         $isSuperAdminIdentity = $this->isSuperAdminIdentity($request);
         $isSuperAdminForHost = $isSuperAdminIdentity
-            && $this->isAllowedSuperAdminLoginHost((string) $request->getHost());
+            && $this->isAllowedSuperAdminLoginHost($this->currentHost($request));
 
         if (! $isSuperAdminForHost && ! $profile && $this->tenantId($request)) {
             return response()->json(['error' => 'Akses tenant ditolak'], 403);
@@ -1069,7 +1069,7 @@ class AuthController extends ApiController
 
     private function currentHost(Request $request): string
     {
-        return strtolower(trim((string) $request->getHost()));
+        return $this->tenantDomainService->trustedRequestHost($request);
     }
 
     private function isAdminHost(string $host): bool

@@ -2,6 +2,7 @@
 
 namespace App\Support\Tenancy;
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -44,6 +45,33 @@ class TenantDomainService
         }
 
         return trim($value, '.');
+    }
+
+    public function trustedRequestHost(Request $request): string
+    {
+        $host = $this->normalizeHost((string) $request->getHost());
+        $secret = trim((string) config('tenancy.edge_proxy_secret', ''));
+        if ($secret === '') {
+            return $host;
+        }
+
+        $secretHeader = trim((string) config('tenancy.edge_secret_header', 'X-Sismu-Edge-Secret'));
+        $forwardedHostHeader = trim((string) config('tenancy.edge_forwarded_host_header', 'X-Sismu-Forwarded-Host'));
+        if ($secretHeader === '' || $forwardedHostHeader === '') {
+            return $host;
+        }
+
+        $receivedSecret = (string) $request->headers->get($secretHeader, '');
+        if ($receivedSecret === '' || ! hash_equals($secret, $receivedSecret)) {
+            return $host;
+        }
+
+        $forwardedHost = $this->normalizeHost((string) $request->headers->get($forwardedHostHeader, ''));
+        if ($forwardedHost === '' || ! $this->isWithinConfiguredRoot($forwardedHost)) {
+            return $host;
+        }
+
+        return $forwardedHost;
     }
 
     public function publicScheme(): string
@@ -226,6 +254,11 @@ class TenantDomainService
 
         $mqttHost = $this->normalizeHost((string) config('rfid.mosquitto.public_host', ''));
         if ($mqttHost !== '' && $normalizedHost === $mqttHost) {
+            return true;
+        }
+
+        $edgeOriginHost = $this->normalizeHost((string) config('tenancy.edge_origin_host', ''));
+        if ($edgeOriginHost !== '' && $normalizedHost === $edgeOriginHost) {
             return true;
         }
 
@@ -781,6 +814,17 @@ class TenantDomainService
         $rootDomain = ltrim($rootDomain, '.');
 
         return trim((string) preg_replace('#^https?://#', '', $rootDomain), '/');
+    }
+
+    private function isWithinConfiguredRoot(string $host): bool
+    {
+        $host = $this->normalizeHost($host);
+        $root = $this->normalizedRootDomain();
+        if ($host === '' || $root === '') {
+            return false;
+        }
+
+        return $host === $root || str_ends_with($host, '.'.$root);
     }
 
     private function isReservedSlug(string $slug): bool

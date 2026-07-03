@@ -15,7 +15,7 @@ class ResolveTenant
 
     public function handle(Request $request, Closure $next)
     {
-        $host = strtolower(trim((string) $request->getHost()));
+        $host = $this->tenantDomainService->trustedRequestHost($request);
         $slug = $this->resolveHeaderTenantSlug($request);
 
         if ($slug === '') {
@@ -46,7 +46,7 @@ class ResolveTenant
             return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
         }
 
-        $isAdminHost = $this->tenantDomainService->isAdminHost((string) $request->getHost());
+        $isAdminHost = $this->tenantDomainService->isAdminHost($host);
         if (
             ! $isAdminHost
             && ! $request->is('api/health')

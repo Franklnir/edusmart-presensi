@@ -2,15 +2,20 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\Tenancy\TenantDomainService;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class DenyRootDomainAuthAccess
 {
+    public function __construct(
+        private readonly TenantDomainService $tenantDomainService
+    ) {}
+
     public function handle(Request $request, Closure $next): Response
     {
-        if ($this->isRootMarketingHost((string) $request->getHost())) {
+        if ($this->isRootMarketingHost($this->tenantDomainService->trustedRequestHost($request))) {
             return response()->json([
                 'error' => 'Login hanya bisa diakses dari subdomain sekolah atau subdomain admin resmi.',
                 'code' => 'ROOT_DOMAIN_AUTH_DISABLED',

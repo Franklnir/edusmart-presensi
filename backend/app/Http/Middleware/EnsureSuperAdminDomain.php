@@ -15,7 +15,7 @@ class EnsureSuperAdminDomain
 
     public function handle(Request $request, Closure $next): Response
     {
-        $host = strtolower(trim((string) $request->getHost()));
+        $host = $this->tenantDomainService->trustedRequestHost($request);
         if ($this->tenantDomainService->isAdminHost($host) || $this->isAllowedLocalSuperAdminHost($host)) {
             return $next($request);
         }
