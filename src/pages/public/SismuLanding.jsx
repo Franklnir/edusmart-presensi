@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleHelp,
+  Cloud,
   Clock,
   Crown,
   DatabaseBackup,
@@ -52,6 +53,8 @@ import { landingFeatureCards, sismuLandingPainPoints } from '../../data/sismuFea
 
 const whatsappUrl =
   'https://wa.me/6289531832365?text=Halo%20SISMU%2C%20saya%20ingin%20konsultasi%20paket%20untuk%20sekolah'
+const demoWhatsappUrl =
+  'https://wa.me/6289531832365?text=Halo%20SISMU%2C%20saya%20ingin%20minta%20demo%20landing%20dan%20fitur%20SISMU%20untuk%20sekolah'
 const adminLoginUrl = `https://${getAdminSubdomain()}.${getRootDomain()}/login`
 
 const iconMap = {
@@ -65,6 +68,7 @@ const iconMap = {
   'calendar-days': CalendarDays,
   'check-circle-2': CheckCircle2,
   'circle-help': CircleHelp,
+  cloud: Cloud,
   clock: Clock,
   crown: Crown,
   'database-backup': DatabaseBackup,
@@ -103,74 +107,169 @@ const iconMap = {
 const problems = sismuLandingPainPoints
 const features = landingFeatureCards
 
+const solutionCards = [
+  {
+    icon: 'folder-check',
+    title: 'Lebih tertata',
+    desc: 'Data sekolah tersimpan per role, kelas, dan periode sehingga admin tidak bergantung pada banyak file terpisah.'
+  },
+  {
+    icon: 'zap',
+    title: 'Lebih cepat',
+    desc: 'Presensi, tugas, quiz, nilai, dan laporan tidak perlu banyak proses manual yang memakan waktu.'
+  },
+  {
+    icon: 'sparkles',
+    title: 'Lebih profesional',
+    desc: 'Sekolah tampil siap digital dengan sistem cloud modern yang nyaman dipakai admin sekolah, guru, dan siswa.'
+  }
+]
+
+const roleFeatureSections = [
+  {
+    role: 'Admin Sekolah',
+    icon: 'user-cog',
+    desc: 'Mengontrol data sekolah, jadwal, presensi, laporan, dan akses pengguna dari satu sistem.',
+    outcome: 'Admin tidak perlu mengelola banyak file terpisah. Jadwal lebih terkontrol, presensi mudah dipantau, dan laporan lebih siap.',
+    features: [
+      'Dashboard sekolah',
+      'Manajemen siswa',
+      'Manajemen guru',
+      'Manajemen kelas dan rombel',
+      'Jadwal pelajaran',
+      'Periode akademik dan kenaikan tahun ajaran',
+      'Presensi QR/RFID/manual',
+      'Live scan dan riwayat presensi',
+      'Absensi guru',
+      'Pengajuan absensi',
+      'Nilai, rapot, dan laporan',
+      'Hak akses admin'
+    ]
+  },
+  {
+    role: 'Guru',
+    icon: 'book-open',
+    desc: 'Membantu guru mengajar, mencatat presensi, membuat tugas, menjalankan quiz, dan merekap nilai lebih rapi.',
+    outcome: 'Guru tidak perlu mengumpulkan tugas lewat chat, merekap nilai manual berkali-kali, atau mencari jadwal dari file terpisah.',
+    features: [
+      'Dashboard guru',
+      'Jadwal mengajar',
+      'Presensi kelas dan mapel',
+      'Tugas digital',
+      'Quiz online',
+      'Bobot penilaian per mapel',
+      'Rekap nilai',
+      'Laporan kelas',
+      'Materi dan lampiran'
+    ]
+  },
+  {
+    role: 'Siswa',
+    icon: 'users',
+    desc: 'Memberi siswa akses ke jadwal, presensi, tugas, quiz, nilai, sertifikat, dan aktivitas sekolah dari akun pribadi.',
+    outcome: 'Siswa lebih mudah melihat kewajiban belajar, status kehadiran, dan perkembangan nilai tanpa menunggu informasi tercecer.',
+    features: [
+      'Dashboard siswa',
+      'Jadwal pelajaran pribadi',
+      'QR/RFID untuk presensi',
+      'Riwayat presensi',
+      'Pengumpulan tugas',
+      'Quiz online',
+      'Nilai dan rapot',
+      'Sertifikat digital',
+      'Ekskul dan aktivitas siswa'
+    ]
+  }
+]
+
 const benefits = [
-  { icon: 'folder-check', title: 'Administrasi lebih tertata', desc: 'Data sekolah tersimpan dalam modul yang saling terhubung.' },
-  { icon: 'zap', title: 'Operasional lebih cepat', desc: 'Presensi, tugas, quiz, dan laporan tidak perlu banyak proses manual.' },
-  { icon: 'monitor-check', title: 'Mudah dipantau', desc: 'Admin dan kepala sekolah dapat membaca kondisi sekolah dari dashboard.' },
-  { icon: 'shield-check', title: 'Data lebih aman', desc: 'Hak akses, backup, dan audit membantu menjaga data sekolah.' },
+  { icon: 'folder-check', title: 'Data sekolah lebih terstruktur', desc: 'Data siswa, guru, kelas, jadwal, presensi, dan laporan berada dalam alur yang sama.' },
+  { icon: 'shield-check', title: 'Akses sesuai role', desc: 'Admin sekolah, guru, dan siswa memakai fitur sesuai kebutuhan masing-masing.' },
+  { icon: 'database-backup', title: 'Storage sampai 200GB', desc: 'Paket SISMU menyediakan ruang penyimpanan besar untuk mendukung data dan lampiran sekolah.' },
+  { icon: 'monitor-check', title: 'Siap digunakan lewat browser', desc: 'Sekolah tidak perlu menyediakan server sendiri untuk mulai memakai sistem.' },
   { icon: 'sparkles', title: 'Citra sekolah modern', desc: 'Layanan digital membuat sekolah terlihat lebih siap dan profesional.' },
-  { icon: 'message-circle', title: 'Komunikasi lebih cepat', desc: 'Informasi penting bisa dikirim lebih terarah kepada pengguna terkait.' }
+  { icon: 'qr-code', title: 'QR siap, RFID opsional', desc: 'Sekolah bisa mulai dari QR Code dan menambahkan RFID jika ingin presensi lebih cepat.' }
 ]
 
 const pricingPlans = [
   {
-    name: 'Starter',
-    badge: 'Mulai Digitalisasi',
-    price: 'Rp2.000',
+    name: 'Standard',
+    badge: 'Paket Lengkap Sekolah',
+    price: 'Rp4.000',
     period: '/siswa/bulan',
-    desc: 'Untuk sekolah yang ingin mulai merapikan data, presensi, tugas, quiz, nilai, dan laporan.',
+    desc: 'Untuk sekolah dengan minimal 280 siswa yang ingin merapikan administrasi, presensi, akademik, dan laporan dalam satu platform.',
     icon: 'rocket',
     highlighted: false,
     features: [
-      'Manajemen siswa, guru, kelas',
+      'Semua fitur utama SISMU',
+      'Akun admin sekolah, guru, dan siswa',
+      'Manajemen siswa, guru, dan kelas',
       'Jadwal pelajaran',
-      'Presensi QR Code dan manual',
+      'Presensi QR Code dan RFID ready',
+      'Live scan dan riwayat presensi',
       'Tugas digital dan quiz online',
-      'Nilai dan rekap akademik',
-      'Dashboard sekolah',
-      'Maksimal 7 admin sekolah',
-      'Storage 100GB',
-      'Backup manual',
-      'Pelatihan awal'
-    ]
+      'Nilai, rapot, dan laporan',
+      'Absensi guru dan pengajuan absensi',
+      'Sertifikat digital',
+      'Backup dan restore',
+      'Hak akses pengguna',
+      'Storage sampai 200GB'
+    ],
+    note: 'Belum termasuk kartu RFID dan reader RFID.'
   },
   {
     name: 'Professional',
-    badge: 'Paling Direkomendasikan',
-    price: 'Rp3.000',
+    badge: 'Branding & Notifikasi',
+    price: 'Rp5.000',
     period: '/siswa/bulan',
-    desc: 'Untuk sekolah yang membutuhkan otomasi lebih lengkap, RFID, notifikasi, custom domain, dan audit aktivitas.',
+    desc: 'Untuk sekolah yang ingin semua fitur Standard ditambah custom domain dan notifikasi WhatsApp untuk kondisi penting.',
     icon: 'crown',
     highlighted: true,
     features: [
-      'Semua fitur Starter',
-      'Presensi RFID dan QR Code',
-      'Notifikasi wali murid',
-      'Sertifikat digital',
-      'Laporan lengkap dan analitik',
-      'Multi admin sekolah',
-      'Custom domain',
-      'Backup otomatis dan restore',
-      'Audit aktivitas',
-      'Storage 150GB',
-      'Dukungan prioritas'
-    ]
+      'Semua fitur Paket Standard',
+      'Custom domain sekolah',
+      'Notifikasi WhatsApp untuk alpha',
+      'Notifikasi WhatsApp untuk pelanggaran tertentu',
+      'Cocok untuk komunikasi sekolah yang lebih cepat',
+      'Branding sekolah lebih profesional',
+      'Storage sampai 200GB'
+    ],
+    note: 'Wajib untuk sekolah dengan jumlah siswa di bawah 280 siswa.'
+  }
+]
+
+const rfidAddOns = [
+  {
+    icon: 'tags',
+    title: 'Kartu RFID siap pakai',
+    price: 'Rp10.000',
+    unit: '/kartu',
+    desc: 'Biaya awal untuk sekolah yang ingin memakai kartu RFID.'
+  },
+  {
+    icon: 'radio',
+    title: 'RFID reader',
+    price: 'Rp70.000',
+    unit: '/unit',
+    desc: 'Biaya awal per reader untuk titik scan yang dibutuhkan sekolah.'
   }
 ]
 
 const comparisonRows = [
   ['Manajemen siswa, guru, kelas', true, true],
   ['Jadwal pelajaran', true, true],
-  ['Presensi manual dan QR', true, true],
-  ['Presensi RFID', 'Opsional', 'Tersedia'],
+  ['Presensi QR Code', true, true],
+  ['Presensi RFID ready', true, true],
+  ['Live scan dan riwayat presensi', true, true],
   ['Tugas dan quiz online', true, true],
-  ['Nilai dan rekap akademik', true, true],
-  ['Sertifikat digital', false, true],
-  ['Notifikasi wali murid', false, true],
-  ['Admin sekolah', 'Maks. 7 admin', 'Multi admin'],
+  ['Nilai dan rapot', true, true],
+  ['Sertifikat digital', true, true],
+  ['Storage', 'Sampai 200GB', 'Sampai 200GB'],
   ['Custom domain', false, true],
-  ['Backup', 'Manual', 'Otomatis + restore'],
-  ['Dukungan', 'Email', 'Prioritas']
+  ['Notifikasi WhatsApp alpha', false, true],
+  ['Notifikasi WhatsApp pelanggaran tertentu', false, true],
+  ['Aturan jumlah siswa', 'Minimal 280 siswa', 'Wajib jika di bawah 280 siswa'],
+  ['Kartu dan reader RFID', 'Add-on awal', 'Add-on awal']
 ]
 
 const faqs = [
@@ -180,19 +279,39 @@ const faqs = [
   },
   {
     q: 'Apakah setiap sekolah mendapatkan subdomain?',
-    a: 'Bisa. Sekolah dapat memakai subdomain seperti namasekolah.sismu.biz.id, dan paket tertentu bisa memakai custom domain.'
+    a: 'Bisa. Sekolah dapat memakai subdomain SISMU, dan Paket Professional mendukung custom domain sekolah.'
   },
   {
-    q: 'Apa bedanya Starter dan Professional?',
-    a: 'Starter cocok untuk digitalisasi dasar. Professional menambahkan RFID, notifikasi, custom domain, audit aktivitas, dan backup otomatis.'
+    q: 'Apakah mendukung presensi QR dan RFID?',
+    a: 'Ya. SISMU mendukung presensi QR Code dan sudah RFID ready. Sekolah bisa mulai dari QR Code, lalu menambahkan kartu dan reader RFID jika dibutuhkan.'
   },
   {
-    q: 'Apakah harga sudah termasuk perangkat RFID?',
-    a: 'Belum. Perangkat RFID, kartu, dan instalasi dihitung sesuai kebutuhan sekolah agar biayanya lebih tepat.'
+    q: 'Apa perbedaan Paket Standard dan Professional?',
+    a: 'Paket Standard Rp4.000/siswa/bulan berisi fitur utama SISMU dengan storage sampai 200GB. Paket Professional Rp5.000/siswa/bulan berisi semua fitur Standard ditambah custom domain dan notifikasi WhatsApp untuk alpha serta pelanggaran tertentu.'
+  },
+  {
+    q: 'Apakah wajib membeli kartu RFID dan reader?',
+    a: 'Tidak wajib. SISMU tetap bisa digunakan dengan QR Code. Kartu RFID Rp10.000/kartu dan RFID reader Rp70.000/unit hanya dibayar di awal jika sekolah ingin memakai RFID.'
   },
   {
     q: 'Apakah bisa migrasi data dari Excel?',
     a: 'Bisa. Data awal seperti siswa, guru, kelas, dan jadwal dapat dibantu impor agar sekolah tidak mulai dari nol.'
+  },
+  {
+    q: 'Mengapa sekolah dengan siswa di bawah 280 wajib mengambil Paket Professional?',
+    a: 'Karena jumlah siswa yang lebih kecil membutuhkan paket dengan nilai layanan minimum agar operasional, dukungan, storage, dan fitur premium tetap layak dijalankan.'
+  },
+  {
+    q: 'Apakah guru dan siswa punya akun masing-masing?',
+    a: 'Ya. Admin sekolah, guru, dan siswa memakai akun sesuai role sehingga fitur dan data yang ditampilkan lebih tepat.'
+  },
+  {
+    q: 'Apakah sekolah bisa memakai custom domain?',
+    a: 'Bisa. Custom domain tersedia di Paket Professional agar akses sekolah terlihat lebih resmi dan mudah diingat.'
+  },
+  {
+    q: 'Apakah sekolah bisa minta demo dulu?',
+    a: 'Bisa. Sekolah dapat konsultasi dan meminta demo sebelum menentukan paket yang paling sesuai.'
   }
 ]
 
@@ -376,7 +495,7 @@ const SismuLanding = () => {
     if (description) {
       description.setAttribute(
         'content',
-        'SISMU adalah platform manajemen sekolah modern untuk presensi, RFID, QR Code, data siswa, guru, tugas, quiz, laporan, backup, dan monitoring sekolah.'
+        'SISMU adalah platform manajemen sekolah modern untuk presensi QR/RFID, data siswa, guru, jadwal, tugas, quiz, nilai, rapot, laporan, backup, dan storage sampai 200GB.'
       )
     }
 
@@ -439,9 +558,9 @@ const SismuLanding = () => {
   }, [activeFilter, openFaq])
 
   const navItems = [
-    ['fitur', 'Fitur'],
     ['solusi', 'Solusi'],
-    ['sistem', 'Sistem'],
+    ['pengguna', 'Pengguna'],
+    ['fitur', 'Fitur'],
     ['harga', 'Harga'],
     ['faq', 'FAQ']
   ]
@@ -549,8 +668,8 @@ const SismuLanding = () => {
               </h1>
 
               <p className="sismu-hero-subtitle mx-auto mt-6 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg lg:mx-0">
-                Sistem Informasi Sekolah Mutu Unggul membantu sekolah mengelola presensi QR/RFID, data siswa,
-                guru, kelas, tugas, quiz, nilai, ekstrakurikuler, laporan, storage, dan backup dalam satu platform.
+                Kelola data siswa, guru, kelas, presensi QR/RFID, jadwal pelajaran, tugas, quiz, nilai, rapot,
+                dan laporan sekolah dalam satu platform cloud yang siap digunakan.
               </p>
 
               <div className="sismu-hero-actions mt-8 flex flex-col justify-center gap-3 sm:flex-row lg:justify-start">
@@ -564,12 +683,12 @@ const SismuLanding = () => {
 
               <div className="sismu-hero-tags mt-8 flex flex-wrap justify-center gap-2 lg:justify-start">
                 {[
-                  ['school', 'Siap pakai untuk sekolah'],
-                  ['radio', 'RFID ready'],
-                  ['qr-code', 'QR Code'],
-                  ['database-backup', 'Backup & restore'],
-                  ['shield-check', 'Data terpisah'],
-                  ['tags', 'Mulai Rp2.000/siswa/bulan']
+                  ['cloud', 'Cloud based'],
+                  ['radio', 'QR & RFID ready'],
+                  ['database-backup', 'Storage sampai 200GB'],
+                  ['calendar-days', 'Jadwal dan presensi'],
+                  ['bar-chart-3', 'Nilai dan rapot'],
+                  ['tags', 'Mulai Rp4.000/siswa/bulan']
                 ].map(([icon, label]) => (
                   <span key={label} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600">
                     <Icon name={icon} className="h-3.5 w-3.5 text-blue-600" />
@@ -603,7 +722,7 @@ const SismuLanding = () => {
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <SectionHeading
               eyebrow="Masalah yang Sering Terjadi"
-              title="Sekolah sering sibuk karena datanya belum saling terhubung."
+              title="Sekolah sering sibuk bukan karena kurang kerja, tapi karena datanya belum saling terhubung."
               desc="SISMU membantu mengurangi pekerjaan berulang, merapikan administrasi, dan membuat data lebih mudah dipantau."
             />
             <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -614,6 +733,75 @@ const SismuLanding = () => {
                   </div>
                   <h3 className="mb-2 text-base font-black text-slate-950">{problem.title}</h3>
                   <p className="text-sm leading-relaxed text-slate-600">{problem.desc}</p>
+                </article>
+              ))}
+            </div>
+
+            <div className="mt-16 rounded-[2rem] border border-blue-100 bg-white p-6 shadow-[0_24px_70px_-48px_rgba(37,99,235,0.75)] md:p-8">
+              <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
+                <div>
+                  <span className="inline-flex rounded-full bg-blue-50 px-4 py-2 text-sm font-black text-blue-700">
+                    Solusi SISMU
+                  </span>
+                  <h3 className="mt-4 text-2xl font-black tracking-tight text-slate-950 md:text-4xl">
+                    SISMU menyatukan operasional sekolah dalam satu sistem.
+                  </h3>
+                  <p className="mt-4 text-sm leading-relaxed text-slate-600 md:text-base">
+                    Dari admin sekolah, guru, sampai siswa, setiap aktivitas penting dibuat lebih rapi agar sekolah
+                    lebih mudah bergerak cepat tanpa kehilangan kontrol data.
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {solutionCards.map((item) => (
+                    <article key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                      <div className="mb-4 grid h-11 w-11 place-items-center rounded-xl bg-white text-blue-600 shadow-sm">
+                        <Icon name={item.icon} className="h-5 w-5" />
+                      </div>
+                      <h4 className="text-base font-black text-slate-950">{item.title}</h4>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.desc}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="pengguna" className="bg-white py-20 md:py-28">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <SectionHeading
+              eyebrow="Untuk Pengguna Sekolah"
+              title="Fitur SISMU dibuat sesuai kebutuhan admin sekolah, guru, dan siswa."
+              desc="Setiap role mendapat alur kerja yang jelas, sehingga sekolah tidak perlu memaksa semua pengguna memakai menu yang sama."
+            />
+
+            <div className="mt-12 grid gap-5 lg:grid-cols-3">
+              {roleFeatureSections.map((section) => (
+                <article key={section.role} className="sismu-card flex h-full flex-col rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg">
+                  <div className="mb-5 flex items-start gap-4">
+                    <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-blue-50 text-blue-600">
+                      <Icon name={section.icon} className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-slate-950">{section.role}</h3>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-600">{section.desc}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    {section.features.map((feature) => (
+                      <div key={feature} className="flex items-start gap-2 text-sm font-semibold text-slate-700">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                        <span>{feature}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-auto pt-6">
+                    <p className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-semibold leading-relaxed text-blue-900">
+                      {section.outcome}
+                    </p>
+                  </div>
                 </article>
               ))}
             </div>
@@ -677,7 +865,7 @@ const SismuLanding = () => {
                 dark
                 eyebrow="Sistem Siap Pakai"
                 title="Satu platform, data sekolah tetap terpisah dan terkontrol."
-                desc="Sekolah cukup menggunakan sistem melalui browser. Admin sekolah mengelola data sesuai hak akses, sementara super admin dapat memantau tenant dan storage."
+                desc="Sekolah cukup menggunakan sistem melalui browser. Admin sekolah mengelola data sesuai hak akses, guru fokus ke kelas, dan siswa mengakses informasi belajar dari akun masing-masing."
               />
             </div>
 
@@ -713,7 +901,7 @@ const SismuLanding = () => {
                   ['shield-check', 'Hak akses sesuai role'],
                   ['hard-drive-download', 'Monitoring storage'],
                   ['history', 'Audit aktivitas'],
-                  ['settings', 'Pengaturan tenant']
+                  ['settings', 'Pengaturan sekolah']
                 ].map(([icon, text]) => (
                   <div key={text} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm font-semibold text-slate-200">
                     <Icon name={icon} className="h-5 w-5 text-blue-300" />
@@ -749,8 +937,8 @@ const SismuLanding = () => {
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <SectionHeading
               eyebrow="Paket Harga"
-              title="Harga mulai dari Rp2.000/siswa/bulan."
-              desc="Paket dapat menyesuaikan jumlah siswa, kebutuhan fitur, perangkat RFID, migrasi data, custom domain, dan layanan tambahan sekolah."
+              title="Paket SISMU dibuat fleksibel sesuai kebutuhan sekolah."
+              desc="Harga berlangganan mulai Rp4.000/siswa/bulan dengan storage sampai 200GB. Perangkat RFID hanya dibayar di awal jika sekolah ingin memakai RFID."
             />
 
             <div className="mt-12 grid gap-6 lg:grid-cols-2">
@@ -810,8 +998,55 @@ const SismuLanding = () => {
                       </div>
                     ))}
                   </div>
+
+                  {plan.note ? (
+                    <p className={`mt-6 rounded-2xl border px-4 py-3 text-sm font-bold leading-relaxed ${
+                      plan.highlighted
+                        ? 'border-white/10 bg-white/5 text-blue-100'
+                        : 'border-amber-200 bg-amber-50 text-amber-800'
+                    }`}>
+                      {plan.note}
+                    </p>
+                  ) : null}
                 </article>
               ))}
+            </div>
+
+            <div className="mt-8 rounded-[2rem] border border-orange-200 bg-orange-50 p-6 shadow-[0_24px_60px_-44px_rgba(234,88,12,0.55)]">
+              <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+                <div>
+                  <span className="inline-flex rounded-full bg-white px-4 py-2 text-sm font-black text-orange-700">
+                    Add-on RFID
+                  </span>
+                  <h3 className="mt-4 text-2xl font-black tracking-tight text-slate-950">
+                    Biaya perangkat RFID hanya dibayar di awal jika sekolah ingin memakai RFID.
+                  </h3>
+                  <p className="mt-3 text-sm leading-relaxed text-slate-700">
+                    SISMU tetap bisa dipakai dengan QR Code tanpa membeli perangkat RFID. Kartu dan reader hanya
+                    dibutuhkan jika sekolah ingin proses scan memakai kartu.
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {rfidAddOns.map((item) => (
+                    <article key={item.title} className="rounded-2xl border border-orange-200 bg-white p-5 shadow-sm">
+                      <div className="mb-4 flex items-center justify-between gap-3">
+                        <div className="grid h-11 w-11 place-items-center rounded-xl bg-orange-100 text-orange-700">
+                          <Icon name={item.icon} className="h-5 w-5" />
+                        </div>
+                        <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-black text-white">
+                          Sekali bayar
+                        </span>
+                      </div>
+                      <h4 className="text-base font-black text-slate-950">{item.title}</h4>
+                      <div className="mt-3 flex items-end gap-1">
+                        <span className="text-3xl font-black text-orange-700">{item.price}</span>
+                        <span className="pb-1 text-sm font-bold text-slate-500">{item.unit}</span>
+                      </div>
+                      <p className="mt-3 text-sm leading-relaxed text-slate-600">{item.desc}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="sismu-table-wrap mt-8 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-[0_24px_60px_-42px_rgba(15,23,42,0.55)]">
@@ -826,7 +1061,7 @@ const SismuLanding = () => {
                   <thead>
                     <tr className="bg-slate-950 text-white">
                       <th className="px-4 py-4 font-black">Fitur</th>
-                      <th className="px-4 py-4 text-center font-black">Starter</th>
+                      <th className="px-4 py-4 text-center font-black">Standard</th>
                       <th className="px-4 py-4 text-center font-black">Professional</th>
                     </tr>
                   </thead>
@@ -879,17 +1114,17 @@ const SismuLanding = () => {
               Mulai Digitalisasi Sekolah
             </span>
             <h2 className="mt-4 text-3xl font-black tracking-tight md:text-5xl">
-              Siap membuat sekolah lebih tertata, modern, dan profesional?
+              Sekolah yang datanya rapi akan lebih mudah bergerak cepat.
             </h2>
             <p className="mt-4 text-base leading-relaxed text-blue-100 md:text-lg">
-              Konsultasikan kebutuhan sekolah Anda, mulai dari presensi, akademik, RFID, storage, backup, hingga laporan.
+              Mulai rapikan presensi, jadwal, tugas, nilai, dan laporan sekolah bersama SISMU.
             </p>
             <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
               <MarketingButton href={whatsappUrl} variant="secondary" className="px-7 py-4 text-base">
-                <MessageCircle className="h-5 w-5" /> Konsultasi via WhatsApp
+                <MessageCircle className="h-5 w-5" /> Konsultasi Sekarang
               </MarketingButton>
-              <MarketingButton variant="dark" onClick={() => scrollToId('harga')} className="border border-white/20 px-7 py-4 text-base">
-                <Calculator className="h-5 w-5" /> Lihat Paket
+              <MarketingButton href={demoWhatsappUrl} variant="dark" className="border border-white/20 px-7 py-4 text-base">
+                <Calculator className="h-5 w-5" /> Minta Demo SISMU
               </MarketingButton>
             </div>
           </div>
