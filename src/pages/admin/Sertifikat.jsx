@@ -1338,7 +1338,7 @@ const GeneratorSection = ({ templateVersion }) => {
 
           <div className="flex flex-wrap gap-2">
             <select
-              className="px-3 py-1.5 border rounded-lg text-sm bg-gray-50"
+              className="min-h-[2.625rem] rounded-lg border bg-gray-50 px-3 py-2 text-sm"
               value={role}
               onChange={(e) => setRole(e.target.value)}
             >
@@ -1349,7 +1349,7 @@ const GeneratorSection = ({ templateVersion }) => {
 
             {role === 'siswa' && (
               <select
-                className="px-3 py-1.5 border rounded-lg text-sm bg-gray-50"
+                className="min-h-[2.625rem] rounded-lg border bg-gray-50 px-3 py-2 text-sm"
                 value={kelasFilter}
                 onChange={(e) => setKelasFilter(e.target.value)}
               >
@@ -1364,7 +1364,7 @@ const GeneratorSection = ({ templateVersion }) => {
 
             {role === 'ekskul' && (
               <select
-                className="px-3 py-1.5 border rounded-lg text-sm bg-gray-50"
+                className="min-h-[2.625rem] rounded-lg border bg-gray-50 px-3 py-2 text-sm"
                 value={ekskulFilter}
                 onChange={(e) => setEskulFilter(e.target.value)}
               >

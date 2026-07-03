@@ -263,12 +263,12 @@ const SuperAdmins = () => {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Cari nama/email..."
-              className="hidden md:block text-xs px-3 py-1.5 rounded-full border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="hidden min-h-[2.625rem] w-64 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 md:block"
             />
             <button
               type="button"
               onClick={loadAdmins}
-              className="text-xs px-3 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50"
+              className="inline-flex min-h-[2.625rem] items-center justify-center rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold hover:bg-slate-50"
             >
               Refresh
             </button>
@@ -280,7 +280,7 @@ const SuperAdmins = () => {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Cari nama/email..."
-            className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="min-h-[2.625rem] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
         </div>
 

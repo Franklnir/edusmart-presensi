@@ -535,7 +535,7 @@ const statCardsFrom = (stats = {}) => [
 ]
 
 const tenantFieldClass =
-  'h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100'
+  'min-h-[2.625rem] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100'
 
 const tenantMetricToneClass = {
   blue: 'border-blue-200 bg-blue-50/70 text-blue-700',
@@ -1867,7 +1867,7 @@ const Tenants = () => {
                   value={tenantSearch}
                   onChange={(event) => setTenantSearch(event.target.value)}
                   placeholder="Cari nama sekolah, slug, atau tenant ID"
-                  className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                  className="min-h-[2.625rem] w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 />
               </div>
               <select
@@ -1886,7 +1886,7 @@ const Tenants = () => {
                   setTenantSearch('')
                   setTenantStatusFilter('all')
                 }}
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                className="inline-flex min-h-[2.625rem] items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
               >
                 <Filter className="h-4 w-4" />
                 Reset
