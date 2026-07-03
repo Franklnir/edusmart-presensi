@@ -258,7 +258,20 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$VPS_SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/edusmart_deploy_key
           chmod 600 ~/.ssh/edusmart_deploy_key
-          ssh-keyscan -T 15 -t ed25519 -p "$port" "$VPS_HOST" >> ~/.ssh/known_hosts
+          : > ~/.ssh/known_hosts
+          for attempt in 1 2 3 4 5; do
+            if ssh-keyscan -T 20 -t ed25519 -p "$port" "$VPS_HOST" >> ~/.ssh/known_hosts; then
+              sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
+              break
+            fi
+
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error title=SSH host key scan failed::Unable to read VPS SSH host key after ${attempt} attempts"
+              exit 1
+            fi
+
+            sleep $((attempt * 5))
+          done
           sleep 5
 
       - name: Verify SSH access
