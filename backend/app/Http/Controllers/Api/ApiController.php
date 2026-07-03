@@ -104,6 +104,37 @@ class ApiController extends Controller
             ->exists();
     }
 
+    protected function hasAnyDelegatedAdminFeatureAccess(Request $request, array $featureKeys): bool
+    {
+        $keys = collect($featureKeys)
+            ->map(fn ($value) => trim((string) $value))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($keys === []) {
+            return false;
+        }
+
+        $user = $this->user($request);
+        if (! $user?->id) {
+            return false;
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId || ! Schema::hasTable('admin_feature_permissions')) {
+            return false;
+        }
+
+        return DB::table('admin_feature_permissions')
+            ->where('tenant_id', $tenantId)
+            ->where('target_teacher_id', (string) $user->id)
+            ->whereIn('feature_key', $keys)
+            ->where('is_active', true)
+            ->exists();
+    }
+
     protected function isSiswa(Request $request): bool
     {
         return $this->role($request) === 'siswa';

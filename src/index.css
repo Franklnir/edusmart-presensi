@@ -776,12 +776,12 @@ body.quiz-strict-active img {
 }
 
 .sismu-filter-control {
-  min-height: 3.5rem;
+  min-height: 2.625rem;
   width: 100%;
-  border-radius: 1rem;
+  border-radius: 0.5rem;
   border: 1px solid rgb(203 213 225);
   background: #fff;
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.75rem;
   color: rgb(15 23 42);
   font-size: 0.875rem;
   line-height: 1.25rem;
@@ -791,8 +791,8 @@ body.quiz-strict-active img {
 }
 
 .sismu-filter-control--compact {
-  min-height: 3.5rem;
-  padding: 0.625rem 0.875rem;
+  min-height: 2.625rem;
+  padding: 0.5rem 0.75rem;
 }
 
 .sismu-filter-control:focus {
@@ -823,25 +823,25 @@ body.quiz-strict-active img {
 }
 
 .sismu-toolbar-card {
-  min-height: 3.5rem;
+  min-height: 2.625rem;
   width: 100%;
-  border-radius: 1rem;
+  border-radius: 0.5rem;
   border: 1px solid rgb(203 213 225);
   background: rgb(248 250 252);
-  padding: 0.625rem 1rem;
+  padding: 0.5rem 0.75rem;
   box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
 }
 
 .sismu-toolbar-control {
-  min-height: 3.5rem;
-  border-radius: 1rem;
-  padding: 0.75rem 1rem;
+  min-height: 2.625rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
 }
 
 .sismu-toolbar-button {
-  min-height: 3.5rem;
-  border-radius: 1rem;
-  padding: 0.75rem 1.125rem;
+  min-height: 2.625rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
   white-space: nowrap;
 }
 
@@ -861,10 +861,10 @@ body.quiz-strict-active img {
 }
 
 .sismu-filter-action {
-  min-height: 3.5rem;
+  min-height: 2.625rem;
   width: 100%;
-  border-radius: 1rem;
-  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
   font-weight: 700;
   line-height: 1.25rem;
 }

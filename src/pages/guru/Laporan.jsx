@@ -1,6 +1,7 @@
 // src/pages/guru/LaporanRekap.jsx
 import React, { startTransition, useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { SlidersHorizontal, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -99,6 +100,11 @@ const getCurrentMonthValue = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
 
+const getAcademicYearStartValue = (tahunAjaran = '') => {
+  const match = String(tahunAjaran || '').match(/^(\d{4})/)
+  return match ? Number(match[1]) : 0
+}
+
 const getQuizSpecialLabel = (quiz) => {
   const mode = normalizeQuizMode(quiz)
   const name = String(quiz?.nama || quiz?.judul || quiz?.title || '').trim().toLowerCase()
@@ -153,6 +159,7 @@ export default function LaporanRekap() {
   const [mapelComponentWeightRows, setMapelComponentWeightRows] = useState([])
   const [selectedWeightMapel, setSelectedWeightMapel] = useState('')
   const [mapelWeightForm, setMapelWeightForm] = useState({ ...DEFAULT_MAPEL_COMPONENT_WEIGHTS })
+  const [showMapelWeightOverlay, setShowMapelWeightOverlay] = useState(false)
   const [savingMapelWeight, setSavingMapelWeight] = useState(false)
 
   // -- Selection State (Restore from saved or default) --
@@ -239,18 +246,6 @@ export default function LaporanRekap() {
   const [rekapStatusFilter, setRekapStatusFilter] = useState('semua')
   const [searchRekapEskul, setSearchRekapEskul] = useState('')
 
-  const selectedKelasMeta = useMemo(
-    () => kelasList.find((kelas) => String(kelas.id) === String(selectedKelas)) || null,
-    [kelasList, selectedKelas]
-  )
-
-  const selectedWaliKelasMeta = useMemo(
-    () => waliKelasList.find((kelas) => String(kelas.id) === String(selectedWaliKelas)) || null,
-    [selectedWaliKelas, waliKelasList]
-  )
-
-  const selectedFilterKelasMeta = isRekapTab ? selectedWaliKelasMeta : selectedKelasMeta
-
   useEffect(() => {
     const tab = searchParams.get('tab')
     if (['absensi', 'tugas', 'quiz', 'mapel', 'rekap', 'rekap_eskul'].includes(tab) && tab !== activeTab) {
@@ -270,6 +265,24 @@ export default function LaporanRekap() {
   }, [reportLoadingKey])
   const selectedTahunAjaran = selectedAcademicPeriodPayload.tahun_ajaran
   const selectedSemester = selectedAcademicPeriodPayload.semester
+  const selectedMapelWeightPeriodKey = `${selectedTahunAjaran || ''}|${selectedSemester || ''}`
+  const selectedPeriodStartYear = getAcademicYearStartValue(selectedTahunAjaran)
+  const activePeriodStartYear = getAcademicYearStartValue(activeAcademicPeriod?.tahunAjaran)
+  const isFutureReportPeriod = selectedPeriodStartYear > 0 &&
+    activePeriodStartYear > 0 &&
+    selectedPeriodStartYear > activePeriodStartYear
+  const mapelWeightPeriodLabel = `${selectedTahunAjaran || 'Periode belum dipilih'}${selectedSemester ? ` - Semester ${selectedSemester}` : ''}`
+  const mapelWeightPeriodTone = isFutureReportPeriod
+    ? 'future'
+    : isViewingArchivePeriod
+      ? 'archive'
+      : 'active'
+  const applyMapelWeightPeriodFilters = useCallback((query) => {
+    let next = query
+    if (selectedTahunAjaran) next = next.eq('tahun_ajaran', selectedTahunAjaran)
+    next = next.eq('semester', selectedSemester || '')
+    return next
+  }, [selectedSemester, selectedTahunAjaran])
   const startReportLoad = useCallback((loadingKey = '') => {
     const requestId = reportRequestSeqRef.current + 1
     reportRequestSeqRef.current = requestId
@@ -583,11 +596,13 @@ export default function LaporanRekap() {
         return
       }
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('guru_mapel_bobot')
           .select('*')
           .eq('guru_id', user.id)
           .order('updated_at', { ascending: false })
+        query = applyMapelWeightPeriodFilters(query)
+        const { data, error } = await query
 
         if (error) throw error
         setMapelComponentWeightRows(data || [])
@@ -598,7 +613,7 @@ export default function LaporanRekap() {
     }
 
     loadMapelComponentWeights()
-  }, [user?.id])
+  }, [applyMapelWeightPeriodFilters, selectedMapelWeightPeriodKey, user?.id])
 
   const mapelAmpuOptions = useMemo(() => {
     const dedup = new Map()
@@ -644,6 +659,16 @@ export default function LaporanRekap() {
     () => new Set(Array.from(mapelWeightByMapelKey.keys())),
     [mapelWeightByMapelKey]
   )
+  const hasAnySavedMapelWeightForPeriod = mapelWeightedKeySet.size > 0
+  const mapelWeightSetupMessage = !mapelAmpuOptions.length
+    ? 'Belum ada mapel yang terdeteksi pada periode ini.'
+    : hasAnySavedMapelWeightForPeriod
+      ? ''
+      : isFutureReportPeriod
+        ? 'Periode depan dimulai dari default. Silakan set bobot nilai untuk periode ini sebelum dipakai.'
+        : isViewingArchivePeriod
+          ? 'Belum ada bobot nilai tersimpan untuk periode arsip ini. Jika guru belum pernah set pada periode tersebut, sistem memakai default.'
+          : 'Bobot nilai periode ini belum pernah diset. Silakan lakukan pengaturan bobot nilai.'
 
   useEffect(() => {
     if (!mapelAmpuOptions.length) {
@@ -682,6 +707,10 @@ export default function LaporanRekap() {
 
   const handleSaveMapelWeight = useCallback(async () => {
     if (!user?.id) return
+    if (!selectedTahunAjaran) {
+      pushToast('error', 'Pilih periode laporan terlebih dahulu.')
+      return
+    }
     if (!selectedWeightMapel) {
       pushToast('error', 'Pilih mapel terlebih dahulu.')
       return
@@ -701,6 +730,8 @@ export default function LaporanRekap() {
       id: existing?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}`),
       guru_id: user.id,
       mapel: selectedWeightMapel,
+      tahun_ajaran: selectedTahunAjaran,
+      semester: selectedSemester || '',
       bobot_tugas_pr: mapelWeightValidation.normalized.bobot_tugas_pr,
       bobot_quiz_reguler: mapelWeightValidation.normalized.bobot_quiz_reguler,
       bobot_quiz_uts: mapelWeightValidation.normalized.bobot_quiz_uts,
@@ -713,7 +744,7 @@ export default function LaporanRekap() {
       setSavingMapelWeight(true)
       const { data, error } = await supabase
         .from('guru_mapel_bobot')
-        .upsert(payload, { onConflict: 'tenant_id,guru_id,mapel' })
+        .upsert(payload, { onConflict: 'tenant_id,guru_id,mapel,tahun_ajaran,semester' })
         .select('*')
         .single()
       if (error) throw error
@@ -739,6 +770,8 @@ export default function LaporanRekap() {
     }
   }, [
     user?.id,
+    selectedTahunAjaran,
+    selectedSemester,
     selectedWeightMapel,
     mapelWeightValidation,
     mapelComponentWeightRows,
@@ -1614,11 +1647,11 @@ export default function LaporanRekap() {
       const guruIdsPengampu = Array.from(
         new Set((jadwalKelasList || []).map((item) => String(item?.guru_id || '').trim()).filter(Boolean))
       )
-      const guruMapelWeightQuery = guruIdsPengampu.length
-        ? supabase
+      let guruMapelWeightQuery = guruIdsPengampu.length
+        ? applyMapelWeightPeriodFilters(supabase
           .from('guru_mapel_bobot')
           .select('*')
-          .in('guru_id', guruIdsPengampu)
+          .in('guru_id', guruIdsPengampu))
         : null
 
       const quizIds = (quizList || []).map((q) => q.id)
@@ -2206,6 +2239,7 @@ export default function LaporanRekap() {
       finishReportLoad(requestId, 'rekap')
     }
   }, [
+    applyMapelWeightPeriodFilters,
     applyReportAcademicFilters,
     finishReportLoad,
     isActiveReportPeriod,
@@ -2289,10 +2323,12 @@ export default function LaporanRekap() {
         )
         let guruMapelWeightRows = []
         if (guruIdsPengampu.length) {
-          const { data, error } = await supabase
+          let guruMapelWeightQuery = supabase
             .from('guru_mapel_bobot')
             .select('*')
             .in('guru_id', guruIdsPengampu)
+          guruMapelWeightQuery = applyMapelWeightPeriodFilters(guruMapelWeightQuery)
+          const { data, error } = await guruMapelWeightQuery
           if (error) {
             console.warn('Bobot mapel detail siswa belum tersedia, memakai default:', error)
             guruMapelWeightRows = []
@@ -2520,6 +2556,7 @@ export default function LaporanRekap() {
       }
     },
     [
+      applyMapelWeightPeriodFilters,
       applyReportAcademicFilters,
       pushToast,
       reportPeriodLabel,
@@ -3992,18 +4029,6 @@ export default function LaporanRekap() {
             compact
           />
 
-          <div className="sismu-filter-field">
-            <label className="sismu-filter-label">
-              Angkatan
-            </label>
-            <div className="sismu-filter-control bg-slate-50 font-semibold text-slate-900">
-              {selectedFilterKelasMeta?.angkatan || '-'}
-            </div>
-            <div className="sismu-filter-help truncate">
-              Mengikuti kelas yang dipilih.
-            </div>
-          </div>
-
           {/* Multi-Select Bulan */}
           <div className="sismu-filter-field relative" ref={dropdownRef}>
             <label className="sismu-filter-label">
@@ -4111,141 +4136,203 @@ export default function LaporanRekap() {
               </div>
             )}
           </div>
-        </div>
 
-        {!isRekapTab && (
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 print:hidden">
-          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-            <div>
-              <h3 className="text-base font-bold text-slate-800">Bobot Penilaian Per Mapel (Guru Pengampu)</h3>
-              <p className="text-sm text-slate-600 mt-1">
-                Atur bobot nilai untuk mapel yang Anda ampu. Total boleh kurang dari 100%, tetapi tidak boleh lebih dari 100%.
-              </p>
-            </div>
-            <div className="text-xs text-slate-500 max-w-2xl leading-relaxed">
-              Rumus mapel: Nilai Akhir Mapel = (RTugasxBTugas + RRegulerxBReguler + RUTSxBUTS + RUASxBUAS) /
-              total bobot komponen yang memiliki nilai.
-            </div>
-          </div>
-
-          {!mapelAmpuOptions.length ? (
-            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 px-4 py-3 text-sm">
-              Belum ada mapel yang terdeteksi di jadwal Anda.
-            </div>
-          ) : (
-            <div className="mt-4 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
-                <div className="lg:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Mapel Pengampu (Checklist Bobot)</label>
-                  <div className="w-full border border-slate-300 rounded-xl bg-white max-h-44 overflow-y-auto divide-y divide-slate-100">
-                    {mapelAmpuOptions.map((item) => (
-                      <button
-                        key={item}
-                        type="button"
-                        onClick={() => setSelectedWeightMapel(item)}
-                        className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 ${
-                          selectedWeightMapel === item
-                            ? 'bg-indigo-50'
-                            : 'hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={mapelWeightedKeySet.has(normalizeMapelKey(item))}
-                            readOnly
-                            className="rounded text-emerald-600 focus:ring-emerald-500 pointer-events-none"
-                          />
-                          <span
-                            className={`text-sm ${
-                              selectedWeightMapel === item
-                                ? 'font-semibold text-indigo-700'
-                                : 'text-slate-700'
-                            }`}
-                          >
-                            {item}
-                          </span>
-                        </div>
-                        <span
-                          className={`text-[11px] px-2 py-0.5 rounded-full border ${
-                            mapelWeightedKeySet.has(normalizeMapelKey(item))
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-slate-50 text-slate-500 border-slate-200'
-                          }`}
-                        >
-                          {mapelWeightedKeySet.has(normalizeMapelKey(item)) ? 'Dibobot' : 'Default'}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    Centang berarti mapel sudah punya bobot khusus. Klik baris mapel untuk mengedit bobotnya.
-                  </p>
-                </div>
-
-                {MAPEL_COMPONENT_WEIGHT_RULES.map((rule) => (
-                  <div key={rule.key}>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">
-                      {rule.label} (maks. 100%)
-                    </label>
-                    <input
-                      type="number"
-                      min={rule.min}
-                      max={rule.max}
-                      step="0.01"
-                      className="w-full border border-slate-300 rounded-xl px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={mapelWeightForm[rule.key] ?? ''}
-                    onChange={(e) => setMapelWeightForm((prev) => ({ ...prev, [rule.key]: e.target.value }))}
-                  />
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span
-                  className={`px-2.5 py-1 rounded-full border ${
-                    mapelWeightValidation.isValid
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-red-50 text-red-700 border-red-200'
-                  }`}
-                >
-                  Total bobot: {mapelWeightValidation.total}%
-                  {mapelWeightValidation.remaining > 0 ? ` • Sisa manual: ${mapelWeightValidation.remaining}%` : ''}
-                </span>
-                {selectedMapelWeightRow?.updated_at && (
-                  <span className="px-2.5 py-1 rounded-full border bg-slate-50 text-slate-600 border-slate-200">
-                    Tersimpan: {new Date(selectedMapelWeightRow.updated_at).toLocaleString('id-ID')}
-                  </span>
-                )}
-                {!mapelWeightValidation.isValid && (
-                  <span className="text-red-600">{mapelWeightValidation.errors[0]}</span>
-                )}
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600 leading-relaxed">
-                <p>Nilai akhir wali kelas dihitung adil dengan 3 tahap:</p>
-                <p>1. Nilai akhir per mapel berbobot komponen di atas.</p>
-                <p>2. Normalisasi adil: komponen yang belum punya nilai tidak dihitung penyebutnya.</p>
-                <p>3. Rata akademik = rata-rata nilai akhir mapel yang punya data.</p>
-                <p>4. Nilai akhir wali = rata berbobot (akademik + absensi) sesuai kebijakan ranking sekolah.</p>
-                <p>
-                  Total bobot maksimal 100%. Jika total masih kurang, sisa bobot muncul sebagai kolom nilai tambahan manual
-                  di Laporan Mapel.
-                </p>
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  disabled={savingMapelWeight || !mapelWeightValidation.isValid}
-                  onClick={handleSaveMapelWeight}
-                  className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {savingMapelWeight ? 'Menyimpan...' : 'Simpan Bobot Mapel'}
-                </button>
+          {!isRekapTab && (
+            <div className="sismu-filter-field">
+              <label className="sismu-filter-label">
+                Bobot Nilai
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowMapelWeightOverlay(true)}
+                className="sismu-filter-action border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition flex items-center justify-center gap-2 shadow-sm"
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Filter Bobot Nilai
+              </button>
+              <div className="sismu-filter-help truncate">
+                {mapelWeightPeriodLabel}
               </div>
             </div>
           )}
+        </div>
+
+        {showMapelWeightOverlay && !isRekapTab && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm print:hidden">
+            <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-100 p-6">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.24em] text-indigo-600">Bobot Nilai</p>
+                  <h3 className="mt-2 text-2xl font-black text-slate-950">Bobot Penilaian Per Mapel</h3>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-bold">
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-700">
+                      {mapelWeightPeriodLabel}
+                    </span>
+                    <span
+                      className={`rounded-full border px-3 py-1 ${
+                        mapelWeightPeriodTone === 'future'
+                          ? 'border-amber-200 bg-amber-50 text-amber-700'
+                          : mapelWeightPeriodTone === 'archive'
+                            ? 'border-sky-200 bg-sky-50 text-sky-700'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      }`}
+                    >
+                      {mapelWeightPeriodTone === 'future'
+                        ? 'Periode depan'
+                        : mapelWeightPeriodTone === 'archive'
+                          ? 'Periode arsip'
+                          : 'Periode aktif'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMapelWeightOverlay(false)}
+                  className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-slate-200 text-slate-500 hover:bg-slate-50"
+                  aria-label="Tutup bobot nilai"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto p-6">
+                {mapelWeightSetupMessage && (
+                  <div className="mb-5 flex min-h-[112px] items-center justify-center rounded-2xl border border-dashed border-amber-200 bg-amber-50 px-6 py-5 text-center">
+                    <div>
+                      <p className="text-base font-black text-amber-800">{mapelWeightSetupMessage}</p>
+                      <p className="mt-1 text-sm font-semibold text-amber-700">
+                        Bobot yang terlihat saat ini adalah default periode ini sampai disimpan.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {!mapelAmpuOptions.length ? (
+                  <div className="flex min-h-[220px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-8 text-center">
+                    <div>
+                      <p className="text-lg font-black text-slate-900">Belum ada mapel pada periode ini</p>
+                      <p className="mt-2 max-w-md text-sm text-slate-500">
+                        Mapel akan muncul setelah jadwal, tugas, quiz, atau bobot periode ini tersedia.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(220px,0.9fr)_minmax(0,1.6fr)]">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Mapel Pengampu</label>
+                        <div className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                          <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+                            {mapelAmpuOptions.map((item) => {
+                              const isSaved = mapelWeightedKeySet.has(normalizeMapelKey(item))
+                              return (
+                                <button
+                                  key={item}
+                                  type="button"
+                                  onClick={() => setSelectedWeightMapel(item)}
+                                  className={`w-full px-3 py-3 text-left flex items-center justify-between gap-2 ${
+                                    selectedWeightMapel === item ? 'bg-indigo-50' : 'hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSaved}
+                                      readOnly
+                                      className="rounded text-emerald-600 focus:ring-emerald-500 pointer-events-none"
+                                    />
+                                    <span
+                                      className={`text-sm ${
+                                        selectedWeightMapel === item
+                                          ? 'font-semibold text-indigo-700'
+                                          : 'text-slate-700'
+                                      }`}
+                                    >
+                                      {item}
+                                    </span>
+                                  </div>
+                                  <span
+                                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${
+                                      isSaved
+                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                        : 'border-slate-200 bg-slate-50 text-slate-500'
+                                    }`}
+                                  >
+                                    {isSaved ? 'Tersimpan' : 'Belum diset'}
+                                  </span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                          {MAPEL_COMPONENT_WEIGHT_RULES.map((rule) => (
+                            <div key={rule.key}>
+                              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                                {rule.label}
+                              </label>
+                              <input
+                                type="number"
+                                min={rule.min}
+                                max={rule.max}
+                                step="0.01"
+                                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                value={mapelWeightForm[rule.key] ?? ''}
+                                onChange={(e) => setMapelWeightForm((prev) => ({ ...prev, [rule.key]: e.target.value }))}
+                              />
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                          <span
+                            className={`rounded-full border px-2.5 py-1 ${
+                              mapelWeightValidation.isValid
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                : 'border-red-200 bg-red-50 text-red-700'
+                            }`}
+                          >
+                            Total bobot: {mapelWeightValidation.total}%
+                            {mapelWeightValidation.remaining > 0 ? ` - Sisa manual: ${mapelWeightValidation.remaining}%` : ''}
+                          </span>
+                          {selectedMapelWeightRow?.updated_at && (
+                            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-600">
+                              Tersimpan: {new Date(selectedMapelWeightRow.updated_at).toLocaleString('id-ID')}
+                            </span>
+                          )}
+                          {!mapelWeightValidation.isValid && (
+                            <span className="font-semibold text-red-600">{mapelWeightValidation.errors[0]}</span>
+                          )}
+                        </div>
+
+                        <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs leading-relaxed text-slate-600">
+                          <p>Nilai akhir mapel memakai bobot Tugas/PR, Quiz Reguler, UTS, dan UAS pada periode yang sedang dipilih.</p>
+                          <p>Komponen yang belum punya nilai tidak dihitung sebagai penyebut nilai akhir.</p>
+                          <p>Total bobot maksimal 100%. Sisa bobot menjadi kolom nilai tambahan manual di Laporan Mapel.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                      <p className="text-xs font-semibold text-slate-500">
+                        Periode lalu membaca bobot tersimpan pada periode itu. Periode depan dimulai default sampai guru menyimpan bobot baru.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={savingMapelWeight || !mapelWeightValidation.isValid}
+                        onClick={handleSaveMapelWeight}
+                        className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {savingMapelWeight ? 'Menyimpan...' : 'Simpan Bobot Mapel'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

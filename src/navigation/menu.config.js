@@ -54,7 +54,16 @@ export const menuConfig = {
       group: 'Absensi',
       icon: 'check',
       items: [
-        { id: 'admin-scan', to: '/admin/scan', label: 'Scan Kehadiran', icon: 'scan' },
+        {
+          id: 'admin-scan',
+          group: 'Scan Kehadiran',
+          icon: 'scan',
+          items: [
+            { id: 'admin-scan-pengaturan', to: '/admin/scan?menu=pengaturan', label: 'Pengaturan Scan', icon: 'cog' },
+            { id: 'admin-scan-live', to: '/admin/scan?menu=live-scan', label: 'Live Scan', icon: 'signal' },
+            { id: 'admin-scan-riwayat', to: '/admin/scan?menu=riwayat', label: 'Riwayat', icon: 'history' },
+          ],
+        },
       ],
     },
     {

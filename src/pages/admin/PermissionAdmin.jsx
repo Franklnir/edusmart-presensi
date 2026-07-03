@@ -193,7 +193,9 @@ const PermissionAdmin = () => {
     }
   }
 
-  const filteredFeatures = (data?.features?.length ? data.features : ADMIN_FEATURES)
+  const availableFeatures = (data?.features?.length ? data.features : ADMIN_FEATURES)
+    .filter((feature) => !feature.legacy)
+  const filteredFeatures = availableFeatures
     .filter((feature) => !(form.target_type === 'homeroom' && feature.key === 'siswa'))
 
   return (
@@ -253,7 +255,7 @@ const PermissionAdmin = () => {
             ['Target', groups.length, UserPlus, 'bg-blue-50 text-blue-700', 'Guru/jabatan/wali kelas'],
             ['Fitur Aktif', activeTotal, CheckCircle2, 'bg-emerald-50 text-emerald-700', 'Menu sedang tampil'],
             ['Nonaktif', inactiveTotal, ToggleLeft, 'bg-amber-50 text-amber-700', 'Masih tersimpan'],
-            ['Fitur Tersedia', ADMIN_FEATURES.length, ShieldCheck, 'bg-violet-50 text-violet-700', 'Pilihan delegasi'],
+            ['Fitur Tersedia', availableFeatures.length, ShieldCheck, 'bg-violet-50 text-violet-700', 'Pilihan delegasi'],
           ].map(([label, value, Icon, iconClass, hint]) => (
             <div key={label} className={statCardClass}>
               <div className="flex h-full items-start justify-between gap-4">

@@ -20,7 +20,10 @@ class AdminFeaturePermissionController extends ApiController
         'guru' => ['label' => 'Guru', 'path' => '/guru/admin/guru'],
         'sertifikat' => ['label' => 'Sertifikat', 'path' => '/guru/admin/sertifikat'],
         'siswa' => ['label' => 'Siswa', 'path' => '/guru/admin/siswa'],
-        'scan-kehadiran' => ['label' => 'Scan Kehadiran', 'path' => '/guru/admin/scan'],
+        'scan-kehadiran' => ['label' => 'Scan Kehadiran (Semua Submenu)', 'path' => '/guru/admin/scan', 'legacy' => true],
+        'scan-kehadiran-pengaturan' => ['label' => 'Pengaturan Scan', 'path' => '/guru/admin/scan?menu=pengaturan'],
+        'scan-kehadiran-live' => ['label' => 'Live Scan', 'path' => '/guru/admin/scan?menu=live-scan'],
+        'scan-kehadiran-riwayat' => ['label' => 'Riwayat', 'path' => '/guru/admin/scan?menu=riwayat'],
     ];
 
     private const TARGET_TYPES = ['teacher', 'position', 'homeroom'];
@@ -318,6 +321,7 @@ class AdminFeaturePermissionController extends ApiController
     private function featureOptions(): array
     {
         return collect(self::FEATURES)
+            ->reject(fn ($meta) => (bool) ($meta['legacy'] ?? false))
             ->map(fn ($meta, $key) => ['key' => $key, 'label' => $meta['label'], 'path' => $meta['path']])
             ->values()
             ->all();

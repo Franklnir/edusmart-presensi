@@ -21,11 +21,22 @@ const DELEGATED_ADMIN_FEATURE_PATHS = [
   ['guru', '/guru/admin/guru'],
   ['sertifikat', '/guru/admin/sertifikat'],
   ['siswa', '/guru/admin/siswa'],
-  ['scan-kehadiran', '/guru/admin/scan']
+  ['scan-kehadiran-pengaturan', '/guru/admin/scan?menu=pengaturan'],
+  ['scan-kehadiran-live', '/guru/admin/scan?menu=live-scan'],
+  ['scan-kehadiran-riwayat', '/guru/admin/scan?menu=riwayat']
 ]
 
-const resolveDelegatedAdminFeatureKeyFromPath = (pathname = '') => {
+const resolveDelegatedAdminFeatureKeyFromPath = (pathname = '', search = '') => {
   const normalized = String(pathname || '').split('?')[0].split('#')[0]
+  if (normalized === '/guru/admin/scan') {
+    const params = new URLSearchParams(search || '')
+    const menu = params.get('menu') || 'pengaturan'
+    if (menu === 'live-scan') return 'scan-kehadiran-live'
+    if (menu === 'riwayat') return 'scan-kehadiran-riwayat'
+
+    return 'scan-kehadiran-pengaturan'
+  }
+
   const match = DELEGATED_ADMIN_FEATURE_PATHS.find(([, route]) => (
     normalized === route || normalized.startsWith(route + '/')
   ))
@@ -940,7 +951,7 @@ const runApiFetch = async (path, options = {}) => {
   }
 
   const delegatedFeatureKey = typeof window !== 'undefined'
-    ? resolveDelegatedAdminFeatureKeyFromPath(window.location?.pathname || '')
+    ? resolveDelegatedAdminFeatureKeyFromPath(window.location?.pathname || '', window.location?.search || '')
     : ''
   if (delegatedFeatureKey) {
     headers['X-Admin-Feature'] = delegatedFeatureKey

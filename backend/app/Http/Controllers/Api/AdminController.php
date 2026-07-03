@@ -23,9 +23,21 @@ use Illuminate\Validation\Rules\Password as PasswordRule;
 
 class AdminController extends ApiController
 {
+    private const SCAN_FEATURE_KEYS = [
+        'scan-kehadiran',
+        'scan-kehadiran-pengaturan',
+        'scan-kehadiran-live',
+        'scan-kehadiran-riwayat',
+    ];
+
+    private const SCAN_LIVE_FEATURE_KEYS = [
+        'scan-kehadiran',
+        'scan-kehadiran-live',
+    ];
+
     public function rfidDevices(Request $request)
     {
-        if (! $this->isAdmin($request)) {
+        if (! $this->canAccessScanFeature($request, self::SCAN_LIVE_FEATURE_KEYS)) {
             return $this->deny();
         }
 
@@ -278,7 +290,7 @@ class AdminController extends ApiController
 
     public function rfidEventsStream(Request $request)
     {
-        if (! $this->isAdmin($request) && ! $this->hasDelegatedAdminFeatureAccess($request, 'scan-kehadiran')) {
+        if (! $this->canAccessScanFeature($request, self::SCAN_LIVE_FEATURE_KEYS)) {
             return $this->deny();
         }
 
@@ -1864,6 +1876,7 @@ class AdminController extends ApiController
                 $previousClassHistorySnapshots = 0;
                 $studentProfileRestores = 0;
                 $studentProfilesOutsidePeriod = 0;
+                $jadwalCopied = 0;
 
                 if ($yearChanged) {
                     $previousClassHistorySnapshots = $this->snapshotStudentClassHistoriesForPeriod(
@@ -1894,7 +1907,12 @@ class AdminController extends ApiController
                     $classesSynced = (int) ($rollover['classes_synced'] ?? 0);
 
                     if ($carryJadwal) {
-                        $this->copyJadwalToNewPeriod($tenantId, $previousYear, $tahunAjaran);
+                        $jadwalCopied = $this->copyJadwalToNewPeriod(
+                            $tenantId,
+                            $previousYear,
+                            $tahunAjaran,
+                            $activePeriod['semester'] ?? null
+                        );
                     }
                 } elseif ($yearChanged || $isCalendarCorrection) {
                     $classesSynced = $this->syncClassPeriodMetadata($tenantId, $activePeriod);
@@ -1925,6 +1943,8 @@ class AdminController extends ApiController
                     'period_snapshot_restored' => $restoreFromClassSnapshot,
                     'student_profile_restores' => $studentProfileRestores,
                     'student_profiles_outside_period' => $studentProfilesOutsidePeriod,
+                    'jadwal_copy_requested' => $carryJadwal && $requiresRollover,
+                    'jadwal_copied' => $jadwalCopied,
                     'previous_class_history_snapshots' => $previousClassHistorySnapshots,
                     'class_history_snapshots' => $classHistorySnapshots,
                     'server_calendar' => [
@@ -2368,7 +2388,7 @@ class AdminController extends ApiController
 
     public function scanSessionSummary(Request $request)
     {
-        if (! $this->isAdmin($request)) {
+        if (! $this->canAccessScanFeature($request)) {
             return $this->deny();
         }
 
@@ -4259,7 +4279,8 @@ class AdminController extends ApiController
     private function copyJadwalToNewPeriod(
         string $tenantId,
         string $sourceYear,
-        string $targetYear
+        string $targetYear,
+        ?string $targetSemester = null
     ): int {
         if (! Schema::hasTable('jadwal')) {
             return 0;
@@ -4267,6 +4288,7 @@ class AdminController extends ApiController
 
         $sourceYear = AcademicPeriod::normalizeAcademicYear($sourceYear);
         $targetYear = AcademicPeriod::normalizeAcademicYear($targetYear);
+        $targetSemester = AcademicPeriod::normalizeSemester($targetSemester);
 
         if (! $sourceYear || ! $targetYear || $sourceYear === $targetYear) {
             return 0;
@@ -4289,7 +4311,8 @@ class AdminController extends ApiController
         if (Schema::hasColumn('jadwal', 'tenant_id')) {
             $sourceQuery->where('tenant_id', $tenantId);
         }
-        $sourceRows = $sourceQuery->get(array_merge($copyColumns, ['kelas_id', 'mapel', 'hari', 'jam_mulai']));
+        $sourceColumns = array_values(array_unique(array_merge($copyColumns, ['kelas_id', 'mapel', 'hari', 'jam_mulai'])));
+        $sourceRows = $sourceQuery->get($sourceColumns);
 
         if ($sourceRows->isEmpty()) {
             return 0;
@@ -4333,6 +4356,12 @@ class AdminController extends ApiController
             $newRow = ['tahun_ajaran' => $targetYear, 'created_at' => $now, 'updated_at' => $now];
             foreach ($copyColumns as $col) {
                 $newRow[$col] = $row->{$col} ?? null;
+            }
+            if ($targetSemester && Schema::hasColumn('jadwal', 'semester')) {
+                $newRow['semester'] = $targetSemester;
+            }
+            if (Schema::hasColumn('jadwal', 'periode_berlaku') && trim((string) ($newRow['periode_berlaku'] ?? '')) === '') {
+                $newRow['periode_berlaku'] = 'tahunan';
             }
 
             // Generate a new UUID-style id for the row
@@ -5434,6 +5463,12 @@ class AdminController extends ApiController
         }
 
         return $query;
+    }
+
+    private function canAccessScanFeature(Request $request, array $featureKeys = self::SCAN_FEATURE_KEYS): bool
+    {
+        return $this->isAdmin($request)
+            || $this->hasAnyDelegatedAdminFeatureAccess($request, $featureKeys);
     }
 
     private function tenantTableCount(string $table, string $tenantId): int

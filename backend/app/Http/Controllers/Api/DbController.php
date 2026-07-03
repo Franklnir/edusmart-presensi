@@ -822,6 +822,8 @@ class DbController extends ApiController
                         'id',
                         'guru_id',
                         'mapel',
+                        'tahun_ajaran',
+                        'semester',
                         'bobot_tugas_pr',
                         'bobot_quiz_reguler',
                         'bobot_quiz_uts',
@@ -5556,6 +5558,23 @@ class DbController extends ApiController
             }
             if ($mapel !== '') {
                 $row['mapel'] = $mapel;
+            }
+
+            if (array_key_exists('tahun_ajaran', $row)) {
+                $tahunAjaran = trim((string) ($row['tahun_ajaran'] ?? ''));
+                if ($requireAllFields && $tahunAjaran === '') {
+                    $error = 'Tahun ajaran bobot penilaian wajib diisi';
+
+                    return $row;
+                }
+
+                if ($tahunAjaran !== '') {
+                    $row['tahun_ajaran'] = $tahunAjaran;
+                }
+            }
+
+            if (array_key_exists('semester', $row)) {
+                $row['semester'] = trim((string) ($row['semester'] ?? ''));
             }
 
             $weights = [];

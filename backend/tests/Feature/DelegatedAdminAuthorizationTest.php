@@ -108,6 +108,49 @@ class DelegatedAdminAuthorizationTest extends TestCase
         ]);
     }
 
+    public function test_delegated_scan_sub_permission_can_read_scan_pages_without_general_admin_access(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        $teacher = $this->createUserWithProfile($tenantId, 'guru');
+
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Aman',
+            'scan_manual_enabled' => false,
+            'scan_always_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('admin_feature_permissions')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'target_type' => 'teacher',
+            'target_teacher_id' => $teacher->id,
+            'target_label' => 'Guru Live Scan',
+            'target_class_id' => '',
+            'feature_key' => 'scan-kehadiran-live',
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($teacher)
+            ->getJson('/api/admin/scan-settings')
+            ->assertOk()
+            ->assertJsonPath('data.can_update_settings', false);
+
+        $this->actingAs($teacher)
+            ->getJson('/api/admin/scan-session-summary')
+            ->assertOk();
+
+        $this->actingAs($teacher)
+            ->patchJson('/api/admin/scan-settings', [
+                'scan_always_active' => false,
+            ])
+            ->assertForbidden();
+    }
+
     private function defaultTenantId(): string
     {
         $tenantId = (string) DB::table('tenants')

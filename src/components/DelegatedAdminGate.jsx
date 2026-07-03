@@ -9,7 +9,7 @@ const DelegatedAdminGate = () => {
   const location = useLocation()
   const [loading, setLoading] = useState(true)
   const [allowed, setAllowed] = useState(false)
-  const feature = resolveDelegatedAdminFeatureFromPath(location.pathname)
+  const feature = resolveDelegatedAdminFeatureFromPath(location.pathname, location.search)
 
   useEffect(() => {
     let cancelled = false
@@ -26,7 +26,10 @@ const DelegatedAdminGate = () => {
         const { data, error } = await supabase.admin.delegatedPermissions()
         if (error) throw error
         const features = Array.isArray(data?.features) ? data.features : []
-        if (!cancelled) setAllowed(features.includes(feature.key))
+        if (!cancelled) setAllowed(
+          features.includes(feature.key) ||
+          (feature.parentKey && features.includes(feature.parentKey))
+        )
       } catch {
         if (!cancelled) setAllowed(false)
       } finally {
@@ -39,7 +42,7 @@ const DelegatedAdminGate = () => {
     return () => {
       cancelled = true
     }
-  }, [feature?.key])
+  }, [feature?.key, feature?.parentKey])
 
   if (!feature?.key) return <Navigate to="/guru/jadwal" replace />
   if (loading) return <LoadingSpinner />

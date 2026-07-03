@@ -1,5 +1,9 @@
 import { menuConfig, superAdminMonitoringGroup, superAdminGroup, waliKelasItem } from './menu.config'
-import { ADMIN_FEATURE_BY_KEY } from '../constants/adminFeaturePermissions'
+import {
+  ADMIN_FEATURE_BY_KEY,
+  SCAN_ATTENDANCE_FEATURE_KEY,
+  SCAN_ATTENDANCE_SUB_FEATURES,
+} from '../constants/adminFeaturePermissions'
 
 export const hasMenuChildren = (item) => Array.isArray(item?.items) && item.items.length > 0
 
@@ -117,15 +121,42 @@ export function buildNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, 
   let items = cloneMenuItems(menuConfig[effectiveRole] || [])
 
   if (role === 'guru' && Array.isArray(delegatedAdminFeatures) && delegatedAdminFeatures.length > 0) {
+    const featureKeys = new Set(delegatedAdminFeatures)
+    const hasLegacyScanAccess = featureKeys.has(SCAN_ATTENDANCE_FEATURE_KEY)
+    const scanFeatureKeys = hasLegacyScanAccess
+      ? SCAN_ATTENDANCE_SUB_FEATURES.map((feature) => feature.key)
+      : SCAN_ATTENDANCE_SUB_FEATURES
+        .map((feature) => feature.key)
+        .filter((featureKey) => featureKeys.has(featureKey))
+
     const delegatedItems = delegatedAdminFeatures
+      .filter((featureKey) => featureKey !== SCAN_ATTENDANCE_FEATURE_KEY)
+      .filter((featureKey) => !SCAN_ATTENDANCE_SUB_FEATURES.some((feature) => feature.key === featureKey))
       .map((featureKey) => ADMIN_FEATURE_BY_KEY[featureKey])
-      .filter(Boolean)
+      .filter((feature) => feature && !feature.legacy)
       .map((feature) => ({
         id: `guru-admin-${feature.key}`,
         to: feature.guruPath,
         label: feature.label,
         icon: feature.icon,
       }))
+
+    if (scanFeatureKeys.length > 0) {
+      delegatedItems.push({
+        id: 'guru-admin-scan',
+        group: 'Scan Kehadiran',
+        icon: 'scan',
+        items: scanFeatureKeys
+          .map((featureKey) => ADMIN_FEATURE_BY_KEY[featureKey])
+          .filter(Boolean)
+          .map((feature) => ({
+            id: `guru-admin-${feature.key}`,
+            to: feature.guruPath,
+            label: feature.label,
+            icon: feature.icon,
+          })),
+      })
+    }
 
     if (delegatedItems.length > 0) {
       items.push({

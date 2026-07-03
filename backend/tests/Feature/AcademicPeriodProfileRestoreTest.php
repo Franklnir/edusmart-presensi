@@ -210,6 +210,69 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         ]);
     }
 
+    public function test_auto_rollover_can_copy_schedule_to_new_academic_year(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-copy-schedule@example.com', 'admin');
+        $teacher = $this->createUserWithProfile($tenantId, 'guru', 'teacher-copy-schedule@example.com', 'guru');
+        $student = $this->createUserWithProfile($tenantId, 'siswa', 'student-copy-schedule@example.com', 'x-a', [
+            'angkatan' => '2025',
+        ]);
+
+        $this->insertClass($tenantId, 'x-a', 'X A', 'X', 'A', '2025', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'xi-a', 'XI A', 'XI', 'A', '2025', '2026/2027', 'Ganjil');
+        $this->insertSettingsPeriod($tenantId, '2025/2026', 'Genap');
+        $this->insertSchedule($tenantId, 'jadwal-source-matematika', 'x-a', $teacher->id, 'MATEMATIKA', 'Senin', '07:00', '08:00', '2025/2026', 'Genap');
+        $this->insertSchedule($tenantId, 'jadwal-source-ipa', 'x-a', $teacher->id, 'IPA', 'Selasa', '08:00', '09:00', '2025/2026', 'Genap');
+        $this->insertSchedule($tenantId, 'jadwal-target-ipa', 'x-a', $teacher->id, 'IPA', 'Selasa', '08:00', '09:00', '2026/2027', 'Ganjil');
+
+        Sanctum::actingAs($admin);
+        $response = $this->postJson('/api/admin/academic-period/apply', $this->periodPayload('2026/2027', 'Ganjil', [
+            'auto_rollover' => true,
+            'carry_jadwal' => true,
+            'calendar_confirmed' => true,
+        ]));
+
+        $response->assertOk()
+            ->assertJsonPath('data.rollover.promoted_students', 1)
+            ->assertJsonPath('data.jadwal_copy_requested', true)
+            ->assertJsonPath('data.jadwal_copied', 1);
+
+        $this->assertDatabaseHas('profiles', [
+            'id' => $student->id,
+            'tenant_id' => $tenantId,
+            'kelas' => 'xi-a',
+            'status' => 'active',
+        ]);
+        $this->assertDatabaseHas('jadwal', [
+            'tenant_id' => $tenantId,
+            'kelas_id' => 'x-a',
+            'mapel' => 'MATEMATIKA',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Ganjil',
+        ]);
+        $this->assertDatabaseHas('jadwal', [
+            'tenant_id' => $tenantId,
+            'kelas_id' => 'x-a',
+            'mapel' => 'MATEMATIKA',
+            'tahun_ajaran' => '2025/2026',
+            'semester' => 'Genap',
+        ]);
+        $this->assertSame(
+            1,
+            DB::table('jadwal')
+                ->where('tenant_id', $tenantId)
+                ->where('kelas_id', 'x-a')
+                ->where('mapel', 'IPA')
+                ->where('tahun_ajaran', '2026/2027')
+                ->where('hari', 'Selasa')
+                ->where('jam_mulai', '08:00')
+                ->count()
+        );
+    }
+
     public function test_auto_rollover_creates_missing_destination_classes_before_promoting_students(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
@@ -527,6 +590,36 @@ class AcademicPeriodProfileRestoreTest extends TestCase
             'wali_guru_nama' => $teacherName,
             'ketua_siswa_id' => $leaderId,
             'ketua_siswa_nama' => $leaderName,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function insertSchedule(
+        string $tenantId,
+        string $id,
+        string $classId,
+        string $teacherId,
+        string $mapel,
+        string $day,
+        string $start,
+        string $end,
+        string $year,
+        string $semester
+    ): void {
+        DB::table('jadwal')->insert([
+            'id' => $id,
+            'tenant_id' => $tenantId,
+            'kelas_id' => $classId,
+            'hari' => $day,
+            'mapel' => $mapel,
+            'guru_id' => $teacherId,
+            'guru_nama' => 'guru test',
+            'jam_mulai' => $start,
+            'jam_selesai' => $end,
+            'tahun_ajaran' => $year,
+            'semester' => $semester,
+            'periode_berlaku' => 'tahunan',
             'created_at' => now(),
             'updated_at' => now(),
         ]);

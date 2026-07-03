@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { id as localeId } from 'date-fns/locale'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { formatDateTime } from '../../lib/time'
 
 /* ========= Helpers ========= */
@@ -36,6 +37,23 @@ const HISTORY_OPTIONS = [
   { label: '2 hari lalu', value: 2 },
   { label: '7 hari lalu', value: 7 }
 ]
+
+const SCAN_MENU_TABS = [
+  { id: 'pengaturan', label: 'Pengaturan Scan', icon: ScanLine },
+  { id: 'live-scan', label: 'Live Scan', icon: RefreshCcw },
+  { id: 'riwayat', label: 'Riwayat', icon: History }
+]
+
+const normalizeScanMenu = (value) => {
+  const menu = String(value || '').trim().toLowerCase()
+  if (menu === 'live-scan' || menu === 'riwayat' || menu === 'pengaturan') {
+    return menu
+  }
+
+  return 'pengaturan'
+}
+
+const canReceiveLiveScanInput = (menu) => menu === 'pengaturan' || menu === 'live-scan'
 
 const toDateStartEnd = (daysAgo = 0) => {
   const start = new Date()
@@ -180,11 +198,26 @@ const findRelevantMapelForSingleScan = (jadwalSiswa, scanRecord, session) => {
 
 export default function Scan() {
   const { pushToast, setLoading } = useUIStore()
+  const location = useLocation()
+  const navigate = useNavigate()
   const profile = useAuthStore((state) => state.profile)
   const isTeacherProfile = isTeacherRole(profile?.role)
   const isDelegatedScanPath = typeof window !== 'undefined' &&
     window.location?.pathname?.startsWith('/guru/admin/scan')
-  const [activeTab, setActiveTab] = useState(1)
+  const activeTab = useMemo(() => {
+    const params = new URLSearchParams(location.search || '')
+    return normalizeScanMenu(params.get('menu'))
+  }, [location.search])
+
+  const setActiveTab = useCallback((menu) => {
+    const normalized = normalizeScanMenu(menu)
+    const params = new URLSearchParams(location.search || '')
+    params.set('menu', normalized)
+    navigate({
+      pathname: location.pathname,
+      search: `?${params.toString()}`
+    })
+  }, [location.pathname, location.search, navigate])
 
   // --- SETTINGS ---
   const [manualModeEnabled, setManualModeEnabled] = useState(false)
@@ -691,7 +724,7 @@ export default function Scan() {
     loadRfidDevices({ silent: true })
 
     if (eventData.success) {
-      if (activeTab === 1) {
+      if (canReceiveLiveScanInput(activeTab)) {
         pushToast(
           'success',
           `RFID ${eventData.nama || eventData.card_uid || 'terbaca'}${eventData.kelas ? ` (${eventData.kelas})` : ''}`
@@ -705,7 +738,7 @@ export default function Scan() {
     }
 
     const message = eventData.message || eventData.reason || 'Scan RFID belum berhasil diproses'
-    if (activeTab === 1) {
+    if (canReceiveLiveScanInput(activeTab)) {
       pushToast('warning', message)
     }
   }, [activeTab, loadRfidDevices, pushToast, refreshScanSummarySoon])
@@ -1137,7 +1170,7 @@ export default function Scan() {
   // Listener global keyboard RFID USB
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (activeTab !== 1 || !scanOperationalActive) return
+      if (!canReceiveLiveScanInput(activeTab) || !scanOperationalActive) return
 
       // Jangan ganggu kalau lagi ngetik di input / textarea / select
       const tag = e.target.tagName
@@ -1178,7 +1211,7 @@ export default function Scan() {
           // filter: 'status=eq.raw'
         },
         (payload) => {
-          if (activeTab !== 1 || !scanOperationalActive) return
+          if (!canReceiveLiveScanInput(activeTab) || !scanOperationalActive) return
           const row = payload.new
           if (!row) return
           if (row.status !== 'raw') {
@@ -1418,7 +1451,7 @@ export default function Scan() {
           .select('*')
           .gte('created_at', start.toISOString())
           .lt('created_at', end.toISOString())
-          .order('created_at', { ascending: true })
+          .order('created_at', { ascending: false })
 
         if (errScans) throw errScans
 
@@ -1493,6 +1526,12 @@ export default function Scan() {
             statusLabel,
             statusType
           }
+        }).sort((a, b) => {
+          const latestA = a.lastScan ? new Date(a.lastScan).getTime() : 0
+          const latestB = b.lastScan ? new Date(b.lastScan).getTime() : 0
+          if (latestA !== latestB) return latestB - latestA
+
+          return String(a.student?.nama || '').localeCompare(String(b.student?.nama || ''), 'id')
         })
 
         setHistoryData(result)
@@ -1507,7 +1546,7 @@ export default function Scan() {
   )
 
   useEffect(() => {
-    if (activeTab === 2) {
+    if (activeTab === 'riwayat') {
       loadHistory(historyDaysAgo)
     }
   }, [activeTab, historyDaysAgo, loadHistory])
@@ -1547,6 +1586,89 @@ export default function Scan() {
         (totalScannedStudents / totalStudents) * 100
       )
       : 0
+
+  const renderScanFeedTable = (rows, config) => (
+    <div>
+      <div className={`px-6 py-3 border-b border-gray-200 ${config.headerClass}`}>
+        <h4 className={`font-semibold flex items-center gap-2 ${config.titleClass}`}>
+          <div className={`w-2 h-2 rounded-full ${config.dotClass}`} />
+          {config.title}
+        </h4>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Siswa
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Waktu
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Kelas
+              </th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Aksi
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {rows.map((s, idx) => (
+              <tr
+                key={`${s.id}-${config.session}-${idx}`}
+                className={idx === 0 ? 'bg-green-50/50 transition-colors duration-500' : 'hover:bg-gray-50'}
+              >
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    <ProfileAvatar
+                      src={s.photo_path || s.photo_url}
+                      name={s.nama}
+                      size={32}
+                      className="border-gray-200"
+                    />
+                    <div>
+                      <div className="font-medium text-gray-900">
+                        {s.nama}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {s.mapel_count} mapel
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-6 py-4">
+                  <div className="font-mono text-gray-900">
+                    {s.scan_time}
+                  </div>
+                </td>
+                <td className="px-6 py-4">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                    {s.kelas}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <button
+                    onClick={() => handleDeleteScan(s)}
+                    className="text-red-600 hover:text-red-800 text-sm font-medium"
+                  >
+                    Hapus
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
+                  Belum ada {config.emptyLabel} hari ini
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
   const rfidDeviceRows = Array.isArray(rfidDevices?.devices) ? rfidDevices.devices : []
   const rfidDeviceSummary = rfidDevices?.summary || {
     total: rfidDeviceRows.length,
@@ -1587,11 +1709,8 @@ export default function Scan() {
                 </div>
               </div>
 
-              <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-200">
-                {[
-                  { id: 1, label: 'Scan Kehadiran', icon: ScanLine },
-                  { id: 2, label: 'Riwayat Scan', icon: History }
-                ].map((tab) => (
+              <div className="flex flex-wrap bg-white p-1 rounded-xl shadow-sm border border-gray-200">
+                {SCAN_MENU_TABS.map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
@@ -1610,8 +1729,8 @@ export default function Scan() {
         </div>
 
         <div className="space-y-6">
-          {/* --- MODE 1: SCANNING MANUAL --- */}
-          {activeTab === 1 && (
+          {/* --- PENGATURAN SCAN --- */}
+          {activeTab === 'pengaturan' && (
             <div className="space-y-6">
               {/* Quick Stats */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -1678,126 +1797,6 @@ export default function Scan() {
                     </div>
                   </div>
                 </div>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-white p-5">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        Status Alat RFID
-                      </h3>
-                      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                        {rfidDeviceSummary.online || 0} online
-                      </span>
-                      <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
-                        {rfidDeviceSummary.offline || 0} offline
-                      </span>
-                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                        rfidStreamStatus === 'connected'
-                          ? 'border-sky-200 bg-sky-50 text-sky-700'
-                          : rfidStreamStatus === 'reconnecting'
-                            ? 'border-amber-200 bg-amber-50 text-amber-700'
-                            : 'border-slate-200 bg-slate-50 text-slate-600'
-                      }`}>
-                        Stream {rfidStreamStatus === 'connected' ? 'realtime' : rfidStreamStatus === 'reconnecting' ? 'menyambung' : 'fallback'}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-sm text-gray-600">
-                      ESP32/ESP8266 dianggap online saat heartbeat terakhir masih aktif. IP dan waktu aktif terakhir ikut ditampilkan.
-                    </p>
-                    {rfidDevicesError && (
-                      <p className="mt-2 text-xs font-semibold text-rose-600">
-                        {rfidDevicesError}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => loadRfidDevices()}
-                    disabled={rfidDevicesLoading}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <RefreshCcw className={`h-4 w-4 ${rfidDevicesLoading ? 'animate-spin' : ''}`} />
-                    {rfidDevicesLoading ? 'Memuat...' : 'Refresh'}
-                  </button>
-                </div>
-
-                {rfidDevicesLoading && !rfidDeviceRows.length ? (
-                  <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
-                    Memuat status alat RFID...
-                  </div>
-                ) : rfidDeviceRows.length ? (
-                  <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-                    {rfidDeviceRows.map((device) => {
-                      const isOnline = Boolean(device?.is_online)
-                      const boardType = String(device?.board_type || 'esp8266').toUpperCase()
-                      const lastSeenLabel = device?.last_seen_at ? formatDateTime(device.last_seen_at) : 'Belum pernah aktif'
-                      const ipLabel = device?.last_ip || '-'
-
-                      return (
-                        <div
-                          key={device.id || device.device_id}
-                          className={`rounded-xl border p-4 ${
-                            isOnline
-                              ? 'border-emerald-200 bg-emerald-50/50'
-                              : 'border-gray-200 bg-gray-50'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="truncate font-semibold text-gray-900">
-                                  {device.name || device.device_id || 'Alat RFID'}
-                                </p>
-                                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                                  {boardType}
-                                </span>
-                              </div>
-                              <p className="mt-1 break-all font-mono text-xs text-gray-500">
-                                {device.device_id || '-'}
-                              </p>
-                            </div>
-                            <span
-                              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                                isOnline
-                                  ? 'bg-emerald-600 text-white'
-                                  : 'bg-rose-100 text-rose-700'
-                              }`}
-                            >
-                              <span className={`h-2 w-2 rounded-full ${isOnline ? 'animate-pulse bg-white' : 'bg-rose-500'}`} />
-                              {isOnline ? 'Online' : 'Offline'}
-                            </span>
-                          </div>
-
-                          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <div className="rounded-lg bg-white px-3 py-2">
-                              <p className="text-[11px] font-semibold uppercase text-gray-500">Terakhir aktif</p>
-                              <p className="mt-1 text-sm font-semibold text-gray-900">{lastSeenLabel}</p>
-                            </div>
-                            <div className="rounded-lg bg-white px-3 py-2">
-                              <p className="text-[11px] font-semibold uppercase text-gray-500">IP terakhir</p>
-                              <p className="mt-1 break-all font-mono text-sm font-semibold text-gray-900">{ipLabel}</p>
-                            </div>
-                          </div>
-
-                          <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold text-gray-600">
-                            <span className="rounded-full bg-white px-2 py-1">
-                              Status: {device.status === 'active' ? 'Aktif' : device.status || '-'}
-                            </span>
-                            <span className="rounded-full bg-white px-2 py-1">
-                              Transport: {device.last_transport || device.transport || '-'}
-                            </span>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="mt-4 rounded-xl border border-dashed border-gray-300 px-4 py-6 text-center text-sm text-gray-500">
-                    Belum ada alat RFID terdaftar untuk sekolah ini.
-                  </div>
-                )}
               </div>
 
               {/* Main Content Grid */}
@@ -2040,97 +2039,6 @@ export default function Scan() {
                     </div>
                   </div>
 
-                  {/* Scanner Status */}
-                  <div className="bg-white rounded-xl border border-gray-200 p-6">
-                    <h4 className="font-medium text-gray-900 mb-4">
-                      Status Scanner
-                    </h4>
-
-                    {scanOperationalActive ? (
-                      <div className="mb-4 p-4 text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg flex gap-3">
-                        <CheckCircle className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="font-semibold">
-                            {scanAlwaysActive ? 'Scan harian realtime aktif' : 'Mode manual aktif'}
-                          </div>
-                          <div className="mt-1">
-                            {scanAlwaysActive ? 'Tanggal operasional mengikuti hari ini. ' : ''}
-                            Sistem otomatis menentukan{' '}
-                            <b>scan MASUK</b> / <b>PULANG</b> berdasarkan
-                            jam scan. Scanner RFID siap menerima input
-                            dari perangkat USB dan realtime.
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mb-4 p-4 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg flex gap-3">
-                        <AlertCircle className="w-5 h-5 text-gray-500 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="font-semibold">
-                            Scanner belum aktif
-                          </div>
-                          <div className="mt-1">
-                            Aktifkan scan harian realtime atau mode scan manual untuk menerima input RFID.
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Current Mode Indicator */}
-                    <div className="grid grid-cols-2 gap-4">
-                      <div
-                        className={`p-4 rounded-lg border-2 text-center ${scanMode === 'masuk'
-                          ? 'bg-blue-50 border-blue-500 text-blue-700'
-                          : 'bg-gray-50 border-gray-300 text-gray-500'
-                          }`}
-                      >
-                        <div className="font-semibold text-lg">
-                          SCAN MASUK
-                        </div>
-                        <div className="text-sm mt-1">
-                          {sessionSettings.jam_masuk_mulai} -{' '}
-                          {sessionSettings.jam_masuk_selesai}
-                        </div>
-                      </div>
-                      <div
-                        className={`p-4 rounded-lg border-2 text-center ${scanMode === 'pulang'
-                          ? 'bg-orange-50 border-orange-500 text-orange-700'
-                          : 'bg-gray-50 border-gray-300 text-gray-500'
-                          }`}
-                      >
-                        <div className="font-semibold text-lg">
-                          SCAN PULANG
-                        </div>
-                        <div className="text-sm mt-1">
-                          {sessionSettings.jam_pulang_mulai} -{' '}
-                          {sessionSettings.jam_pulang_selesai}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-                      <div className="font-semibold">
-                        Cara Penggunaan:
-                      </div>
-                      <ul className="mt-1 space-y-1 list-disc list-inside">
-                        <li>
-                          Gunakan RFID Reader USB (mode keyboard
-                          emulation)
-                        </li>
-                        <li>
-                          Tempelkan kartu RFID → reader akan mengirimkan
-                          UID
-                        </li>
-                        <li>
-                          Scan otomatis diproses ketika menekan Enter
-                        </li>
-                        <li>
-                          Hanya diterima dalam rentang jam scan yang
-                          ditentukan
-                        </li>
-                      </ul>
-                    </div>
-                  </div>
                 </div>
 
                 {/* Classes Panel */}
@@ -2206,217 +2114,226 @@ export default function Scan() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
 
-              {/* Live Scan Tables */}
+          {/* --- LIVE SCAN --- */}
+          {activeTab === 'live-scan' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+                <div className="bg-white rounded-xl border border-gray-200 p-6 xl:col-span-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Status Scanner
+                    </h3>
+                    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                      rfidStreamStatus === 'connected'
+                        ? 'border-sky-200 bg-sky-50 text-sky-700'
+                        : rfidStreamStatus === 'reconnecting'
+                          ? 'border-amber-200 bg-amber-50 text-amber-700'
+                          : 'border-slate-200 bg-slate-50 text-slate-600'
+                    }`}>
+                      Stream {rfidStreamStatus === 'connected' ? 'realtime' : rfidStreamStatus === 'reconnecting' ? 'menyambung' : 'fallback'}
+                    </span>
+                  </div>
+
+                  {scanOperationalActive ? (
+                    <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+                      <div className="flex gap-3">
+                        <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
+                        <div>
+                          <div className="font-semibold">
+                            {scanAlwaysActive ? 'Scan harian realtime aktif' : 'Mode manual aktif'}
+                          </div>
+                          <div className="mt-1">
+                            Sistem menentukan <b>scan MASUK</b> atau <b>PULANG</b> berdasarkan jam scan.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
+                      <div className="flex gap-3">
+                        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-gray-500" />
+                        <div>
+                          <div className="font-semibold">Scanner belum aktif</div>
+                          <div className="mt-1">
+                            Aktifkan scan harian realtime atau mode scan manual di Pengaturan Scan.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-4 grid grid-cols-2 gap-4">
+                    <div
+                      className={`rounded-lg border-2 p-4 text-center ${scanMode === 'masuk'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-300 bg-gray-50 text-gray-500'
+                      }`}
+                    >
+                      <div className="text-lg font-semibold">SCAN MASUK</div>
+                      <div className="mt-1 text-sm">
+                        {sessionSettings.jam_masuk_mulai} - {sessionSettings.jam_masuk_selesai}
+                      </div>
+                    </div>
+                    <div
+                      className={`rounded-lg border-2 p-4 text-center ${scanMode === 'pulang'
+                        ? 'border-orange-500 bg-orange-50 text-orange-700'
+                        : 'border-gray-300 bg-gray-50 text-gray-500'
+                      }`}
+                    >
+                      <div className="text-lg font-semibold">SCAN PULANG</div>
+                      <div className="mt-1 text-sm">
+                        {sessionSettings.jam_pulang_mulai} - {sessionSettings.jam_pulang_selesai}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white p-5 xl:col-span-2">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-lg font-semibold text-gray-900">
+                          Status Alat RFID
+                        </h3>
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                          {rfidDeviceSummary.online || 0} online
+                        </span>
+                        <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                          {rfidDeviceSummary.offline || 0} offline
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Perangkat dianggap online saat heartbeat terakhir masih aktif.
+                      </p>
+                      {rfidDevicesError && (
+                        <p className="mt-2 text-xs font-semibold text-rose-600">
+                          {rfidDevicesError}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => loadRfidDevices()}
+                      disabled={rfidDevicesLoading}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <RefreshCcw className={`h-4 w-4 ${rfidDevicesLoading ? 'animate-spin' : ''}`} />
+                      {rfidDevicesLoading ? 'Memuat...' : 'Refresh'}
+                    </button>
+                  </div>
+
+                  {rfidDevicesLoading && !rfidDeviceRows.length ? (
+                    <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
+                      Memuat status alat RFID...
+                    </div>
+                  ) : rfidDeviceRows.length ? (
+                    <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                      {rfidDeviceRows.map((device) => {
+                        const isOnline = Boolean(device?.is_online)
+                        const boardType = String(device?.board_type || 'esp8266').toUpperCase()
+                        const lastSeenLabel = device?.last_seen_at ? formatDateTime(device.last_seen_at) : 'Belum pernah aktif'
+                        const ipLabel = device?.last_ip || '-'
+
+                        return (
+                          <div
+                            key={device.id || device.device_id}
+                            className={`rounded-xl border p-4 ${
+                              isOnline ? 'border-emerald-200 bg-emerald-50/50' : 'border-gray-200 bg-gray-50'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate font-semibold text-gray-900">
+                                    {device.name || device.device_id || 'Alat RFID'}
+                                  </p>
+                                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                                    {boardType}
+                                  </span>
+                                </div>
+                                <p className="mt-1 break-all font-mono text-xs text-gray-500">
+                                  {device.device_id || '-'}
+                                </p>
+                              </div>
+                              <span
+                                className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                  isOnline ? 'bg-emerald-600 text-white' : 'bg-rose-100 text-rose-700'
+                                }`}
+                              >
+                                <span className={`h-2 w-2 rounded-full ${isOnline ? 'animate-pulse bg-white' : 'bg-rose-500'}`} />
+                                {isOnline ? 'Online' : 'Offline'}
+                              </span>
+                            </div>
+
+                            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <div className="rounded-lg bg-white px-3 py-2">
+                                <p className="text-[11px] font-semibold uppercase text-gray-500">Terakhir aktif</p>
+                                <p className="mt-1 text-sm font-semibold text-gray-900">{lastSeenLabel}</p>
+                              </div>
+                              <div className="rounded-lg bg-white px-3 py-2">
+                                <p className="text-[11px] font-semibold uppercase text-gray-500">IP terakhir</p>
+                                <p className="mt-1 break-all font-mono text-sm font-semibold text-gray-900">{ipLabel}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="mt-4 rounded-xl border border-dashed border-gray-300 px-4 py-6 text-center text-sm text-gray-500">
+                      Belum ada alat RFID terdaftar untuk sekolah ini.
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="text-lg font-semibold text-gray-900">
                       Live Scan Feed
                     </h3>
-                    <div className="flex items-center gap-4 text-sm text-gray-600">
-                      <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full">
+                    <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                      <span className="rounded-full bg-blue-100 px-3 py-1 text-blue-700">
                         {scanMasuk.length} Masuk
                       </span>
-                      <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full">
+                      <span className="rounded-full bg-orange-100 px-3 py-1 text-orange-700">
                         {scanPulang.length} Pulang
                       </span>
-                      <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full">
+                      <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-700">
                         {scannedStudents.length} Total
                       </span>
                     </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 xl:grid-cols-2 divide-y xl:divide-y-0 xl:divide-x divide-gray-200">
-                  {/* Scan Masuk Table */}
-                  <div>
-                    <div className="px-6 py-3 bg-blue-50 border-b border-gray-200">
-                      <h4 className="font-semibold text-blue-900 flex items-center gap-2">
-                        <div className="w-2 h-2 bg-blue-500 rounded-full" />
-                        Scan Masuk
-                      </h4>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="bg-gray-50 border-b border-gray-200">
-                          <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Siswa
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Waktu
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Kelas
-                            </th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Aksi
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {scanMasuk.map((s, idx) => (
-                            <tr
-                              key={`${s.id}-masuk-${idx}`}
-                              className={
-                                idx === 0
-                                  ? 'bg-green-50/50 transition-colors duration-500'
-                                  : 'hover:bg-gray-50'
-                              }
-                            >
-                              <td className="px-6 py-4">
-                                <div className="flex items-center gap-3">
-                                  <ProfileAvatar
-                                    src={s.photo_path || s.photo_url}
-                                    name={s.nama}
-                                    size={32}
-                                    className="border-gray-200"
-                                  />
-                                  <div>
-                                    <div className="font-medium text-gray-900">
-                                      {s.nama}
-                                    </div>
-                                    <div className="text-sm text-gray-500">
-                                      {s.mapel_count} mapel
-                                    </div>
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-6 py-4">
-                                <div className="font-mono text-gray-900">
-                                  {s.scan_time}
-                                </div>
-                              </td>
-                              <td className="px-6 py-4">
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                  {s.kelas}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 text-right">
-                                <button
-                                  onClick={() =>
-                                    handleDeleteScan(s)
-                                  }
-                                  className="text-red-600 hover:text-red-800 text-sm font-medium"
-                                >
-                                  Hapus
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                          {scanMasuk.length === 0 && (
-                            <tr>
-                              <td
-                                colSpan={4}
-                                className="px-6 py-8 text-center text-gray-500"
-                              >
-                                Belum ada scan masuk hari ini
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* Scan Pulang Table */}
-                  <div>
-                    <div className="px-6 py-3 bg-orange-50 border-b border-gray-200">
-                      <h4 className="font-semibold text-orange-900 flex items-center gap-2">
-                        <div className="w-2 h-2 bg-orange-500 rounded-full" />
-                        Scan Pulang
-                      </h4>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="bg-gray-50 border-b border-gray-200">
-                          <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Siswa
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Waktu
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Kelas
-                            </th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Aksi
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {scanPulang.map((s, idx) => (
-                            <tr
-                              key={`${s.id}-pulang-${idx}`}
-                              className={
-                                idx === 0
-                                  ? 'bg-green-50/50 transition-colors duration-500'
-                                  : 'hover:bg-gray-50'
-                              }
-                            >
-                              <td className="px-6 py-4">
-                                <div className="flex items-center gap-3">
-                                  <ProfileAvatar
-                                    src={s.photo_path || s.photo_url}
-                                    name={s.nama}
-                                    size={32}
-                                    className="border-gray-200"
-                                  />
-                                  <div>
-                                    <div className="font-medium text-gray-900">
-                                      {s.nama}
-                                    </div>
-                                    <div className="text-sm text-gray-500">
-                                      {s.mapel_count} mapel
-                                    </div>
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-6 py-4">
-                                <div className="font-mono text-gray-900">
-                                  {s.scan_time}
-                                </div>
-                              </td>
-                              <td className="px-6 py-4">
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                  {s.kelas}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 text-right">
-                                <button
-                                  onClick={() =>
-                                    handleDeleteScan(s)
-                                  }
-                                  className="text-red-600 hover:text-red-800 text-sm font-medium"
-                                >
-                                  Hapus
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                          {scanPulang.length === 0 && (
-                            <tr>
-                              <td
-                                colSpan={4}
-                                className="px-6 py-8 text-center text-gray-500"
-                              >
-                                Belum ada scan pulang hari ini
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                <div className="grid grid-cols-1 divide-y divide-gray-200 xl:grid-cols-2 xl:divide-x xl:divide-y-0">
+                  {renderScanFeedTable(scanMasuk, {
+                    session: 'masuk',
+                    title: 'Scan Masuk',
+                    emptyLabel: 'scan masuk',
+                    headerClass: 'bg-blue-50',
+                    titleClass: 'text-blue-900',
+                    dotClass: 'bg-blue-500',
+                  })}
+                  {renderScanFeedTable(scanPulang, {
+                    session: 'pulang',
+                    title: 'Scan Pulang',
+                    emptyLabel: 'scan pulang',
+                    headerClass: 'bg-orange-50',
+                    titleClass: 'text-orange-900',
+                    dotClass: 'bg-orange-500',
+                  })}
                 </div>
               </div>
             </div>
           )}
 
-          {/* --- MODE 2: RIWAYAT --- */}
-          {activeTab === 2 && (
+          {/* --- RIWAYAT --- */}
+          {activeTab === 'riwayat' && (
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

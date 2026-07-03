@@ -12,6 +12,18 @@ class SettingsController extends ApiController
 {
     use HasTenantBackupLogic;
 
+    private const SCAN_FEATURE_KEYS = [
+        'scan-kehadiran',
+        'scan-kehadiran-pengaturan',
+        'scan-kehadiran-live',
+        'scan-kehadiran-riwayat',
+    ];
+
+    private const SCAN_SETTINGS_MANAGER_FEATURE_KEYS = [
+        'scan-kehadiran',
+        'scan-kehadiran-pengaturan',
+    ];
+
     public function backup(Request $request)
     {
         if (! $this->isAdmin($request)) {
@@ -301,7 +313,7 @@ class SettingsController extends ApiController
     private function canViewScanSettings(Request $request, string $tenantId): bool
     {
         return $this->canUpdateScanSettings($request, $tenantId)
-            || $this->hasDelegatedAdminFeatureAccess($request, 'scan-kehadiran');
+            || $this->hasAnyDelegatedAdminFeatureAccess($request, self::SCAN_FEATURE_KEYS);
     }
 
     private function canUpdateScanSettings(Request $request, string $tenantId): bool
@@ -377,7 +389,7 @@ class SettingsController extends ApiController
 
         $query = DB::table('admin_feature_permissions')
             ->where('target_teacher_id', $teacherId)
-            ->where('feature_key', 'scan-kehadiran')
+            ->whereIn('feature_key', self::SCAN_SETTINGS_MANAGER_FEATURE_KEYS)
             ->where('is_active', true)
             ->whereIn('target_type', ['homeroom', 'position']);
         $this->scopeTenant($query, 'admin_feature_permissions', $tenantId);

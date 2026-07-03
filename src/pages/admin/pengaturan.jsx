@@ -928,9 +928,17 @@ export default function APengaturan() {
 
     if (name === 'tahunAjaran') {
       const nextYear = normalizeAcademicYear(value) || value
+      const persistedStartYear = Number(String(persistedPeriodForm.tahunAjaran || '').slice(0, 4))
+      const nextStartYear = Number(String(nextYear || '').slice(0, 4))
+      const movesForwardOneStep =
+        nextYear !== persistedPeriodForm.tahunAjaran &&
+        Number.isFinite(persistedStartYear) &&
+        Number.isFinite(nextStartYear) &&
+        nextStartYear === persistedStartYear + 1
+
+      setCarryJadwal(movesForwardOneStep)
       if (nextYear === persistedPeriodForm.tahunAjaran) {
         setCarryEskulMembers(false)
-        setCarryJadwal(false)
       }
     }
 
@@ -1203,8 +1211,11 @@ export default function APengaturan() {
       const eskulText = rollover && payload.carry_eskul_members
         ? ` Eskul disalin: ${rollover.eskul_members_copied || 0}.`
         : ''
+      const jadwalCopied = Number(data?.jadwal_copied || 0)
       const jadwalText = rollover && payload.carry_jadwal
-        ? ' Jadwal berhasil disalin.'
+        ? (jadwalCopied > 0
+            ? ` Jadwal disalin: ${jadwalCopied}.`
+            : ' Tidak ada jadwal sumber yang disalin.')
         : ''
 
       pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh.${rolloverText}${createdClassText}${restoredText}${eskulText}${jadwalText}`, {
