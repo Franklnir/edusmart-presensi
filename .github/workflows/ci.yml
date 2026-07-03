@@ -278,6 +278,50 @@ jobs:
             "$VPS_USER@$VPS_HOST" \
             "printf 'SSH_OK\n'"
 
+      - name: Transfer release images to VPS
+        env:
+          EDUSMART_BACKEND_IMAGE: ${{ needs.build-production-images.outputs.backend_image }}
+          EDUSMART_NGINX_IMAGE: ${{ needs.build-production-images.outputs.nginx_image }}
+          EDUSMART_CADDY_IMAGE: ${{ needs.build-production-images.outputs.caddy_image }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          port="${VPS_PORT:-22}"
+          ssh_opts=(
+            -i ~/.ssh/edusmart_deploy_key
+            -p "$port"
+            -o BatchMode=yes
+            -o ConnectionAttempts=3
+            -o ConnectTimeout=20
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+          )
+          images=(
+            "$EDUSMART_BACKEND_IMAGE"
+            "$EDUSMART_NGINX_IMAGE"
+            "$EDUSMART_CADDY_IMAGE"
+          )
+
+          printf "%s" "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+          for image in "${images[@]}"; do
+            docker pull "$image"
+          done
+
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            'docker system prune -af || true; df -h /; docker system df || true'
+
+          docker save "${images[@]}" | gzip -1 | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+            'gunzip | docker load'
+
+          for image in "${images[@]}"; do
+            ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
+              "docker image inspect '$image' >/dev/null"
+          done
+
       - name: Deploy release on VPS
         env:
           RELEASE_REF: ${{ github.sha }}
@@ -285,8 +329,7 @@ jobs:
           EDUSMART_BACKEND_IMAGE: ${{ needs.build-production-images.outputs.backend_image }}
           EDUSMART_NGINX_IMAGE: ${{ needs.build-production-images.outputs.nginx_image }}
           EDUSMART_CADDY_IMAGE: ${{ needs.build-production-images.outputs.caddy_image }}
-          GHCR_USERNAME: ${{ github.actor }}
-          GHCR_TOKEN: ${{ github.token }}
+          PRELOADED_RELEASE_IMAGES: "true"
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
           VPS_USER: ${{ secrets.VPS_USER }}
@@ -305,6 +348,7 @@ jobs:
             printf 'BACKEND_IMAGE=%q\n' "$EDUSMART_BACKEND_IMAGE"
             printf 'NGINX_IMAGE=%q\n' "$EDUSMART_NGINX_IMAGE"
             printf 'CADDY_IMAGE=%q\n' "$EDUSMART_CADDY_IMAGE"
+            printf 'PRELOADED_IMAGES=%q\n' "${PRELOADED_RELEASE_IMAGES:-false}"
             printf 'GHCR_USERNAME=%q\n' "${GHCR_USERNAME:-}"
             printf 'GHCR_TOKEN=%q\n' "${GHCR_TOKEN:-}"
             printf '%s\n' \
@@ -335,11 +379,16 @@ jobs:
               '    delay=$((delay * 2))' \
               '  done' \
               '}' \
-              'echo "[preflight] Bersihkan image/cache Docker tidak terpakai sebelum fetch release dan login registry..."' \
-              'docker system prune -af || true' \
-              'df -h / || true' \
-              'if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_TOKEN" ]; then' \
-              '  retry_docker_login' \
+              'if [ "${PRELOADED_IMAGES:-false}" = "true" ]; then' \
+              '  echo "[preflight] Release image sudah dimuat dari CI runner; lewati pull/login registry di VPS."' \
+              '  df -h / || true' \
+              'else' \
+              '  echo "[preflight] Bersihkan image/cache Docker tidak terpakai sebelum fetch release dan login registry..."' \
+              '  docker system prune -af || true' \
+              '  df -h / || true' \
+              '  if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_TOKEN" ]; then' \
+              '    retry_docker_login' \
+              '  fi' \
               'fi' \
               'unset GHCR_TOKEN' \
               'if [ -n "$RELEASE_BRANCH" ]; then' \
@@ -355,7 +404,11 @@ jobs:
               'trap '"'"'rm -f "$tmp_script"'"'"' EXIT' \
               'git show "$RELEASE_REF":deploy/release-prod.sh > "$tmp_script"' \
               'chmod +x "$tmp_script"' \
-              'EDUSMART_BACKEND_IMAGE="$BACKEND_IMAGE" EDUSMART_NGINX_IMAGE="$NGINX_IMAGE" EDUSMART_CADDY_IMAGE="$CADDY_IMAGE" EDUSMART_ROOT_DIR="$REMOTE_DIR" "$tmp_script" --ref "$RELEASE_REF" --pull-images'
+              'pull_flag="--pull-images"' \
+              'if [ "${PRELOADED_IMAGES:-false}" = "true" ]; then' \
+              '  pull_flag="--no-pull-images"' \
+              'fi' \
+              'EDUSMART_BACKEND_IMAGE="$BACKEND_IMAGE" EDUSMART_NGINX_IMAGE="$NGINX_IMAGE" EDUSMART_CADDY_IMAGE="$CADDY_IMAGE" EDUSMART_ROOT_DIR="$REMOTE_DIR" "$tmp_script" --ref "$RELEASE_REF" "$pull_flag"'
           } | ssh -i ~/.ssh/edusmart_deploy_key -p "$port" \
             -o BatchMode=yes \
             -o ConnectionAttempts=3 \
