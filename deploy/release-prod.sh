@@ -735,8 +735,12 @@ if [[ -z "$DB_USERNAME" || -z "$DB_DATABASE" ]]; then
   exit 1
 fi
 
-echo "[1/9] Fetch refs terbaru..."
-git fetch --all --tags --prune
+if [[ "${EDUSMART_SKIP_RELEASE_FETCH:-false}" == "true" ]]; then
+  echo "[1/9] Lewati fetch refs: commit release sudah diverifikasi oleh CI."
+else
+  echo "[1/9] Fetch refs terbaru..."
+  git fetch --all --tags --prune
+fi
 git rev-parse --verify "$TARGET_REF" >/dev/null
 validate_compose_files_available
 
