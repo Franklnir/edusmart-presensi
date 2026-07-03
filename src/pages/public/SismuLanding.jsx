@@ -49,7 +49,7 @@ import {
   Zap
 } from 'lucide-react'
 import { getAdminSubdomain, getRootDomain } from '../../utils/marketingHost'
-import { landingFeatureCards, sismuLandingPainPoints } from '../../data/sismuFeatureDataset'
+import { landingFeatureCards, sismuLandingPainPoints } from '../../data/sismuLandingDataset'
 
 const whatsappUrl =
   'https://wa.me/6289531832365?text=Halo%20SISMU%2C%20saya%20ingin%20konsultasi%20paket%20untuk%20sekolah'
