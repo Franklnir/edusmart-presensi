@@ -362,8 +362,6 @@ compose_has_service() {
 }
 
 recreate_mosquitto_after_config_change() {
-  local services=(mosquitto)
-
   if [[ "$MOSQUITTO_CONFIG_CHANGED" != "true" ]]; then
     return 0
   fi
@@ -373,13 +371,19 @@ recreate_mosquitto_after_config_change() {
     return 0
   fi
 
+  echo "      - recreate Mosquitto karena konfigurasi broker berubah"
   if compose_has_service mosquitto_reloader; then
-    services+=(mosquitto_reloader)
+    compose stop mosquitto_reloader >/dev/null 2>&1 || true
   fi
 
-  echo "      - recreate Mosquitto karena konfigurasi broker berubah"
   retry_command "recreate Mosquitto setelah config change" 3 12 \
-    compose up -d --no-build --force-recreate --no-deps "${services[@]}"
+    compose up -d --no-build --force-recreate --no-deps mosquitto
+  check_compose_service mosquitto "${DEPLOY_STAGE_WAIT_SECONDS:-90}"
+
+  if compose_has_service mosquitto_reloader; then
+    retry_command "recreate Mosquitto reloader setelah broker stabil" 3 12 \
+      compose up -d --no-build --force-recreate --no-deps mosquitto_reloader
+  fi
 }
 
 git_status_for_release() {
@@ -545,6 +549,84 @@ run_internal_health_checks() {
   run_optional_health_checks
 }
 
+array_contains() {
+  local needle="$1"
+  shift
+
+  local item
+  for item in "$@"; do
+    if [[ "$item" == "$needle" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+stage_app_services() {
+  local label="$1"
+  local wait_mode="$2"
+  shift 2
+
+  local services=()
+  local service
+
+  for service in "$@"; do
+    if ! array_contains "$service" "${APP_SERVICES[@]}"; then
+      continue
+    fi
+    if ! compose_has_service "$service"; then
+      continue
+    fi
+
+    services+=("$service")
+    append_unique STARTED_APP_SERVICES "$service"
+  done
+
+  if [[ "${#services[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  echo "      - deploy ${label}: ${services[*]}"
+  retry_command "compose up ${label}" 4 12 \
+    compose up -d --no-build "${services[@]}"
+
+  if [[ "$wait_mode" == "ready" ]]; then
+    for service in "${services[@]}"; do
+      check_compose_service "$service" "${DEPLOY_STAGE_WAIT_SECONDS:-90}"
+    done
+  fi
+}
+
+deploy_app_services() {
+  STARTED_APP_SERVICES=()
+
+  stage_app_services "broker MQTT" ready mosquitto
+  stage_app_services "aplikasi Laravel" none backend worker scheduler rfid_bridge
+  stage_app_services "gateway HTTP internal" ready nginx
+  stage_app_services "gateway publik" ready caddy
+  stage_app_services "helper MQTT" none mosquitto_reloader
+  stage_app_services "sync sertifikat MQTT" none mosquitto_cert_sync
+
+  local remaining=()
+  local service
+  for service in "${APP_SERVICES[@]}"; do
+    if array_contains "$service" "${STARTED_APP_SERVICES[@]}"; then
+      continue
+    fi
+    if ! compose_has_service "$service"; then
+      continue
+    fi
+    remaining+=("$service")
+  done
+
+  if [[ "${#remaining[@]}" -gt 0 ]]; then
+    echo "      - deploy service tambahan: ${remaining[*]}"
+    retry_command "compose up service tambahan" 4 12 \
+      compose up -d --no-build "${remaining[@]}"
+  fi
+}
+
 rollback_application() {
   if [[ "$AUTO_ROLLBACK" != "true" || "$ROLLBACK_RUNNING" == "true" ]]; then
     return 0
@@ -583,7 +665,7 @@ rollback_application() {
     export EDUSMART_CADDY_IMAGE="$PREV_CADDY_IMAGE"
   fi
 
-  compose up -d --no-build "${APP_SERVICES[@]}"
+  deploy_app_services
   local compose_status=$?
   if [[ "$compose_status" -ne 0 ]]; then
     echo "[rollback] compose up ref lama gagal." >&2
@@ -800,8 +882,7 @@ else
 fi
 DEPLOY_PHASE="restart_services"
 echo "[5/9] Deploy service tanpa build lokal..."
-retry_command "compose up app services" 3 15 \
-  compose up -d --no-build "${APP_SERVICES[@]}"
+deploy_app_services
 recreate_mosquitto_after_config_change
 start_optional_services
 
