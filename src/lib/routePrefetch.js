@@ -45,6 +45,7 @@ const routeLoaders = {
   '/admin/monitoring': () => import('../pages/admin/SuperMonitoring'),
   '/admin/background-job': () => import('../pages/admin/SuperBackgroundJobs'),
   '/admin/monitoring-server': () => import('../pages/admin/SuperServerMonitoring'),
+  '/admin/monitoring-web-vitals': () => import('../pages/admin/SuperWebVitals'),
   '/admin/monitoring-log': () => import('../pages/admin/SuperMonitorLog'),
   '/admin/animasi-flow': () => import('../pages/admin/AnimasiFlow'),
   '/admin/tenants': () => import('../pages/admin/Tenants'),

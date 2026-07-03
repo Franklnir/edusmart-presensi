@@ -230,6 +230,17 @@ const superApi = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async webVitals(params = {}) {
+      const res = await apiFetch(`/api/super/monitoring/web-vitals${buildQueryString(params)}`, {
+        method: 'GET',
+        cacheTtlMs: 5000,
+        persistCache: true,
+        staleCacheTtlMs: 60 * 1000,
+        staleKey: `super.web-vitals.${JSON.stringify(params || {})}`,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async monitoringLogs(params = {}) {
       const res = await apiFetch(`/api/super/monitoring/logs${buildQueryString(params)}`, {
         method: 'GET',

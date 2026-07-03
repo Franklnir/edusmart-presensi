@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\StorageManagementController;
 use App\Http\Controllers\Api\SuperAdminController;
 use App\Http\Controllers\Api\SuperLogController;
 use App\Http\Controllers\Api\TugasController;
+use App\Http\Controllers\Api\WebVitalsController;
 use App\Http\Controllers\Api\WhatsAppController;
 use App\Http\Controllers\Api\WhatsAppWebhookController;
 use App\Http\Middleware\EnsureTenantMatchesProfile;
@@ -49,6 +50,10 @@ Route::get('/mobile/schools', [MobileDirectoryController::class, 'schools'])
     ]);
 
 Route::get('/public/settings', [PublicSettingsController::class, 'show'])
+    ->middleware('throttle:api')
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
+
+Route::post('/observability/web-vitals', [WebVitalsController::class, 'store'])
     ->middleware('throttle:api')
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 
@@ -306,6 +311,7 @@ Route::middleware(['auth:sanctum', 'throttle:super', 'super.domain', 'super.admi
     Route::get('/super/tenants/{id}', [SuperAdminController::class, 'showTenant']);
     Route::get('/super/monitoring', [SuperAdminController::class, 'monitoringOverview']);
     Route::get('/super/monitoring/server', [SuperAdminController::class, 'serverMonitoring']);
+    Route::get('/super/monitoring/web-vitals', [WebVitalsController::class, 'summary']);
     Route::get('/super/monitoring/logs', [SuperLogController::class, 'index']);
     Route::get('/super/monitoring/logs/{id}', [SuperLogController::class, 'show']);
     Route::get('/super/storage', [StorageManagementController::class, 'superOverview']);

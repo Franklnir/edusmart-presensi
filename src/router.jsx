@@ -43,6 +43,7 @@ const APengaturan = lazyRoute('/admin/pengaturan')
 const ASuperMonitoring = lazyRoute('/admin/monitoring')
 const ASuperBackgroundJobs = lazyRoute('/admin/background-job')
 const ASuperServerMonitoring = lazyRoute('/admin/monitoring-server')
+const ASuperWebVitals = lazyRoute('/admin/monitoring-web-vitals')
 const ASuperMonitorLog = lazyRoute('/admin/monitoring-log')
 const AAnimasiFlow = lazyRoute('/admin/animasi-flow')
 const ATenants = lazyRoute('/admin/tenants')
@@ -144,6 +145,7 @@ const AppRoutes = () => (
       <Route path="/admin/monitoring" element={lazyElement(ASuperMonitoring)} />
       <Route path="/admin/background-job" element={lazyElement(ASuperBackgroundJobs)} />
       <Route path="/admin/monitoring-server" element={lazyElement(ASuperServerMonitoring)} />
+      <Route path="/admin/monitoring-web-vitals" element={lazyElement(ASuperWebVitals)} />
       <Route path="/admin/monitoring-log" element={lazyElement(ASuperMonitorLog)} />
       <Route path="/admin/animasi-flow" element={lazyElement(AAnimasiFlow)} />
       <Route path="/admin/tenants" element={lazyElement(ATenants)} />

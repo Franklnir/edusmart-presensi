@@ -124,6 +124,7 @@ export const superAdminMonitoringGroup = {
     { id: 'super-monitoring', to: '/admin/monitoring', label: 'Monitoring', icon: 'signal' },
     { id: 'super-background-job', to: '/admin/background-job', label: 'Background Job', icon: 'queue' },
     { id: 'super-monitoring-server', to: '/admin/monitoring-server', label: 'Monitoring Server', icon: 'monitor' },
+    { id: 'super-monitoring-web-vitals', to: '/admin/monitoring-web-vitals', label: 'Performa Halaman', icon: 'gauge' },
     { id: 'super-monitoring-log', to: '/admin/monitoring-log', label: 'Monitor Log', icon: 'terminal' },
     { id: 'super-animasi-flow', to: '/admin/animasi-flow', label: 'Animasi Flow', icon: 'workflow' },
   ],

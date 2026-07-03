@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import ConfirmDialog from './components/ConfirmDialog'
 import AppBootShell from './components/AppBootShell'
+import WebVitalsReporter from './components/monitoring/WebVitalsReporter'
 import AppRoutes from './router'
 import { useAuthStore } from './store/useAuthStore'
 import { SESSION_EXPIRED_EVENT, hasAuthSessionHint, supabase } from './lib/supabase'
@@ -250,6 +251,7 @@ const App = () => {
         <main className="w-full min-h-screen">
           <AppRoutes />
         </main>
+        <WebVitalsReporter />
         <ConfirmDialog />
       </div>
     )
@@ -261,6 +263,7 @@ const App = () => {
         <main className="w-full min-h-screen">
           <AppRoutes />
         </main>
+        <WebVitalsReporter />
         <ConfirmDialog />
       </div>
     )
@@ -276,6 +279,7 @@ const App = () => {
           <AppRoutes />
         </main>
       </div>
+      <WebVitalsReporter />
       <ConfirmDialog />
     </div>
   )

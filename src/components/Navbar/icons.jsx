@@ -14,6 +14,7 @@ import {
   Circle,
   Database,
   GraduationCap,
+  Gauge,
   HardDrive,
   History,
   Home,
@@ -69,6 +70,7 @@ const iconComponents = {
   x: X,
   workflow: Workflow,
   queue: ListChecks,
+  gauge: Gauge,
 }
 
 export const Icon = React.memo(({ name, className = 'w-5 h-5' }) => {

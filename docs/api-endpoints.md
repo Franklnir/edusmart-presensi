@@ -5,7 +5,7 @@ Tanggal audit: 2026-07-03
 Dokumen ini merangkum kontrak endpoint API backend EduSmart dari source
 `backend/routes/api.php`, hasil verifikasi `php artisan route:list --path=api`,
 dan pembacaan controller utama. Total endpoint API aplikasi aktif saat audit:
-207 route. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai
+209 route. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai
 API aplikasi.
 
 ## Status Kualitas Dokumen
@@ -1212,6 +1212,12 @@ Total route API aplikasi aktif: 207.
 | `GET` | `/api/profile/me` | `ProfileController@me` | Sanctum |
 | `PATCH` | `/api/profile/me` | `ProfileController@updateMe` | Sanctum |
 
+### Observability
+
+| Method | Endpoint | Handler | Auth |
+|---|---|---|---|
+| `POST` | `/api/observability/web-vitals` | `WebVitalsController@store` | Public throttled |
+
 ### Public
 
 | Method | Endpoint | Handler | Auth |
@@ -1287,6 +1293,7 @@ Total route API aplikasi aktif: 207.
 | `GET` | `/api/super/monitoring/logs` | `SuperLogController@index` | Super admin |
 | `GET` | `/api/super/monitoring/logs/{id}` | `SuperLogController@show` | Super admin |
 | `GET` | `/api/super/monitoring/server` | `SuperAdminController@serverMonitoring` | Super admin |
+| `GET` | `/api/super/monitoring/web-vitals` | `WebVitalsController@summary` | Super admin |
 | `GET` | `/api/super/storage` | `StorageManagementController@superOverview` | Super admin |
 | `POST` | `/api/super/storage/object-storage/sync` | `StorageManagementController@superObjectStorageSync` | Super admin |
 | `POST` | `/api/super/storage/trash/purge-expired` | `StorageManagementController@superPurgeExpiredTrash` | Super admin |

@@ -15,6 +15,10 @@ export default defineConfig({
           /^\/auth(?:\/|$)/,
           /^\/login(?:\/|$|\?)/,
           /^\/logout(?:\/|$)/
+        ],
+        globIgnores: [
+          '**/pdf.worker-*.mjs',
+          '**/vendor-pdf-*.js'
         ]
       },
       manifest: {
@@ -58,6 +62,16 @@ export default defineConfig({
   },
   build: {
     minify: 'terser',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('pdfjs-dist')) return 'vendor-pdf-preview'
+          if (id.includes('jspdf') || id.includes('html2canvas')) return 'vendor-pdf-export'
+          if (id.includes('react-window')) return 'vendor-virtual-list'
+          return undefined
+        }
+      }
+    },
     terserOptions: {
       compress: {
         drop_console: true,
