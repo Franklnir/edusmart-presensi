@@ -27,6 +27,7 @@ RFID_MOSQUITTO_INTERNAL_USE_TLS=false
 RFID_MOSQUITTO_BRIDGE_USERNAME=edusmart_bridge
 RFID_MOSQUITTO_BRIDGE_PASSWORD=GANTI_PASSWORD_PANJANG_RANDOM
 RFID_MOSQUITTO_TOPIC_PREFIX=edusmart
+RFID_MOSQUITTO_STRICT_DEVICE_ACL=true
 MOSQUITTO_CERT_SYNC_INTERVAL_SECONDS=300
 ```
 
@@ -62,3 +63,15 @@ Dari halaman Super Admin > Detail Sekolah > Konfigurasi MQTT RFID Sekolah:
 Kalau password tenant bocor, klik `Rotasi Password`, lalu flash ulang device
 dengan template terbaru. Pastikan `device_id` alat memakai format aman tanpa
 spasi, misalnya `gerbang-2`; nilai ini menjadi bagian dari ACL/topic MQTT.
+
+## ACL Ketat Per Device
+
+Default production memakai `RFID_MOSQUITTO_STRICT_DEVICE_ACL=true`. File ACL
+Mosquitto tidak lagi memberi akses wildcard ke semua device tenant, tetapi
+hanya topic milik device aktif yang sudah tercatat di `rfid_devices`.
+
+Setiap kali device ditambah atau dihapus dari Super Admin, backend melakukan
+sync ulang `aclfile` best-effort dan `mosquitto_reloader` akan reload broker.
+Jika harus melakukan recovery perangkat lama yang belum terdaftar, set
+`RFID_MOSQUITTO_STRICT_DEVICE_ACL=false` sementara, daftarkan device, jalankan
+`php artisan rfid:mosquitto-sync`, lalu aktifkan kembali.

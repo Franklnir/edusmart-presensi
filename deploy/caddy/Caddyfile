@@ -25,6 +25,7 @@
 			SecRule ARGS|ARGS_NAMES|REQUEST_HEADERS|REQUEST_COOKIES|REQUEST_URI "(?i)(?:union\s+select|information_schema|sleep\s*\(|benchmark\s*\(|load_file\s*\(|into\s+outfile|@@version)" "id:100003,phase:2,deny,status:403,t:none,t:urlDecodeUni,log,msg:'sql injection probe'"
 			SecRule ARGS|ARGS_NAMES|REQUEST_HEADERS|REQUEST_COOKIES|REQUEST_URI "(?i)(?:<script|javascript:|onerror\s*=|onload\s*=|document\.cookie)" "id:100004,phase:2,deny,status:403,t:none,t:urlDecodeUni,log,msg:'xss probe'"
 			SecRule ARGS|ARGS_NAMES|REQUEST_URI "(?:\.\./|\.\.\\|%2e%2e%2f|%252e%252e%252f)" "id:100005,phase:2,deny,status:403,t:none,t:urlDecodeUni,log,msg:'path traversal probe'"
+			SecRule REQUEST_URI "(?i)(?:/(?:backup|backups|dump|db|database|prod|production|staging|release|archive|source|src|config|secrets?)[^/]*\.(?:zip|tar|tgz|gz|bz2|7z|rar|sql|sqlite|sqlite3|bak|backup|old|orig|save|swp|env|log)$|/(?:composer\.(?:json|lock)|package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|vite\.config\.[cm]?js|webpack\.config\.[cm]?js)$|/(?:actuator|telescope|debug/default/view|server-info)(?:/|$))" "id:100006,phase:1,deny,status:403,t:none,t:urlDecodeUni,log,msg:'sensitive fallback probe'"
 		`
 	}
 }

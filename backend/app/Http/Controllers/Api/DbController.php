@@ -1631,14 +1631,26 @@ class DbController extends ApiController
                     $kelas = $profile?->kelas;
                     $nama = $profile?->nama;
                     $this->mapPayload($payload, function ($row) use ($userId, $kelas, $nama) {
+                        $row = $this->filterPayload($row, [
+                            'tanggal',
+                            'mapel',
+                            'status',
+                            'komentar',
+                        ]);
                         $row['uid'] = $userId;
                         $row['kelas'] = $kelas;
-                        if (! isset($row['nama'])) {
-                            $row['nama'] = $nama;
-                        }
+                        $row['nama'] = $nama;
+                        $row['status'] = 'Hadir';
+                        $row['waktu'] = Carbon::now('Asia/Jakarta');
+                        $row['oleh'] = 'siswa';
 
                         return $row;
                     });
+
+                    $validationError = $this->validateSiswaAbsensiWritePayload($payload, $request, (string) $userId, $kelas);
+                    if ($validationError !== null) {
+                        return $this->deny($validationError['message'], $validationError['status']);
+                    }
 
                     return true;
                 }
@@ -1660,9 +1672,7 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $query->where('uid', $userId);
-
-                    return true;
+                    return $this->deny('Perubahan absensi siswa wajib melalui sesi absen mandiri atau QR.', 403);
                 }
             }
         }
@@ -2699,6 +2709,112 @@ class DbController extends ApiController
             $inner->whereNull('created_by')
                 ->orWhere('created_by', '!=', $userId);
         });
+    }
+
+    private function validateSiswaAbsensiWritePayload($payload, Request $request, string $userId, $kelas): ?array
+    {
+        $kelas = trim((string) $kelas);
+        if ($userId === '' || $kelas === '') {
+            return [
+                'message' => 'Profil siswa belum lengkap untuk absen mandiri.',
+                'status' => 403,
+            ];
+        }
+
+        $tenantId = $this->currentTenantId ?: $this->tenantId($request);
+        if (! $tenantId) {
+            return [
+                'message' => 'Tenant tidak valid',
+                'status' => 400,
+            ];
+        }
+
+        $rows = $this->normalizeRows($payload);
+        if (empty($rows)) {
+            return [
+                'message' => 'Payload absensi kosong',
+                'status' => 422,
+            ];
+        }
+
+        $now = Carbon::now('Asia/Jakarta');
+        $today = $now->toDateString();
+        $todayName = $this->dayNameForDateKey($today);
+        $clock = $now->format('H:i:s');
+
+        foreach ($rows as $row) {
+            $tanggal = trim((string) ($row['tanggal'] ?? ''));
+            try {
+                $tanggal = Carbon::parse($tanggal, 'Asia/Jakarta')->toDateString();
+            } catch (\Throwable $e) {
+                return [
+                    'message' => 'Tanggal absensi tidak valid',
+                    'status' => 422,
+                ];
+            }
+
+            if ($tanggal !== $today) {
+                return [
+                    'message' => 'Absen mandiri hanya bisa untuk tanggal hari ini.',
+                    'status' => 422,
+                ];
+            }
+
+            $mapel = trim((string) ($row['mapel'] ?? ''));
+            if ($mapel === '') {
+                return [
+                    'message' => 'Mapel wajib diisi untuk absen mandiri.',
+                    'status' => 422,
+                ];
+            }
+
+            if ((string) ($row['status'] ?? '') !== 'Hadir') {
+                return [
+                    'message' => 'Siswa hanya boleh menyimpan status Hadir lewat absen mandiri.',
+                    'status' => 403,
+                ];
+            }
+
+            $jadwalQuery = DB::table('jadwal')
+                ->where('kelas_id', $kelas)
+                ->where('hari', $todayName)
+                ->where('mapel', $mapel)
+                ->where('jam_mulai', '<=', $clock)
+                ->where('jam_selesai', '>=', $clock);
+            $this->applyTenantFilter($jadwalQuery);
+            $this->applyCurrentAcademicPeriodToQuery($jadwalQuery, 'jadwal', $tenantId);
+
+            if (! $jadwalQuery->exists()) {
+                return [
+                    'message' => 'Sesi absensi belum aktif atau sudah ditutup.',
+                    'status' => 403,
+                ];
+            }
+
+            if (! Schema::hasColumn('absensi_settings', 'allow_self_absen')) {
+                return [
+                    'message' => 'Absen mandiri belum dikonfigurasi.',
+                    'status' => 403,
+                ];
+            }
+
+            $settingsQuery = DB::table('absensi_settings')
+                ->where('kelas', $kelas)
+                ->where('tanggal', $tanggal)
+                ->where('mapel', $mapel)
+                ->where('allow_self_absen', true);
+            $this->applyTenantFilter($settingsQuery);
+            $this->applyCurrentAcademicPeriodToQuery($settingsQuery, 'absensi_settings', $tenantId);
+
+            if (! $settingsQuery->exists()) {
+                return [
+                    'message' => 'Absen mandiri belum diizinkan guru.',
+                    'status' => 403,
+                ];
+            }
+        }
+
+        return null;
     }
 
     private function validateGuruJamKosongReplacement(

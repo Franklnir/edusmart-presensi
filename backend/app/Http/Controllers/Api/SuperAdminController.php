@@ -431,6 +431,16 @@ class SuperAdminController extends ApiController
             $this->tenantMqttConfigService->tenantConfig((string) $tenant->id, (string) $tenant->slug, false)
         );
 
+        $template = $this->rfidDeviceService->ensureTenantTemplateDevice(
+            (string) $tenant->id,
+            (string) $tenant->slug
+        );
+        if (! ($template['success'] ?? false)) {
+            return response()->json([
+                'error' => (string) ($template['message'] ?? 'Gagal menyiapkan template RFID tenant'),
+            ], 422);
+        }
+
         try {
             $result = $this->tenantMqttConfigService->provisionMosquittoTenantConfig(
                 (string) $tenant->id,
@@ -538,6 +548,7 @@ class SuperAdminController extends ApiController
         return $this->ok([
             'message' => 'Device berhasil didaftarkan',
             'data' => $result,
+            'mosquitto_sync' => $this->syncMosquittoAclBestEffort(),
         ]);
     }
 
@@ -578,6 +589,7 @@ class SuperAdminController extends ApiController
         return $this->ok([
             'message' => $result['message'] ?? 'Device RFID berhasil dihapus',
             'data' => $result,
+            'mosquitto_sync' => $this->syncMosquittoAclBestEffort(),
         ]);
     }
 
@@ -5040,6 +5052,18 @@ class SuperAdminController extends ApiController
                 'Tambahkan satu device_id untuk setiap ESP32/ESP8266 agar topic dan riwayat alat tidak saling konflik.',
             ],
         ];
+    }
+
+    private function syncMosquittoAclBestEffort(): ?array
+    {
+        try {
+            return $this->tenantMqttConfigService->syncManagedMosquittoFiles();
+        } catch (\Throwable $e) {
+            return [
+                'synced' => false,
+                'error' => $e->getMessage(),
+            ];
+        }
     }
 
     private function renderTenantRfidTopic(string $template, string $tenantSlug, string $deviceId): string

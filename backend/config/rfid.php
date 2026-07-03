@@ -61,6 +61,7 @@ return [
         'bridge_password' => env('RFID_MOSQUITTO_BRIDGE_PASSWORD', ''),
         'tenant_username_prefix' => env('RFID_MOSQUITTO_TENANT_USERNAME_PREFIX', 'edusmart'),
         'topic_prefix' => env('RFID_MOSQUITTO_TOPIC_PREFIX', 'edusmart'),
+        'strict_device_acl' => filter_var(env('RFID_MOSQUITTO_STRICT_DEVICE_ACL', true), FILTER_VALIDATE_BOOL),
         'password_length' => (int) env('RFID_MOSQUITTO_TENANT_PASSWORD_LENGTH', 40),
         'passwd_binary' => env('RFID_MOSQUITTO_PASSWD_BINARY', 'mosquitto_passwd'),
         'file_uid' => (int) env('RFID_MOSQUITTO_FILE_UID', 82),

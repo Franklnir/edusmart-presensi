@@ -1,10 +1,17 @@
 name: edusmart-prod
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: edusmart-postgres
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${DB_DATABASE:?DB_DATABASE is required}
       POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME is required}
@@ -23,6 +30,7 @@ services:
     image: redis:7-alpine
     container_name: edusmart-redis
     restart: unless-stopped
+    logging: *default-logging
     command:
       - redis-server
       - --appendonly
@@ -46,6 +54,7 @@ services:
     image: alpine:3.20
     container_name: edusmart-mosquitto-init
     restart: "no"
+    logging: *default-logging
     environment:
       RFID_MOSQUITTO_PUBLIC_HOST: ${RFID_MOSQUITTO_PUBLIC_HOST:-edusmart-mqtt.local}
     volumes:
@@ -81,6 +90,7 @@ services:
     container_name: edusmart-mosquitto
     restart: unless-stopped
     user: "82:82"
+    logging: *default-logging
     depends_on:
       mosquitto_init:
         condition: service_completed_successfully
@@ -100,6 +110,7 @@ services:
     image: alpine:3.20
     container_name: edusmart-mosquitto-reloader
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       mosquitto:
         condition: service_started
@@ -126,6 +137,7 @@ services:
     image: alpine:3.20
     container_name: edusmart-mosquitto-cert-sync
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       caddy:
         condition: service_started
@@ -185,6 +197,7 @@ services:
     image: postgres:16-alpine
     container_name: edusmart-evolution-postgres
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${EVOLUTION_DB_NAME:-evolution}
       POSTGRES_USER: ${EVOLUTION_DB_USER:-evolution}
@@ -203,6 +216,7 @@ services:
     image: redis:7-alpine
     container_name: edusmart-evolution-redis
     restart: unless-stopped
+    logging: *default-logging
     command:
       - redis-server
       - --appendonly
@@ -226,6 +240,7 @@ services:
     image: ${EVOLUTION_API_IMAGE:-evoapicloud/evolution-api:v2.3.7}
     container_name: edusmart-evolution-api
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       evolution_postgres:
         condition: service_healthy
@@ -274,6 +289,7 @@ services:
     image: ${EDUSMART_BACKEND_IMAGE:?EDUSMART_BACKEND_IMAGE is required. Build and push production images in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-backend
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -342,6 +358,7 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS is required}
       CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-}
       API_RATE_LIMIT_PER_MINUTE: ${API_RATE_LIMIT_PER_MINUTE:-300}
+      PUBLIC_DIRECTORY_RATE_LIMIT_PER_MINUTE: ${PUBLIC_DIRECTORY_RATE_LIMIT_PER_MINUTE:-60}
       DB_RATE_LIMIT_PER_MINUTE: ${DB_RATE_LIMIT_PER_MINUTE:-300}
       DB_GUEST_RATE_LIMIT_PER_MINUTE: ${DB_GUEST_RATE_LIMIT_PER_MINUTE:-360}
       RFID_RATE_LIMIT_PER_MINUTE: ${RFID_RATE_LIMIT_PER_MINUTE:-1200}
@@ -483,6 +500,7 @@ services:
       RFID_MOSQUITTO_BRIDGE_PASSWORD: ${RFID_MOSQUITTO_BRIDGE_PASSWORD:-}
       RFID_MOSQUITTO_TENANT_USERNAME_PREFIX: ${RFID_MOSQUITTO_TENANT_USERNAME_PREFIX:-edusmart}
       RFID_MOSQUITTO_TOPIC_PREFIX: ${RFID_MOSQUITTO_TOPIC_PREFIX:-edusmart}
+      RFID_MOSQUITTO_STRICT_DEVICE_ACL: ${RFID_MOSQUITTO_STRICT_DEVICE_ACL:-true}
       RFID_MOSQUITTO_PASSWD_BINARY: ${RFID_MOSQUITTO_PASSWD_BINARY:-mosquitto_passwd}
       RFID_MOSQUITTO_FILE_UID: ${RFID_MOSQUITTO_FILE_UID:-82}
       RFID_MOSQUITTO_FILE_GID: ${RFID_MOSQUITTO_FILE_GID:-82}
@@ -504,6 +522,7 @@ services:
     image: ${EDUSMART_BACKEND_IMAGE:?EDUSMART_BACKEND_IMAGE is required. Build and push production images in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-worker
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -623,6 +642,7 @@ services:
     image: ${EDUSMART_BACKEND_IMAGE:?EDUSMART_BACKEND_IMAGE is required. Build and push production images in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-scheduler
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -737,6 +757,7 @@ services:
     image: ${EDUSMART_BACKEND_IMAGE:?EDUSMART_BACKEND_IMAGE is required. Build and push production images in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-rfid-bridge
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -836,6 +857,7 @@ services:
       RFID_MOSQUITTO_BRIDGE_PASSWORD: ${RFID_MOSQUITTO_BRIDGE_PASSWORD:-}
       RFID_MOSQUITTO_TENANT_USERNAME_PREFIX: ${RFID_MOSQUITTO_TENANT_USERNAME_PREFIX:-edusmart}
       RFID_MOSQUITTO_TOPIC_PREFIX: ${RFID_MOSQUITTO_TOPIC_PREFIX:-edusmart}
+      RFID_MOSQUITTO_STRICT_DEVICE_ACL: ${RFID_MOSQUITTO_STRICT_DEVICE_ACL:-true}
       RFID_MOSQUITTO_PASSWD_BINARY: ${RFID_MOSQUITTO_PASSWD_BINARY:-mosquitto_passwd}
       RFID_MOSQUITTO_FILE_UID: ${RFID_MOSQUITTO_FILE_UID:-82}
       RFID_MOSQUITTO_FILE_GID: ${RFID_MOSQUITTO_FILE_GID:-82}
@@ -863,6 +885,7 @@ services:
     image: ${EDUSMART_NGINX_IMAGE:?EDUSMART_NGINX_IMAGE is required. Build and push production images in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-nginx
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       backend:
         condition: service_started
@@ -880,6 +903,7 @@ services:
     image: ${EDUSMART_CADDY_IMAGE:?EDUSMART_CADDY_IMAGE is required. Build and push production Caddy WAF image in GitHub Actions, then deploy with --pull-images.}
     container_name: edusmart-caddy
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       nginx:
         condition: service_healthy

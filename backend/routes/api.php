@@ -43,7 +43,7 @@ Route::get('/internal/tls/authorize', [InfrastructureController::class, 'authori
     ]);
 
 Route::get('/mobile/schools', [MobileDirectoryController::class, 'schools'])
-    ->middleware('throttle:api')
+    ->middleware('throttle:public-directory')
     ->withoutMiddleware([
         ResolveTenant::class,
         EnsureTenantMatchesProfile::class,

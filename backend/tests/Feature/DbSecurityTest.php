@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Support\AcademicPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -761,6 +762,146 @@ class DbSecurityTest extends TestCase
         $this->assertSame('Matematika', $rows[0]['mapel'] ?? null);
     }
 
+    public function test_siswa_cannot_bypass_closed_self_attendance_through_db_gateway(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-06 08:30:00', 'Asia/Jakarta'));
+
+        try {
+            $tenantId = $this->defaultTenantId();
+            [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+            $this->seedSelfAttendanceWindow($tenantId, false);
+
+            $response = $this->actingAs($user)->postJson('/api/db', [
+                'table' => 'absensi',
+                'action' => 'upsert',
+                'payload' => [
+                    'tanggal' => '2026-07-06',
+                    'mapel' => 'Matematika',
+                    'kelas' => 'X-2',
+                    'uid' => 'siswa-lain',
+                    'nama' => 'Nama Palsu',
+                    'status' => 'Sakit',
+                    'waktu' => '2099-01-01 00:00:00',
+                    'oleh' => 'admin',
+                ],
+                'onConflict' => 'uid,tanggal,mapel',
+            ]);
+
+            $response->assertForbidden();
+            $response->assertJsonPath('error', 'Absen mandiri belum diizinkan guru.');
+
+            $this->assertDatabaseMissing('absensi', [
+                'tenant_id' => $tenantId,
+                'uid' => $user->id,
+                'tanggal' => '2026-07-06',
+                'mapel' => 'Matematika',
+            ]);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_siswa_self_attendance_db_gateway_forces_server_owned_fields(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-06 08:30:00', 'Asia/Jakarta'));
+
+        try {
+            $tenantId = $this->defaultTenantId();
+            [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+            $this->seedSelfAttendanceWindow($tenantId, true);
+
+            $response = $this->actingAs($user)->postJson('/api/db', [
+                'table' => 'absensi',
+                'action' => 'upsert',
+                'payload' => [
+                    'tanggal' => '2026-07-06',
+                    'mapel' => 'Matematika',
+                    'kelas' => 'X-2',
+                    'uid' => 'siswa-lain',
+                    'nama' => 'Nama Palsu',
+                    'status' => 'Sakit',
+                    'waktu' => '2099-01-01 00:00:00',
+                    'oleh' => 'admin',
+                    'komentar' => 'Hadir lewat portal',
+                ],
+                'onConflict' => 'uid,tanggal,mapel',
+            ]);
+
+            $response->assertOk();
+
+            $row = DB::table('absensi')
+                ->where('tenant_id', $tenantId)
+                ->where('uid', $user->id)
+                ->where('tanggal', '2026-07-06')
+                ->where('mapel', 'Matematika')
+                ->first();
+
+            $this->assertNotNull($row);
+            $this->assertSame('X-1', $row->kelas);
+            $this->assertSame('siswa test', $row->nama);
+            $this->assertSame('Hadir', $row->status);
+            $this->assertSame('siswa', $row->oleh);
+            $this->assertStringStartsWith('2026-07-06 08:30', (string) $row->waktu);
+            $this->assertSame('Hadir lewat portal', $row->komentar);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_siswa_cannot_update_or_delete_absensi_through_db_gateway(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+
+        DB::table('absensi')->insert([
+            'tenant_id' => $tenantId,
+            'uid' => $user->id,
+            'nama' => 'siswa test',
+            'kelas' => 'X-1',
+            'tanggal' => '2026-07-06',
+            'mapel' => 'Matematika',
+            'status' => 'Hadir',
+            'waktu' => '2026-07-06 08:30:00',
+            'oleh' => 'siswa',
+        ]);
+
+        foreach (['update', 'delete'] as $action) {
+            $request = [
+                'table' => 'absensi',
+                'action' => $action,
+                'filters' => [
+                    'eq' => [
+                        'uid' => $user->id,
+                        'tanggal' => '2026-07-06',
+                        'mapel' => 'Matematika',
+                    ],
+                ],
+            ];
+
+            if ($action === 'update') {
+                $request['payload'] = [
+                    'status' => 'Sakit',
+                ];
+            }
+
+            $response = $this->actingAs($user)->postJson('/api/db', $request);
+
+            $response->assertForbidden();
+            $response->assertJsonPath(
+                'error',
+                'Perubahan absensi siswa wajib melalui sesi absen mandiri atau QR.'
+            );
+        }
+
+        $this->assertDatabaseHas('absensi', [
+            'tenant_id' => $tenantId,
+            'uid' => $user->id,
+            'tanggal' => '2026-07-06',
+            'mapel' => 'Matematika',
+            'status' => 'Hadir',
+        ]);
+    }
+
     public function test_guru_cannot_create_tugas_with_past_mulai(): void
     {
         $tenantId = $this->defaultTenantId();
@@ -942,5 +1083,54 @@ class DbSecurityTest extends TestCase
         ]);
 
         return [$user];
+    }
+
+    private function seedSelfAttendanceWindow(string $tenantId, bool $allowSelfAttendance): void
+    {
+        DB::table('settings')->where('tenant_id', $tenantId)->delete();
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Test',
+            'tahun_ajaran' => '2026/2027',
+            'semester_aktif' => 'Ganjil',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('kelas')->insert([
+            'id' => 'X-1',
+            'tenant_id' => $tenantId,
+            'nama' => 'X-1',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('jadwal')->insert([
+            'id' => 'jadwal-matematika',
+            'tenant_id' => $tenantId,
+            'kelas_id' => 'X-1',
+            'hari' => 'Senin',
+            'mapel' => 'Matematika',
+            'jam_mulai' => '08:00:00',
+            'jam_selesai' => '09:00:00',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Ganjil',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('absensi_settings')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'kelas' => 'X-1',
+            'tanggal' => '2026-07-06',
+            'mapel' => 'Matematika',
+            'mode' => 'manual',
+            'allow_self_absen' => $allowSelfAttendance,
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Ganjil',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
     }
 }

@@ -11,7 +11,8 @@ server karena bergantung pada IP admin, IP perangkat RFID, dan panel DNS.
 - `POST /api/db` dan `POST /api/db/batch` sekarang wajib `auth:sanctum`.
 - Branding login/register memakai `GET /api/public/settings`, wrapper publik kecil dengan allowlist field aman dari tabel `settings`.
 - Method API yang salah untuk route API dikembalikan sebagai `404 Not Found` generik.
-- `public/robots.txt` menolak crawler untuk `/api`, `/admin`, dan `/manager`.
+- `public/robots.txt` tidak lagi menyebut `/api`, `/admin`, dan `/manager`
+  agar tidak membocorkan path sensitif ke scanner.
 - Caddy edge proxy menambahkan HSTS untuk host HTTPS production.
 - Caddy production memakai custom image dengan Coraza WAF untuk memblokir probe
   high-confidence: scanner user-agent, path sensitif, SQLi, XSS, dan path traversal.
@@ -19,6 +20,13 @@ server karena bergantung pada IP admin, IP perangkat RFID, dan panel DNS.
   Caddy; `/` dan `/manager*` dikembalikan sebagai `404`.
 - Build frontend dipisah per area role agar kode admin/guru/siswa tidak masuk satu chunk utama.
 - Referensi domain lama diganti ke `sismu.biz.id`.
+- Docker production memakai log rotation `json-file` agar log container tidak
+  memenuhi disk VPS.
+- Nginx dan Caddy WAF memblokir probe fallback sensitif seperti archive backup,
+  dump SQL, `.env`, `.git`, `composer.json`, `package.json`, `actuator`,
+  `telescope`, dan debug path sebelum masuk SPA fallback.
+- Mosquitto memakai limit koneksi/payload dan ACL ketat per device aktif untuk
+  config managed platform.
 
 ## Status VPS 12 Juni 2026
 
@@ -136,6 +144,58 @@ docker compose --env-file .env.production -f docker-compose.prod.yml restart mos
 ```
 
 Port `8883` sebaiknya hanya dibuka untuk IP perangkat RFID sekolah atau lewat VPN.
+
+## Disk VPS dan Log Rotation
+
+Production compose memakai `json-file` log rotation (`10m x 5 file`) untuk
+service utama agar log Docker tidak memenuhi disk. Untuk maintenance berkala,
+jalankan dari root repo di VPS:
+
+```bash
+deploy/scripts/vps_disk_maintenance.sh
+```
+
+Default skrip:
+
+- prune stopped container, network tidak terpakai, build cache lebih lama dari
+  `24h`, dan image tidak terpakai lebih lama dari `168h`;
+- hapus backup `backups/pre-release-*.sql.gz` lebih lama dari `14` hari;
+- vacuum systemd journal lebih lama dari `7d`;
+- beri warning jika free disk root di bawah `2048MB`.
+
+Jika ingin maintenance gagal ketika disk terlalu rendah:
+
+```bash
+EDUSMART_DISK_FAIL_ON_LOW_FREE=true EDUSMART_MIN_FREE_DISK_MB=4096 deploy/scripts/vps_disk_maintenance.sh
+```
+
+## Cloudflare WAAP/CDN dan Zero Trust
+
+Status production `sismu.biz.id`:
+
+- Cloudflare proxy aktif untuk web host publik, sedangkan `mqtt.sismu.biz.id`
+  wajib `DNS only` karena MQTT TLS `8883` tidak lewat proxy HTTP Cloudflare.
+- SSL mode Cloudflare: `Full strict`.
+- Minimum TLS: `1.2`; TLS 1.3, HTTP/3, Brotli, Always HTTPS, dan Automatic HTTPS
+  Rewrites aktif.
+- Cloudflare Managed Free WAF Ruleset aktif bersama custom WAF SISMU.
+- Rate limit plan Free dipakai untuk `POST /api/auth/*`.
+- Cloudflare fitur yang menyuntik script ke HTML dimatikan: Rocket Loader, Bot
+  Fight/JS Detection, Browser Integrity Check, Email Obfuscation, dan Server Side
+  Excludes. Ini menjaga CSP production tetap ketat tanpa error console.
+- Zero Trust organization aktif sebagai `SISMU` dengan team domain
+  `sismu-biz-id.cloudflareaccess.com`.
+
+Jangan pasang Cloudflare Access ke seluruh aplikasi SISMU. Halaman guru, siswa,
+dan admin sekolah harus tetap publik karena aplikasi sudah punya autentikasi
+role sendiri. Gunakan Zero Trust bertahap untuk:
+
+- SSH/VPS via Cloudflare Tunnel atau VPN/bastion;
+- subdomain internal khusus super-admin bila policy email/IdP sudah jelas;
+- panel operasional internal, bukan tenant login publik.
+
+Setelah SSH via Zero Trust/Tunnel stabil, port `22/tcp` di VPS bisa ditutup dari
+publik dan hanya dibuka untuk jalur admin/deploy yang disepakati.
 
 ## Fail2Ban
 

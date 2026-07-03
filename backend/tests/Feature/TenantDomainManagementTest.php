@@ -454,10 +454,11 @@ class TenantDomainManagementTest extends TestCase
         $this->assertStringContainsString('edusmart_bali_rfid:', $passwordContents);
         $this->assertStringNotContainsString($devicePassword, $passwordContents);
         $this->assertStringContainsString('user edusmart_bridge', $aclContents);
-        $this->assertStringContainsString('topic read edusmart/bali/rfid/+/scan', $aclContents);
+        $this->assertStringContainsString('topic read edusmart/bali/rfid/rfid-template-bali-01/scan', $aclContents);
         $this->assertStringContainsString('user edusmart_bali_rfid', $aclContents);
-        $this->assertStringContainsString('topic write edusmart/bali/rfid/+/scan', $aclContents);
-        $this->assertStringContainsString('topic read edusmart/bali/rfid/+/response', $aclContents);
+        $this->assertStringContainsString('topic write edusmart/bali/rfid/rfid-template-bali-01/scan', $aclContents);
+        $this->assertStringContainsString('topic read edusmart/bali/rfid/rfid-template-bali-01/response', $aclContents);
+        $this->assertStringNotContainsString('edusmart/bali/rfid/+/scan', $aclContents);
 
         $this->assertDatabaseHas('tenant_mqtt_configs', [
             'tenant_id' => $tenantId,
