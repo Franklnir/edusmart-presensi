@@ -1,11 +1,11 @@
 # Dokumentasi Endpoint API EduSmart
 
-Tanggal audit: 2026-07-02
+Tanggal audit: 2026-07-03
 
 Dokumen ini merangkum kontrak endpoint API backend EduSmart dari source
 `backend/routes/api.php`, hasil verifikasi `php artisan route:list --path=api`,
 dan pembacaan controller utama. Total endpoint API aplikasi aktif saat audit:
-205 route. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai
+207 route. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai
 API aplikasi.
 
 ## Status Kualitas Dokumen
@@ -225,6 +225,8 @@ Periode aktif disimpan di `settings` tenant:
 Endpoint utama:
 
 - `POST /api/admin/academic-period/apply`
+- `GET /api/admin/academic-period/schedule-decision`
+- `POST /api/admin/academic-period/schedule-decision`
 - `POST /api/admin/academic-period/restore-roster`
 
 Aturan profesional yang sekarang didokumentasikan:
@@ -237,9 +239,13 @@ Aturan profesional yang sekarang didokumentasikan:
 - Snapshot `student_class_histories` dipakai agar profil siswa, laporan, rapor,
   absensi, tugas, quiz, jadwal, dan eskul membaca konteks kelas/periode yang
   benar.
-- Opsi salin jadwal dan salin anggota eskul hanya masuk akal saat maju tepat
-  satu tahun ajaran; saat kembali ke periode lalu data periode itu harus dibaca
-  dari histori/snapshot, bukan disalin ulang.
+- Jadwal tidak disalin saat `apply` periode. Saat admin membuka menu Jadwal
+  untuk periode aktif yang masih kosong, client wajib memanggil
+  `schedule-decision` agar admin memilih buat jadwal baru atau memakai jadwal
+  periode sebelumnya.
+- Opsi salin anggota eskul hanya masuk akal saat maju tepat satu tahun ajaran;
+  saat kembali ke periode lalu data periode itu harus dibaca dari histori atau
+  snapshot, bukan disalin ulang.
 
 Payload utama `apply`:
 
@@ -252,11 +258,26 @@ Payload utama `apply`:
   "periode_genap_mulai": "2027-01-01",
   "periode_genap_selesai": "2027-06-30",
   "auto_rollover": true,
-  "carry_jadwal": true,
   "carry_eskul_members": true,
   "calendar_confirmed": true
 }
 ```
+
+Payload `schedule-decision`:
+
+```json
+{
+  "action": "use_previous",
+  "target_tahun_ajaran": "2026/2027",
+  "source_tahun_ajaran": "2025/2026"
+}
+```
+
+Nilai `action`:
+
+- `start_empty`: admin memilih membuat jadwal baru manual untuk periode aktif.
+- `use_previous`: server menyalin jadwal dari `source_tahun_ajaran` ke periode
+  aktif sebagai baris jadwal baru.
 
 Payload `restore-roster`:
 
@@ -754,7 +775,6 @@ Request minimal:
   "periode_genap_mulai": "2027-01-01",
   "periode_genap_selesai": "2027-06-30",
   "auto_rollover": true,
-  "carry_jadwal": true,
   "carry_eskul_members": true,
   "calendar_confirmed": true
 }
@@ -1006,7 +1026,6 @@ curl -X POST "https://<tenant-host>/api/admin/academic-period/apply" \
     "periode_genap_mulai": "2027-01-01",
     "periode_genap_selesai": "2027-06-30",
     "auto_rollover": true,
-    "carry_jadwal": true,
     "carry_eskul_members": true,
     "calendar_confirmed": true
   }'
@@ -1032,7 +1051,7 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 
 Katalog ini digenerate ulang pada 2026-07-02 dari `php artisan route:list --json --path=api` dan hanya memasukkan route aplikasi dengan URI `api/*`. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai API aplikasi.
 
-Total route API aplikasi aktif: 205.
+Total route API aplikasi aktif: 207.
 
 ### Admin
 
@@ -1041,6 +1060,8 @@ Total route API aplikasi aktif: 205.
 | `POST` | `/api/admin/academic-period/apply` | `AdminController@applyAcademicPeriod` | Sanctum |
 | `POST` | `/api/admin/academic-period/copy-structure` | `AdminController@copyAcademicStructure` | Sanctum |
 | `POST` | `/api/admin/academic-period/restore-roster` | `AdminController@restoreAcademicPeriodRoster` | Sanctum |
+| `GET` | `/api/admin/academic-period/schedule-decision` | `AdminController@schedulePeriodDecisionStatus` | Sanctum |
+| `POST` | `/api/admin/academic-period/schedule-decision` | `AdminController@resolveSchedulePeriodDecision` | Sanctum |
 | `GET` | `/api/admin/academic-rollover-exceptions` | `AdminController@academicRolloverExceptions` | Sanctum |
 | `PUT` | `/api/admin/academic-rollover-exceptions` | `AdminController@replaceAcademicRolloverExceptions` | Sanctum |
 | `GET` | `/api/admin/academic-summary` | `AdminController@academicSummary` | Sanctum |
