@@ -1065,9 +1065,9 @@ export default function APengaturan() {
     if (yearChanged) {
       const confirmedYear = yearMovesForwardOneStep
         ? await requestConfirmation({
-            title: 'Ubah tahun ajaran aktif?',
-            message: `Periode tahun ajaran akan berubah dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`,
-            confirmText: 'Ya, rollover otomatis',
+            title: 'Konfirmasi ubah tahun ajaran aktif',
+            message: `Periode aktif akan berubah dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}. Setelah disimpan, sistem akan menjalankan rollover siswa dan admin akan memilih keputusan jadwal dari menu Jadwal jika jadwal periode baru masih kosong.`,
+            confirmText: 'Ya, ubah periode',
             cancelText: 'Batal',
             tone: 'warning',
             details: [
@@ -1081,11 +1081,11 @@ export default function APengaturan() {
             ]
           })
         : await requestConfirmation({
-            title: yearMovesBackward ? 'Koreksi periode aktif?' : 'Tahun ajaran tidak berurutan',
+            title: yearMovesBackward ? 'Konfirmasi koreksi periode aktif' : 'Konfirmasi tahun ajaran tidak berurutan',
             message: yearMovesBackward
               ? `Periode aktif akan dikoreksi dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`
               : `Periode aktif akan berubah dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`,
-            confirmText: yearMovesBackward ? 'Ya, koreksi periode' : 'Cek ke server',
+            confirmText: yearMovesBackward ? 'Ya, koreksi periode' : 'Ya, cek ke server',
             cancelText: 'Batal',
             tone: 'warning',
             details: [

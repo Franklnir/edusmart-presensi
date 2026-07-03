@@ -634,11 +634,51 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const resolveScheduleDecision = useCallback(async (action) => {
     if (!isSchedulePage || !scheduleDecisionStatus?.requires_decision || scheduleDecisionAction) return
 
+    const targetYear = scheduleDecisionStatus.target_tahun_ajaran || schedulePeriod.tahunAjaran || '-'
+    const sourceYear = scheduleDecisionStatus.source_tahun_ajaran || '-'
+    const sourceCount = Number(scheduleDecisionStatus.source_schedule_count || 0)
+    const targetCount = Number(scheduleDecisionStatus.target_schedule_count || 0)
+
+    let confirmed = false
+    if (action === 'start_empty') {
+      confirmed = await requestConfirmation({
+        title: 'Buat jadwal baru periode ini?',
+        message: `Periode ${targetYear} akan dibuka tanpa menyalin jadwal periode sebelumnya.`,
+        confirmText: 'Ya, buat baru',
+        cancelText: 'Batal',
+        tone: 'warning',
+        details: [
+          `Jadwal periode ${targetYear} saat ini ${targetCount.toLocaleString('id-ID')} baris.`,
+          'Admin perlu mengisi jadwal periode ini secara manual.',
+          `Jadwal periode sebelumnya (${sourceYear}) tetap tersimpan dan tidak diubah.`
+        ]
+      })
+    } else if (action === 'use_previous') {
+      if (sourceCount <= 0) {
+        pushToast('warning', 'Jadwal periode sebelumnya belum tersedia, jadi admin perlu membuat jadwal baru.')
+        return
+      }
+      confirmed = await requestConfirmation({
+        title: 'Pakai jadwal periode sebelumnya?',
+        message: `Jadwal periode ${sourceYear} akan disalin menjadi jadwal baru untuk periode ${targetYear}.`,
+        confirmText: 'Pakai jadwal lama',
+        cancelText: 'Batal',
+        tone: 'warning',
+        details: [
+          `Jadwal periode sebelumnya: ${sourceCount.toLocaleString('id-ID')} baris.`,
+          `Jadwal periode ${targetYear} saat ini: ${targetCount.toLocaleString('id-ID')} baris.`,
+          'Data yang dibuat akan memakai tahun ajaran target, bukan membuka arsip periode lama.'
+        ]
+      })
+    }
+
+    if (!confirmed) return
+
     setScheduleDecisionAction(action)
     try {
       const { data, error } = await supabase.admin.resolveSchedulePeriodDecision({
         action,
-        target_tahun_ajaran: scheduleDecisionStatus.target_tahun_ajaran || schedulePeriod.tahunAjaran,
+        target_tahun_ajaran: targetYear,
         source_tahun_ajaran: scheduleDecisionStatus.source_tahun_ajaran || undefined
       })
       if (error) throw error
@@ -667,6 +707,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
     isSchedulePage,
     loadSelectedClassData,
     pushToast,
+    requestConfirmation,
     scheduleDecisionAction,
     scheduleDecisionStatus,
     schedulePeriod.tahunAjaran

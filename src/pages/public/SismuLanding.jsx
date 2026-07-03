@@ -48,6 +48,7 @@ import {
   Zap
 } from 'lucide-react'
 import { getAdminSubdomain, getRootDomain } from '../../utils/marketingHost'
+import { landingFeatureCards, sismuLandingPainPoints } from '../../data/sismuFeatureDataset'
 
 const whatsappUrl =
   'https://wa.me/6289531832365?text=Halo%20SISMU%2C%20saya%20ingin%20konsultasi%20paket%20untuk%20sekolah'
@@ -99,47 +100,8 @@ const iconMap = {
   zap: Zap
 }
 
-const problems = [
-  {
-    icon: 'file-spreadsheet',
-    title: 'Data masih tersebar',
-    desc: 'Data siswa, guru, kelas, dan presensi sering berada di banyak file sehingga rawan salah versi.'
-  },
-  {
-    icon: 'clock',
-    title: 'Rekap presensi lambat',
-    desc: 'Absensi manual membuat laporan harian, bulanan, dan rekap kehadiran memakan waktu.'
-  },
-  {
-    icon: 'message-circle-warning',
-    title: 'Informasi terlambat',
-    desc: 'Wali murid sering menerima informasi kehadiran atau tugas setelah proses rekap selesai.'
-  },
-  {
-    icon: 'database-backup',
-    title: 'Data rawan hilang',
-    desc: 'Tanpa backup yang rapi, data penting bisa hilang karena file rusak atau human error.'
-  }
-]
-
-const features = [
-  { cat: 'data', icon: 'users', title: 'Manajemen Siswa', desc: 'Data siswa, kelas, status aktif, dan identitas sekolah tersimpan rapi.' },
-  { cat: 'data', icon: 'user-cog', title: 'Manajemen Guru', desc: 'Kelola data guru, wali kelas, dan informasi profil guru.' },
-  { cat: 'data', icon: 'school', title: 'Manajemen Kelas', desc: 'Atur kelas, rombel, wali kelas, dan anggota kelas per tahun ajaran.' },
-  { cat: 'akademik', icon: 'calendar-days', title: 'Jadwal Pelajaran', desc: 'Susun jadwal yang berlaku untuk satu tahun ajaran dengan opsi fleksibel.' },
-  { cat: 'presensi', icon: 'qr-code', title: 'Presensi QR Code', desc: 'Presensi cepat melalui QR sesuai aturan sekolah.' },
-  { cat: 'presensi', icon: 'radio', title: 'Presensi RFID', desc: 'Tap kartu RFID untuk mencatat masuk dan pulang lebih cepat.' },
-  { cat: 'presensi', icon: 'user-check-2', title: 'Absensi Guru', desc: 'Pantau kehadiran guru dan jam kosong secara digital.' },
-  { cat: 'akademik', icon: 'file-text', title: 'Tugas Digital', desc: 'Guru membuat tugas, siswa mengumpulkan jawaban dan lampiran online.' },
-  { cat: 'akademik', icon: 'circle-help', title: 'Quiz Online', desc: 'Buat quiz, soal gambar, esai, dan rekap nilai dalam satu modul.' },
-  { cat: 'akademik', icon: 'bar-chart-3', title: 'Nilai & Laporan', desc: 'Rekap nilai quiz, tugas, absensi, dan laporan kelas lebih tertata.' },
-  { cat: 'akademik', icon: 'award', title: 'Sertifikat Digital', desc: 'Generate sertifikat kegiatan atau prestasi siswa.' },
-  { cat: 'data', icon: 'users-2', title: 'Ekstrakurikuler', desc: 'Kelola anggota, pembina, jadwal, dan absensi ekskul.' },
-  { cat: 'sistem', icon: 'building', title: 'Multi Sekolah', desc: 'Setiap sekolah memiliki data dan akses tenant terpisah.' },
-  { cat: 'sistem', icon: 'globe', title: 'Subdomain Sekolah', desc: 'Sekolah bisa punya alamat akses khusus yang mudah diingat.' },
-  { cat: 'sistem', icon: 'database-backup', title: 'Backup & Restore', desc: 'Data sekolah dapat dicadangkan dan dipulihkan saat diperlukan.' },
-  { cat: 'komunikasi', icon: 'send', title: 'Notifikasi', desc: 'Siapkan alur notifikasi untuk presensi, tugas, dan informasi penting.' }
-]
+const problems = sismuLandingPainPoints
+const features = landingFeatureCards
 
 const benefits = [
   { icon: 'folder-check', title: 'Administrasi lebih tertata', desc: 'Data sekolah tersimpan dalam modul yang saling terhubung.' },
