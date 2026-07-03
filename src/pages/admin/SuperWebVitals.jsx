@@ -75,6 +75,7 @@ const roleLabel = {
 }
 
 const numberFormatter = new Intl.NumberFormat('id-ID')
+const tableScrollStyle = { maxHeight: '35rem' }
 const formatNumber = (value) => numberFormatter.format(Number(value || 0))
 const formatMs = (value) => {
   if (value === null || value === undefined || value === '') return '-'
@@ -173,9 +174,9 @@ function RouteTable({ rows = [] }) {
         <h2 className="text-base font-bold text-slate-950">Halaman Paling Perlu Dipantau</h2>
         <p className="mt-1 text-sm text-slate-500">Diurutkan dari status terburuk dan p75 LCP tertinggi.</p>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-auto" style={tableScrollStyle}>
         <table className="min-w-full divide-y divide-slate-100">
-          <thead className="bg-slate-50">
+          <thead className="sticky top-0 z-10 bg-slate-50">
             <tr>
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Halaman</th>
               <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Sample</th>
@@ -188,7 +189,7 @@ function RouteTable({ rows = [] }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((row) => (
-              <tr key={row.key} className="hover:bg-slate-50/70">
+              <tr key={row.key} className="h-16 hover:bg-slate-50/70">
                 <td className="max-w-[320px] px-5 py-4">
                   <p className="truncate text-sm font-bold text-slate-950" title={row.label}>{row.label}</p>
                   {row.tenant_slug ? <p className="mt-1 text-xs text-slate-500">{row.tenant_slug}</p> : null}
@@ -370,9 +371,9 @@ export default function SuperWebVitals() {
               Terakhir sinkron: {data?.generated_at ? formatDateTime(data.generated_at) : '-'}
             </p>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-auto" style={tableScrollStyle}>
             <table className="min-w-full divide-y divide-slate-100">
-              <thead className="bg-slate-50">
+              <thead className="sticky top-0 z-10 bg-slate-50">
                 <tr>
                   <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Waktu</th>
                   <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Sekolah</th>
@@ -384,7 +385,7 @@ export default function SuperWebVitals() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(data?.recent || []).length ? data.recent.map((row, index) => (
-                  <tr key={`${row.created_at}-${index}`} className="hover:bg-slate-50/70">
+                  <tr key={`${row.created_at}-${index}`} className="h-16 hover:bg-slate-50/70">
                     <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">{row.created_at ? formatDateTime(row.created_at) : '-'}</td>
                     <td className="px-5 py-4 text-sm font-semibold text-slate-800">{row.tenant_name || row.tenant_slug || '-'}</td>
                     <td className="max-w-[320px] px-5 py-4 text-sm font-semibold text-slate-800">

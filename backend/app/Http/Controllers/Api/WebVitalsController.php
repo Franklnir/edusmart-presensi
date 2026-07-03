@@ -241,7 +241,7 @@ class WebVitalsController extends ApiController
             'range' => $range,
             'since' => now()->subDays(self::RANGE_DAYS[$range])->toISOString(),
             'limits' => [],
-            'filters' => ['tenants' => []],
+            'filters' => ['tenants' => $this->tenantOptions()],
             'summary' => $this->summarizeGroup(collect()),
             'routes' => [],
             'tenants' => [],
@@ -253,12 +253,23 @@ class WebVitalsController extends ApiController
 
     private function tenantOptions(): array
     {
-        return DB::table(self::TABLE.' as w')
-            ->leftJoin('tenants as t', 't.id', '=', 'w.tenant_id')
-            ->whereNotNull('w.tenant_id')
-            ->select('w.tenant_id as id', 't.name', 't.slug')
-            ->distinct()
-            ->orderBy('t.name')
+        if (! Schema::hasTable('tenants')) {
+            return [];
+        }
+
+        $query = DB::table('tenants')
+            ->select('id', 'name', 'slug');
+
+        if (Schema::hasColumn('tenants', 'status')) {
+            $query->where(function ($statusQuery) {
+                $statusQuery
+                    ->whereNull('status')
+                    ->orWhereNotIn('status', ['deleted', 'archived']);
+            });
+        }
+
+        return $query
+            ->orderBy('name')
             ->limit(200)
             ->get()
             ->map(fn ($row) => [
