@@ -82,7 +82,7 @@ jobs:
           set -euo pipefail
           cat > dist/_headers <<'HEADERS'
           /*
-            Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:
+            Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:
             Cross-Origin-Opener-Policy: same-origin-allow-popups
             Cross-Origin-Resource-Policy: same-site
             Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=()
@@ -125,6 +125,9 @@ jobs:
               return true
             }
             decoded = decoded.toLowerCase()
+            if (decoded.startsWith('/assets/')) {
+              return false
+            }
             return SENSITIVE_FILE_PATTERN.test(decoded)
           }
 
