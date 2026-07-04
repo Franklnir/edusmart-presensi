@@ -115,6 +115,29 @@ jobs:
             BACKEND_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'))
           )
 
+          const SENSITIVE_FILE_PATTERN = /(?:^|\/)(?:\.env|\.git|backup|backups|dump|database)(?:[./_-]|$)|\.(?:7z|bak|backup|conf|config|env|gz|ini|key|log|old|pem|phar|php|rar|sql|tar|tgz|xz|zip)$/i
+
+          const isSensitiveFileProbe = (pathname) => {
+            let decoded = String(pathname || '')
+            try {
+              decoded = decodeURIComponent(decoded)
+            } catch {
+              return true
+            }
+            decoded = decoded.toLowerCase()
+            return SENSITIVE_FILE_PATTERN.test(decoded)
+          }
+
+          const notFound = () => new Response('Not Found', {
+            status: 404,
+            headers: {
+              'Cache-Control': 'no-store',
+              'Content-Type': 'text/plain; charset=utf-8',
+              'X-Content-Type-Options': 'nosniff',
+              'X-Robots-Tag': 'noindex, nofollow'
+            }
+          })
+
           const isPlatformUtilityHost = (hostname) => {
             const host = String(hostname || '').toLowerCase()
             const root = String(ROOT_DOMAIN || '').toLowerCase()
@@ -167,6 +190,10 @@ jobs:
               const url = new URL(request.url)
               if (isBackendPath(url.pathname)) {
                 return proxyBackend(request)
+              }
+
+              if (isSensitiveFileProbe(url.pathname)) {
+                return notFound()
               }
 
               return env.ASSETS.fetch(request)
