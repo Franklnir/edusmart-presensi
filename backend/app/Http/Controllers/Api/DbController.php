@@ -2343,14 +2343,27 @@ class DbController extends ApiController
                 $wali = $this->guruWaliKelasIds($userId);
                 $kelasAmpu = $this->guruRapotKelasIds($userId);
                 $kelasAllowed = $this->expandKelasAccessValues(array_merge($wali, $kelasAmpu));
-                $query->where(function ($scope) use ($kelasAllowed, $userId) {
+                $tenantId = $this->currentTenantId;
+                $query->where(function ($scope) use ($kelasAllowed, $userId, $tenantId) {
                     if (! empty($kelasAllowed)) {
                         $scope->whereIn('kelas_id', $kelasAllowed);
                     } else {
                         $scope->whereRaw('1 = 0');
                     }
                     $scope->orWhere('created_by', $userId)
-                        ->orWhere('updated_by', $userId);
+                        ->orWhere('updated_by', $userId)
+                        ->orWhereExists(function ($sub) use ($userId, $tenantId) {
+                            $sub->selectRaw('1')
+                                ->from('kelas_struktur as ks')
+                                ->where('ks.wali_guru_id', $userId)
+                                ->whereColumn('ks.kelas_id', 'rapot_siswa.kelas_id');
+                            if ($tenantId && $this->isSelectableColumn('kelas_struktur', 'tenant_id')) {
+                                $sub->where('ks.tenant_id', $tenantId);
+                            }
+                            if ($this->isSelectableColumn('kelas_struktur', 'tahun_ajaran') && $this->isSelectableColumn('rapot_siswa', 'tahun_pelajaran')) {
+                                $sub->whereColumn('ks.tahun_ajaran', 'rapot_siswa.tahun_pelajaran');
+                            }
+                        });
                 });
 
                 if (in_array($action, ['insert', 'upsert'], true)) {
@@ -2439,14 +2452,26 @@ class DbController extends ApiController
                 $query->whereIn('rapot_id', function ($q) use ($kelasAllowed, $userId, $tenantId) {
                     $q->select('id')
                         ->from('rapot_siswa')
-                        ->where(function ($owner) use ($kelasAllowed, $userId) {
+                        ->where(function ($owner) use ($kelasAllowed, $userId, $tenantId) {
                             if (! empty($kelasAllowed)) {
                                 $owner->whereIn('kelas_id', $kelasAllowed);
                             } else {
                                 $owner->whereRaw('1 = 0');
                             }
                             $owner->orWhere('created_by', $userId)
-                                ->orWhere('updated_by', $userId);
+                                ->orWhere('updated_by', $userId)
+                                ->orWhereExists(function ($sub) use ($userId, $tenantId) {
+                                    $sub->selectRaw('1')
+                                        ->from('kelas_struktur as ks')
+                                        ->where('ks.wali_guru_id', $userId)
+                                        ->whereColumn('ks.kelas_id', 'rapot_siswa.kelas_id');
+                                    if ($tenantId && $this->isSelectableColumn('kelas_struktur', 'tenant_id')) {
+                                        $sub->where('ks.tenant_id', $tenantId);
+                                    }
+                                    if ($this->isSelectableColumn('kelas_struktur', 'tahun_ajaran') && $this->isSelectableColumn('rapot_siswa', 'tahun_pelajaran')) {
+                                        $sub->whereColumn('ks.tahun_ajaran', 'rapot_siswa.tahun_pelajaran');
+                                    }
+                                });
                         });
                     if ($tenantId) {
                         $q->where('tenant_id', $tenantId);
@@ -2467,7 +2492,7 @@ class DbController extends ApiController
                         ->whereIn('id', $rapotIds);
                     $this->applyTenantFilterAllowingLegacyNull($allowedRapotQuery);
                     $allowedRapotRows = $allowedRapotQuery
-                        ->get(['id', 'siswa_id', 'kelas_id', 'locked_at', 'created_by', 'updated_by'])
+                        ->get($this->existingColumns('rapot_siswa', ['id', 'siswa_id', 'kelas_id', 'tahun_pelajaran', 'locked_at', 'created_by', 'updated_by']))
                         ->keyBy('id');
                     if ($allowedRapotRows->count() !== count($rapotIds)) {
                         return $this->deny('Rapot tidak ditemukan untuk tenant sekolah ini', 404);
@@ -2481,6 +2506,7 @@ class DbController extends ApiController
                         $rapotPayloadRow = [
                             'kelas_id' => $rapot->kelas_id,
                             'siswa_id' => $rapot->siswa_id,
+                            'tahun_pelajaran' => $rapot->tahun_pelajaran ?? null,
                         ];
                         $isRapotEditor = (string) ($rapot->created_by ?? '') === $userId
                             || (string) ($rapot->updated_by ?? '') === $userId;
@@ -2497,7 +2523,7 @@ class DbController extends ApiController
                         if ($rapot->locked_at && ! $isWaliClass) {
                             return $this->deny('Rapot dikunci wali kelas. Harap hubungi wali kelas untuk membuka kunci.', 423);
                         }
-                        if (! $isWaliClass && ! $this->guruCanTeachMapelInKelas($userId, (string) $rapot->kelas_id, $mapel)) {
+                        if (! $isWaliClass && ! $this->guruCanTeachMapelInKelas($userId, (string) $rapot->kelas_id, $mapel, $rapot->tahun_pelajaran ?? null)) {
                             return $this->deny('Mapel rapot bukan mapel yang Anda ampu di kelas ini', 403);
                         }
                     }
@@ -4178,7 +4204,18 @@ class DbController extends ApiController
                     if ($hasTenantColumn) {
                         unset($update['tenant_id']);
                     }
-                    DB::table($table)->where('id', $existing->id)->update($update);
+                    $updateQuery = DB::table($table);
+                    if ($this->isSelectableColumn($table, 'id') && isset($existing->id)) {
+                        $updateQuery->where('id', $existing->id);
+                    } else {
+                        if ($hasTenantColumn) {
+                            $updateQuery->where('tenant_id', $tenantId);
+                        }
+                        foreach ($uniqueBy as $col) {
+                            $updateQuery->where($col, $row[$col] ?? null);
+                        }
+                    }
+                    $updateQuery->update($update);
                     $results[] = (object) array_merge((array) $existing, $update);
 
                     continue;
@@ -4401,6 +4438,34 @@ class DbController extends ApiController
             ->where('semester', $period['semester']);
     }
 
+    private function applyCurrentAcademicYearToQuery($query, string $table, ?string $tenantId = null): void
+    {
+        $period = $this->currentAcademicPeriodForTenant($tenantId ?: $this->currentTenantId);
+        $this->applyAcademicYearToQuery($query, $table, $period['tahun_ajaran'] ?? null);
+    }
+
+    private function applyAcademicYearToQuery($query, string $table, mixed $academicYear, bool $includeLegacyBlank = false): void
+    {
+        if (! $this->isSelectableColumn($table, 'tahun_ajaran')) {
+            return;
+        }
+
+        $year = AcademicPeriod::normalizeAcademicYear($academicYear);
+        if ($year !== null && $year !== '') {
+            if ($includeLegacyBlank) {
+                $query->where(function ($scope) use ($year) {
+                    $scope->where('tahun_ajaran', $year)
+                        ->orWhereNull('tahun_ajaran')
+                        ->orWhere('tahun_ajaran', '');
+                });
+
+                return;
+            }
+
+            $query->where('tahun_ajaran', $year);
+        }
+    }
+
     private function attachAcademicPeriodRows(string $table, array $rows, ?string $tenantId): array
     {
         if (in_array($table, self::ACADEMIC_CHILD_SNAPSHOT_TABLES, true)) {
@@ -4422,6 +4487,14 @@ class DbController extends ApiController
         return array_map(function ($row) use ($table, $tenantId, $period, $hasPeriodColumns, $hasCohortColumn) {
             if (! is_array($row)) {
                 return $row;
+            }
+
+            if (
+                $table === 'kelas_struktur'
+                && $this->isSelectableColumn($table, 'id')
+                && trim((string) ($row['id'] ?? '')) === ''
+            ) {
+                $row['id'] = (string) Str::uuid();
             }
 
             if ($hasPeriodColumns) {
@@ -4779,6 +4852,7 @@ class DbController extends ApiController
 
         $waliQuery = DB::table('kelas_struktur')->where('wali_guru_id', $userId);
         $this->applyTenantFilterAllowingLegacyNull($waliQuery);
+        $this->applyCurrentAcademicYearToQuery($waliQuery, 'kelas_struktur');
         $wali = $waliQuery
             ->distinct()
             ->pluck('kelas_id')
@@ -4800,6 +4874,7 @@ class DbController extends ApiController
 
         $waliQuery = DB::table('kelas_struktur')->where('wali_guru_id', $userId);
         $this->applyTenantFilterAllowingLegacyNull($waliQuery);
+        $this->applyCurrentAcademicYearToQuery($waliQuery, 'kelas_struktur');
         $wali = $waliQuery
             ->distinct()
             ->pluck('kelas_id')
@@ -5835,7 +5910,7 @@ class DbController extends ApiController
         return $error;
     }
 
-    private function guruCanTeachMapelInKelas(string $guruId, string $kelasId, string $mapel): bool
+    private function guruCanTeachMapelInKelas(string $guruId, string $kelasId, string $mapel, ?string $academicYear = null): bool
     {
         $kelasId = trim($kelasId);
         $mapelNeedle = strtolower(trim($mapel));
@@ -5848,6 +5923,7 @@ class DbController extends ApiController
             ->where('guru_id', $guruId)
             ->whereIn('kelas_id', $this->expandKelasAccessValues([$kelasId]));
         $this->applyTenantFilterAllowingLegacyNull($jadwalQuery);
+        $this->applyAcademicYearToQuery($jadwalQuery, 'jadwal', $academicYear, true);
         $mapelRows = $jadwalQuery->pluck('mapel')->filter()->all();
 
         foreach ($mapelRows as $mapelRow) {
@@ -5862,6 +5938,7 @@ class DbController extends ApiController
                 ->whereIn('kelas_id', $this->expandKelasAccessValues([$kelasId]))
                 ->whereNotNull('mapel');
             $this->applyTenantFilterAllowingLegacyNull($tugasQuery);
+            $this->applyAcademicYearToQuery($tugasQuery, 'tugas', $academicYear, true);
             foreach ($tugasQuery->distinct()->pluck('mapel')->all() as $mapelRow) {
                 if (strtolower(trim((string) $mapelRow)) === $mapelNeedle) {
                     return true;
@@ -5874,6 +5951,7 @@ class DbController extends ApiController
                 ->where('created_by', $guruId)
                 ->whereNotNull('mapel');
             $this->applyTenantFilterAllowingLegacyNull($tugasKelasQuery);
+            $this->applyAcademicYearToQuery($tugasKelasQuery, 'tugas', $academicYear, true);
             foreach ($tugasKelasQuery->distinct()->get(['kelas', 'mapel']) as $row) {
                 if (
                     in_array($this->normalizeKelasAccessValue($row->kelas ?? ''), $kelasNeedles, true) &&
@@ -5890,6 +5968,7 @@ class DbController extends ApiController
                 ->whereIn('kelas_id', $this->expandKelasAccessValues([$kelasId]))
                 ->whereNotNull('mapel');
             $this->applyTenantFilterAllowingLegacyNull($quizQuery);
+            $this->applyAcademicYearToQuery($quizQuery, 'quizzes', $academicYear, true);
             foreach ($quizQuery->distinct()->pluck('mapel')->all() as $mapelRow) {
                 if (strtolower(trim((string) $mapelRow)) === $mapelNeedle) {
                     return true;
@@ -5934,6 +6013,7 @@ class DbController extends ApiController
                 ->where('wali_guru_id', $guruId)
                 ->whereIn('kelas_id', $kelasAliases);
             $this->applyTenantFilterAllowingLegacyNull($waliQuery);
+            $this->applyAcademicYearToQuery($waliQuery, 'kelas_struktur', $row['tahun_pelajaran'] ?? $row['tahun_ajaran'] ?? null);
             if ($waliQuery->exists()) {
                 return true;
             }
@@ -5944,6 +6024,7 @@ class DbController extends ApiController
                 ->where('guru_id', $guruId)
                 ->whereIn('kelas_id', $kelasAliases);
             $this->applyTenantFilterAllowingLegacyNull($jadwalQuery);
+            $this->applyAcademicYearToQuery($jadwalQuery, 'jadwal', $row['tahun_pelajaran'] ?? $row['tahun_ajaran'] ?? null, true);
             if ($jadwalQuery->exists()) {
                 return true;
             }
@@ -5954,6 +6035,7 @@ class DbController extends ApiController
                 ->where('created_by', $guruId)
                 ->whereIn('kelas_id', $kelasAliases);
             $this->applyTenantFilterAllowingLegacyNull($tugasQuery);
+            $this->applyAcademicYearToQuery($tugasQuery, 'tugas', $row['tahun_pelajaran'] ?? $row['tahun_ajaran'] ?? null, true);
             if ($tugasQuery->exists()) {
                 return true;
             }
@@ -5964,6 +6046,7 @@ class DbController extends ApiController
                 ->where('created_by', $guruId)
                 ->whereNotNull('kelas');
             $this->applyTenantFilterAllowingLegacyNull($tugasKelasQuery);
+            $this->applyAcademicYearToQuery($tugasKelasQuery, 'tugas', $row['tahun_pelajaran'] ?? $row['tahun_ajaran'] ?? null, true);
             foreach ($tugasKelasQuery->distinct()->pluck('kelas')->all() as $kelas) {
                 if (in_array($this->normalizeKelasAccessValue($kelas), $kelasKeys, true)) {
                     return true;
@@ -5976,6 +6059,7 @@ class DbController extends ApiController
                 ->where('guru_id', $guruId)
                 ->whereIn('kelas_id', $kelasAliases);
             $this->applyTenantFilterAllowingLegacyNull($quizQuery);
+            $this->applyAcademicYearToQuery($quizQuery, 'quizzes', $row['tahun_pelajaran'] ?? $row['tahun_ajaran'] ?? null, true);
             if ($quizQuery->exists()) {
                 return true;
             }
@@ -6009,6 +6093,7 @@ class DbController extends ApiController
             ->where('wali_guru_id', $guruId)
             ->whereIn('kelas_id', $kelasAliases);
         $this->applyTenantFilterAllowingLegacyNull($waliQuery);
+        $this->applyAcademicYearToQuery($waliQuery, 'kelas_struktur', $row['tahun_pelajaran'] ?? $row['tahun_ajaran'] ?? null);
 
         return $waliQuery->exists();
     }

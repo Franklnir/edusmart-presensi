@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\AcademicPeriod;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -409,10 +410,13 @@ class AdminFeaturePermissionController extends ApiController
             return [];
         }
 
-        return DB::table('struktur_sekolah')
+        $query = DB::table('struktur_sekolah')
             ->where('tenant_id', $tenantId)
             ->select('id', 'jabatan', 'guru_id', 'guru_nama')
-            ->orderBy('jabatan')
+            ->orderBy('jabatan');
+        $this->scopeActiveAcademicYear($query, 'struktur_sekolah', $tenantId);
+
+        return $query
             ->get()
             ->map(fn ($row) => [
                 'id' => (string) ($row->id ?? ''),
@@ -431,10 +435,13 @@ class AdminFeaturePermissionController extends ApiController
             return [];
         }
 
-        return DB::table('kelas_struktur')
+        $query = DB::table('kelas_struktur')
             ->where('tenant_id', $tenantId)
             ->select('kelas_id', 'wali_guru_id', 'wali_guru_nama')
-            ->orderBy('kelas_id')
+            ->orderBy('kelas_id');
+        $this->scopeActiveAcademicYear($query, 'kelas_struktur', $tenantId);
+
+        return $query
             ->get()
             ->map(fn ($row) => [
                 'kelas_id' => (string) ($row->kelas_id ?? ''),
@@ -466,9 +473,12 @@ class AdminFeaturePermissionController extends ApiController
             return null;
         }
 
-        return DB::table('struktur_sekolah')
+        $query = DB::table('struktur_sekolah')
             ->where('tenant_id', $tenantId)
-            ->where('id', $positionId)
+            ->where('id', $positionId);
+        $this->scopeActiveAcademicYear($query, 'struktur_sekolah', $tenantId);
+
+        return $query
             ->first();
     }
 
@@ -478,30 +488,41 @@ class AdminFeaturePermissionController extends ApiController
             return null;
         }
 
-        return DB::table('kelas_struktur')
+        $query = DB::table('kelas_struktur')
             ->where('tenant_id', $tenantId)
-            ->where('kelas_id', $classId)
+            ->where('kelas_id', $classId);
+        $this->scopeActiveAcademicYear($query, 'kelas_struktur', $tenantId);
+
+        return $query
             ->first();
     }
 
     private function teacherHasPosition(string $tenantId, string $teacherId): bool
     {
-        return $teacherId !== ''
-            && Schema::hasTable('struktur_sekolah')
-            && DB::table('struktur_sekolah')
-                ->where('tenant_id', $tenantId)
-                ->where('guru_id', $teacherId)
-                ->exists();
+        if ($teacherId === '' || ! Schema::hasTable('struktur_sekolah')) {
+            return false;
+        }
+
+        $query = DB::table('struktur_sekolah')
+            ->where('tenant_id', $tenantId)
+            ->where('guru_id', $teacherId);
+        $this->scopeActiveAcademicYear($query, 'struktur_sekolah', $tenantId);
+
+        return $query->exists();
     }
 
     private function teacherHasHomeroom(string $tenantId, string $teacherId): bool
     {
-        return $teacherId !== ''
-            && Schema::hasTable('kelas_struktur')
-            && DB::table('kelas_struktur')
-                ->where('tenant_id', $tenantId)
-                ->where('wali_guru_id', $teacherId)
-                ->exists();
+        if ($teacherId === '' || ! Schema::hasTable('kelas_struktur')) {
+            return false;
+        }
+
+        $query = DB::table('kelas_struktur')
+            ->where('tenant_id', $tenantId)
+            ->where('wali_guru_id', $teacherId);
+        $this->scopeActiveAcademicYear($query, 'kelas_struktur', $tenantId);
+
+        return $query->exists();
     }
 
     private function classLabel(string $tenantId, string $classId): string
@@ -546,5 +567,28 @@ class AdminFeaturePermissionController extends ApiController
     private function tableUnavailableResponse(): JsonResponse
     {
         return $this->deny('Tabel permission admin belum tersedia. Jalankan migration production terlebih dahulu.', 503);
+    }
+
+    private function scopeActiveAcademicYear($query, string $table, string $tenantId): void
+    {
+        if (! Schema::hasColumn($table, 'tahun_ajaran')) {
+            return;
+        }
+
+        $settingsColumns = array_values(array_filter([
+            Schema::hasColumn('settings', 'tahun_ajaran') ? 'tahun_ajaran' : null,
+            Schema::hasColumn('settings', 'semester_aktif') ? 'semester_aktif' : null,
+        ]));
+        $settings = Schema::hasTable('settings') && $settingsColumns !== []
+            ? DB::table('settings')
+                ->when(Schema::hasColumn('settings', 'tenant_id'), fn ($builder) => $builder->where('tenant_id', $tenantId))
+                ->orderBy('id')
+                ->first($settingsColumns)
+            : null;
+        $period = AcademicPeriod::fromSettings($settings);
+        $year = AcademicPeriod::normalizeAcademicYear($period['tahun_ajaran'] ?? null);
+        if ($year !== '') {
+            $query->where('tahun_ajaran', $year);
+        }
     }
 }

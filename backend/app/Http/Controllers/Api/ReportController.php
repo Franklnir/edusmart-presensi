@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -387,24 +388,27 @@ class ReportController extends ApiController
             return false;
         }
 
-        // Check jadwal for any academic year — this allows teachers to access
-        // reports for past periods (archives) where they taught the same
-        // class/subject combination.
-        $teachesSubject = $this->tenantQuery('jadwal', $tenantId)
+        // Scope to the report academic year so archive reports follow the
+        // teacher/homeroom assignment that was valid in that year.
+        $teachesSubjectQuery = $this->tenantQuery('jadwal', $tenantId)
             ->where('guru_id', $guruId)
             ->where('kelas_id', $kelas)
-            ->where('mapel', $mapel)
-            ->exists();
-        if ($teachesSubject) {
+            ->where('mapel', $mapel);
+        $this->scopeReportAcademicYear($teachesSubjectQuery, 'jadwal', $request, $tenantId);
+        if ($teachesSubjectQuery->exists()) {
             return true;
         }
 
-        // Also allow wali kelas access — again across any period.
-        return Schema::hasTable('kelas_struktur')
-            && $this->tenantQuery('kelas_struktur', $tenantId)
-                ->where('kelas_id', $kelas)
-                ->where('wali_guru_id', $guruId)
-                ->exists();
+        if (! Schema::hasTable('kelas_struktur')) {
+            return false;
+        }
+
+        $homeroomQuery = $this->tenantQuery('kelas_struktur', $tenantId)
+            ->where('kelas_id', $kelas)
+            ->where('wali_guru_id', $guruId);
+        $this->scopeReportAcademicYear($homeroomQuery, 'kelas_struktur', $request, $tenantId);
+
+        return $homeroomQuery->exists();
     }
 
     private function canAccessHomeroom(Request $request, string $tenantId, string $kelas): bool
@@ -418,10 +422,12 @@ class ReportController extends ApiController
             return false;
         }
 
-        return $this->tenantQuery('kelas_struktur', $tenantId)
+        $query = $this->tenantQuery('kelas_struktur', $tenantId)
             ->where('kelas_id', $kelas)
-            ->where('wali_guru_id', $guruId)
-            ->exists();
+            ->where('wali_guru_id', $guruId);
+        $this->scopeReportAcademicYear($query, 'kelas_struktur', $request, $tenantId);
+
+        return $query->exists();
     }
 
     private function resolveReportPeriod(Request $request): array
@@ -622,6 +628,34 @@ class ReportController extends ApiController
         // Tugas and quizzes are scoped by tahun_ajaran + date range already;
         // adding semester makes values disappear when records were created
         // before semester was consistently populated.
+    }
+
+    private function scopeReportAcademicYear($query, string $table, Request $request, string $tenantId): void
+    {
+        if (! Schema::hasColumn($table, 'tahun_ajaran')) {
+            return;
+        }
+
+        $year = AcademicPeriod::normalizeAcademicYear($request->query('tahun_ajaran'))
+            ?: $this->activeAcademicYear($tenantId);
+        if ($year !== '') {
+            $query->where('tahun_ajaran', $year);
+        }
+    }
+
+    private function activeAcademicYear(string $tenantId): string
+    {
+        if (! Schema::hasTable('settings') || ! Schema::hasColumn('settings', 'tahun_ajaran')) {
+            return AcademicPeriod::current()['tahun_ajaran'];
+        }
+
+        $settings = DB::table('settings')
+            ->when(Schema::hasColumn('settings', 'tenant_id'), fn ($builder) => $builder->where('tenant_id', $tenantId))
+            ->orderBy('id')
+            ->first(['tahun_ajaran']);
+
+        return AcademicPeriod::normalizeAcademicYear($settings->tahun_ajaran ?? null)
+            ?: AcademicPeriod::current()['tahun_ajaran'];
     }
 
     private function tenantQuery(string $table, string $tenantId)

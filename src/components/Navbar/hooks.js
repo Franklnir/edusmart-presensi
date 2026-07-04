@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PROFILE_BUCKET, getSignedUrlForValue, supabase } from '../../lib/supabase'
 import { buildNavigationMenu } from '../../navigation/menu.utils'
+import { normalizeAcademicYear } from '../../utils/academicPeriod'
 
 const isHttpUrl = (value = '') => /^https?:\/\//i.test(String(value || ''))
 
@@ -154,8 +155,9 @@ export const useSchoolLogoUrl = (settings) => {
   return { logoUrl, clearLogoUrl }
 }
 
-export const useWaliKelasFlag = (role, userId) => {
+export const useWaliKelasFlag = (role, userId, settings = null) => {
   const [isWaliKelas, setIsWaliKelas] = useState(false)
+  const activeYear = normalizeAcademicYear(settings?.tahun_ajaran || settings?.tahunAjaran)
 
   useEffect(() => {
     let cancelled = false
@@ -167,11 +169,17 @@ export const useWaliKelasFlag = (role, userId) => {
       }
 
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('kelas_struktur')
           .select('kelas_id')
           .eq('wali_guru_id', userId)
           .limit(1)
+
+        if (activeYear) {
+          query = query.eq('tahun_ajaran', activeYear)
+        }
+
+        const { data, error } = await query
 
         if (error) throw error
         if (!cancelled) setIsWaliKelas((data || []).length > 0)
@@ -185,7 +193,7 @@ export const useWaliKelasFlag = (role, userId) => {
     return () => {
       cancelled = true
     }
-  }, [role, userId])
+  }, [activeYear, role, userId])
 
   return isWaliKelas
 }

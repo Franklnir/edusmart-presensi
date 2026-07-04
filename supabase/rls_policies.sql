@@ -76,6 +76,18 @@ as $$
   where p.id = auth.uid();
 $$;
 
+create or replace function public.current_tenant_id()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.tenant_id::text
+  from public.profiles p
+  where p.id = auth.uid();
+$$;
+
 create or replace function public.current_rfid_uid()
 returns text
 language sql
@@ -88,7 +100,9 @@ as $$
   where p.id = auth.uid();
 $$;
 
-create or replace function public.is_guru_for_kelas(target_kelas text)
+drop function if exists public.is_guru_for_kelas(text) cascade;
+
+create or replace function public.is_guru_for_kelas(target_kelas text, target_tahun_ajaran text default null)
 returns boolean
 language sql
 stable
@@ -100,12 +114,16 @@ as $$
     from public.jadwal j
     where j.guru_id = auth.uid()
       and j.kelas_id = target_kelas
+      and (target_tahun_ajaran is null or j.tahun_ajaran = target_tahun_ajaran)
+      and (public.current_tenant_id() is null or j.tenant_id::text = public.current_tenant_id())
   )
   or exists (
     select 1
     from public.kelas_struktur ks
     where ks.wali_guru_id = auth.uid()
       and ks.kelas_id = target_kelas
+      and (target_tahun_ajaran is null or ks.tahun_ajaran = target_tahun_ajaran)
+      and (public.current_tenant_id() is null or ks.tenant_id::text = public.current_tenant_id())
   );
 $$;
 
@@ -123,7 +141,7 @@ create policy absensi_select
   for select
   using (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
     or uid = auth.uid()
   );
 
@@ -133,7 +151,7 @@ create policy absensi_insert
   for insert
   with check (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
     or (uid = auth.uid() and kelas = public.current_kelas())
   );
 
@@ -143,12 +161,12 @@ create policy absensi_update
   for update
   using (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
     or uid = auth.uid()
   )
   with check (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
     or uid = auth.uid()
   );
 
@@ -168,7 +186,7 @@ create policy absensi_ajuan_select
   for select
   using (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
     or uid = auth.uid()
   );
 
@@ -187,11 +205,11 @@ create policy absensi_ajuan_update
   for update
   using (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
   )
   with check (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
   );
 
 drop policy if exists absensi_ajuan_delete on public.absensi_ajuan;
@@ -299,7 +317,7 @@ create policy absensi_settings_select
   for select
   using (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
     or (public.is_siswa() and kelas = public.current_kelas())
   );
 
@@ -309,7 +327,7 @@ create policy absensi_settings_insert
   for insert
   with check (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
   );
 
 drop policy if exists absensi_settings_update on public.absensi_settings;
@@ -318,18 +336,18 @@ create policy absensi_settings_update
   for update
   using (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
   )
   with check (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
   );
 
 drop policy if exists absensi_settings_delete on public.absensi_settings;
 create policy absensi_settings_delete
   on public.absensi_settings
   for delete
-  using (public.is_admin() or public.is_guru_for_kelas(kelas));
+  using (public.is_admin() or public.is_guru_for_kelas(kelas, tahun_ajaran));
 
 -- admin_users
 alter table public.admin_users enable row level security;
@@ -452,7 +470,7 @@ create policy jadwal_select
   for select
   using (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas_id)
+    or public.is_guru_for_kelas(kelas_id, tahun_ajaran)
     or (public.is_siswa() and kelas_id = public.current_kelas())
   );
 
@@ -473,7 +491,7 @@ create policy jam_kosong_select
   for select
   using (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
     or (public.is_siswa() and kelas = public.current_kelas())
   );
 
@@ -483,7 +501,7 @@ create policy jam_kosong_insert
   for insert
   with check (
     public.is_admin()
-    or (public.is_guru_for_kelas(kelas) and created_by = auth.uid())
+    or (public.is_guru_for_kelas(kelas, tahun_ajaran) and created_by = auth.uid())
   );
 
 drop policy if exists jam_kosong_update on public.jam_kosong;
@@ -524,7 +542,11 @@ drop policy if exists kelas_struktur_select on public.kelas_struktur;
 create policy kelas_struktur_select
   on public.kelas_struktur
   for select
-  using (auth.role() = 'authenticated');
+  using (
+    public.is_admin()
+    or (public.is_guru() and wali_guru_id = auth.uid())
+    or (public.is_siswa() and kelas_id = public.current_kelas())
+  );
 
 drop policy if exists kelas_struktur_modify on public.kelas_struktur;
 create policy kelas_struktur_modify
@@ -800,7 +822,7 @@ create policy tugas_select
   for select
   using (
     public.is_admin()
-    or public.is_guru_for_kelas(kelas)
+    or public.is_guru_for_kelas(kelas, tahun_ajaran)
     or (public.is_siswa() and kelas = public.current_kelas())
   );
 
@@ -810,7 +832,7 @@ create policy tugas_insert
   for insert
   with check (
     public.is_admin()
-    or (public.is_guru_for_kelas(kelas) and created_by = auth.uid())
+    or (public.is_guru_for_kelas(kelas, tahun_ajaran) and created_by = auth.uid())
   );
 
 drop policy if exists tugas_update on public.tugas;
@@ -847,7 +869,7 @@ create policy tugas_jawaban_select
       select 1
       from public.tugas t
       where t.id = tugas_jawaban.tugas_id
-        and public.is_guru_for_kelas(t.kelas)
+        and public.is_guru_for_kelas(t.kelas, t.tahun_ajaran)
     )
   );
 
@@ -868,7 +890,7 @@ create policy tugas_jawaban_update
       select 1
       from public.tugas t
       where t.id = tugas_jawaban.tugas_id
-        and public.is_guru_for_kelas(t.kelas)
+        and public.is_guru_for_kelas(t.kelas, t.tahun_ajaran)
     )
   )
   with check (
@@ -878,7 +900,7 @@ create policy tugas_jawaban_update
       select 1
       from public.tugas t
       where t.id = tugas_jawaban.tugas_id
-        and public.is_guru_for_kelas(t.kelas)
+        and public.is_guru_for_kelas(t.kelas, t.tahun_ajaran)
     )
   );
 
@@ -986,14 +1008,14 @@ create policy storage_assignments_select
           or exists (
             select 1
             from public.tugas t
-            where public.is_guru_for_kelas(t.kelas)
+            where public.is_guru_for_kelas(t.kelas, t.tahun_ajaran)
               and (t.file_url = name or t.file_url like '%' || name)
           )
           or exists (
             select 1
             from public.tugas_jawaban tj
             join public.tugas t on t.id = tj.tugas_id
-            where public.is_guru_for_kelas(t.kelas)
+            where public.is_guru_for_kelas(t.kelas, t.tahun_ajaran)
               and (tj.file_url = name or tj.file_url like '%' || name)
           )
         )

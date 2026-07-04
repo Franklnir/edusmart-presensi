@@ -152,8 +152,10 @@ class DbUpsertExecutor
             'absensi_scan_temp',
             'guru_mapel_bobot',
             'guru_mapel_manual_nilai',
+            'kelas_struktur',
             'rapot_siswa',
             'rapot_siswa_items',
+            'struktur_sekolah',
         ];
 
         if (in_array($table, $manualFallbackTables, true) && ! empty($uniqueBy)) {

@@ -1376,6 +1376,7 @@ class AdminController extends ApiController
         }
 
         if ($includeContext) {
+            $activeYear = $this->activeAcademicYearForTenant($tenantId);
             $payload['kelas'] = $this->tenantQuery('kelas', $tenantId)
                 ->select($this->existingColumns('kelas', ['id', 'nama', 'tingkat', 'jurusan', 'wali_kelas', 'angkatan', 'created_at', 'updated_at']))
                 ->when($teacherClassIds !== null, fn ($builder) => $builder->whereIn('id', $teacherClassIds))
@@ -1387,6 +1388,7 @@ class AdminController extends ApiController
             $payload['struktur'] = $this->tenantQuery('kelas_struktur', $tenantId)
                 ->select($this->existingColumns('kelas_struktur', ['kelas_id', 'wali_guru_id', 'wali_guru_nama', 'ketua_siswa_id', 'ketua_siswa_nama', 'created_at', 'updated_at']))
                 ->when($teacherClassIds !== null, fn ($builder) => $builder->whereIn('kelas_id', $teacherClassIds))
+                ->when($activeYear !== '' && Schema::hasColumn('kelas_struktur', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
                 ->get()
                 ->map(fn ($row) => (array) $row)
                 ->values();
@@ -2315,23 +2317,27 @@ class AdminController extends ApiController
             ->map(fn ($row) => (array) $row);
 
         $teacherIds = $baseTeachers->pluck('id')->filter()->values()->all();
+        $activeYear = $this->activeAcademicYearForTenant($tenantId);
         $jadwalRows = empty($teacherIds)
             ? collect()
             : $this->tenantQuery('jadwal', $tenantId)
                 ->select($this->existingColumns('jadwal', ['id', 'kelas_id', 'hari', 'mapel', 'guru_id', 'guru_nama', 'jam_mulai', 'jam_selesai', 'created_at', 'updated_at']))
                 ->whereIn('guru_id', $teacherIds)
+                ->when($activeYear !== '' && Schema::hasColumn('jadwal', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
                 ->get();
         $waliRows = empty($teacherIds)
             ? collect()
             : $this->tenantQuery('kelas_struktur', $tenantId)
                 ->select($this->existingColumns('kelas_struktur', ['kelas_id', 'wali_guru_id', 'wali_guru_nama']))
                 ->whereIn('wali_guru_id', $teacherIds)
+                ->when($activeYear !== '' && Schema::hasColumn('kelas_struktur', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
                 ->get();
         $strukturRows = empty($teacherIds)
             ? collect()
             : $this->tenantQuery('struktur_sekolah', $tenantId)
                 ->select($this->existingColumns('struktur_sekolah', ['id', 'jabatan', 'guru_id', 'guru_nama']))
                 ->whereIn('guru_id', $teacherIds)
+                ->when($activeYear !== '' && Schema::hasColumn('struktur_sekolah', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
                 ->get();
 
         $jadwalByTeacher = $jadwalRows->groupBy('guru_id');
@@ -5686,6 +5692,14 @@ class AdminController extends ApiController
         return $query;
     }
 
+    private function activeAcademicYearForTenant(string $tenantId): string
+    {
+        $settings = $this->firstTenantRow('settings', $tenantId);
+
+        return AcademicPeriod::normalizeAcademicYear($settings?->tahun_ajaran ?? null)
+            ?: AcademicPeriod::current()['tahun_ajaran'];
+    }
+
     private function canAccessScanFeature(Request $request, array $featureKeys = self::SCAN_FEATURE_KEYS): bool
     {
         return $this->isAdmin($request)
@@ -5803,8 +5817,11 @@ class AdminController extends ApiController
             return [];
         }
 
+        $activeYear = $this->activeAcademicYearForTenant($tenantId);
+
         return $this->tenantQuery('kelas_struktur', $tenantId)
             ->where('wali_guru_id', $teacherId)
+            ->when($activeYear !== '' && Schema::hasColumn('kelas_struktur', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
             ->pluck('kelas_id')
             ->filter()
             ->map(fn ($value) => (string) $value)
@@ -5964,8 +5981,10 @@ class AdminController extends ApiController
 
         $total = (int) $statusCounts->sum();
         $active = (int) ($statusCounts['active'] ?? 0);
+        $activeYear = $this->activeAcademicYearForTenant($tenantId);
         $struktur = $this->tenantQuery('kelas_struktur', $tenantId)
             ->when($classIds !== null, fn ($builder) => $builder->whereIn('kelas_id', $classIds))
+            ->when($activeYear !== '' && Schema::hasColumn('kelas_struktur', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
             ->whereNotNull('ketua_siswa_id')
             ->where('ketua_siswa_id', '<>', '');
 
