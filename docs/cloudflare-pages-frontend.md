@@ -9,6 +9,14 @@ Dokumen ini dipakai untuk memindahkan frontend SISMU ke Cloudflare Pages secara 
 - `sismu.biz.id` apex dipindah paling akhir karena sebelumnya juga menjadi canonical backend/API host.
 - Selama transisi, frontend di VPS boleh tetap ada sebagai rollback. Setelah apex stabil di Pages, serving frontend di VPS bisa dimatikan sehingga VPS menjadi backend-only.
 
+## Status 4 Juli 2026
+
+- `sismu.biz.id`, `www.sismu.biz.id`, `frontend.sismu.biz.id`, `demo.sismu.biz.id`, dan `sman3bogor.sismu.biz.id` sudah aktif di Cloudflare Pages.
+- `sismu.biz.id` sudah CNAME ke `sismu-frontend-staging.pages.dev` dan proxied.
+- `origin.sismu.biz.id` tetap DNS-only ke VPS untuk backend/API.
+- Caddy di VPS sudah backend-only: route frontend seperti `/` dan `/assets/...` dibalas `404`, sedangkan `/api/*`, `/sanctum/*`, `/storage/*`, `/broadcasting/auth`, `/horizon/*`, dan `/up` tetap diteruskan ke backend.
+- Rollback cepat DNS apex: ubah record `sismu.biz.id` kembali ke `A 103.191.63.170` proxied jika Pages perlu dikembalikan sementara.
+
 ## Alur deploy
 
 Workflow: `.github/workflows/cloudflare-pages-staging.yml`
@@ -85,8 +93,8 @@ Dengan konfigurasi ini, `frontend.sismu.biz.id` masih satu site dengan API `sism
 
 Setelah staging stabil:
 
-1. Arahkan tenant/subdomain non-apex ke Cloudflare Pages lebih dulu, contoh `frontend`, `www`, `demo`, dan domain sekolah.
+1. Arahkan tenant/subdomain non-apex ke Cloudflare Pages lebih dulu, contoh `frontend`, `www`, `demo`, dan domain sekolah. Selesai 4 Juli 2026.
 2. Pastikan login Admin Sekolah/Guru/Siswa, upload kecil, export PDF, Web Vitals, `/api/mobile/schools`, webhook, dan `/sanctum/csrf-cookie` normal dari host Pages.
-3. Pindahkan `sismu.biz.id` apex ke Cloudflare Pages setelah Worker API dipastikan memakai `origin.sismu.biz.id`, bukan apex.
-4. Pertahankan frontend VPS sebagai rollback selama beberapa hari.
-5. Setelah monitoring stabil, ubah VPS menjadi backend-only dan hapus/disable serving frontend lama dari konfigurasi web server.
+3. Pindahkan `sismu.biz.id` apex ke Cloudflare Pages setelah Worker API dipastikan memakai `origin.sismu.biz.id`, bukan apex. Selesai 4 Juli 2026.
+4. Ubah VPS menjadi backend-only dan hapus/disable serving frontend lama dari konfigurasi web server. Selesai di lapisan Caddy 4 Juli 2026.
+5. Pantau error/login/upload selama masa stabilisasi. Frontend static masih ada di image Nginx lama, tetapi tidak lagi reachable karena Caddy memblokir route frontend.

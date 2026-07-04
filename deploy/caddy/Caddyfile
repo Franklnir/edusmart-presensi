@@ -41,13 +41,21 @@
 		path /api/storage/upload* /api/tugas/jawaban/submit* /api/admin/storage-manager/*
 	}
 
+	@backend_paths {
+		path /api /api/* /sanctum /sanctum/* /storage /storage/* /broadcasting/auth /broadcasting/auth/* /horizon /horizon/* /up
+	}
+
 	handle @skip_waf_uploads {
 		reverse_proxy nginx:80
 	}
 
-	handle {
+	handle @backend_paths {
 		import waf_high_confidence
 		reverse_proxy nginx:80
+	}
+
+	handle {
+		respond "Not Found" 404
 	}
 }
 
