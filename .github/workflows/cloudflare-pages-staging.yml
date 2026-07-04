@@ -147,14 +147,18 @@ jobs:
             )
           }
 
-          const backendRequestInit = (request, forwardedUrl, signForwardedHost) => {
+          const normalizeHost = (value) => String(value || '').trim().toLowerCase().replace(/:\d+$/, '')
+
+          const backendRequestInit = (request, publicUrl, publicHost) => {
             const headers = new Headers(request.headers)
-            headers.set('X-Forwarded-Host', forwardedUrl.host)
-            headers.set('X-Forwarded-Proto', forwardedUrl.protocol.replace(':', ''))
-            headers.set('X-Forwarded-Port', forwardedUrl.port || (forwardedUrl.protocol === 'https:' ? '443' : '80'))
-            headers.set('X-Original-Host', forwardedUrl.host)
-            if (signForwardedHost && EDGE_PROXY_SECRET) {
-              headers.set('X-Sismu-Forwarded-Host', forwardedUrl.host)
+            const forwardedHost = normalizeHost(publicHost || publicUrl.host)
+            const forwardedProto = publicUrl.protocol.replace(':', '') || 'https'
+            headers.set('X-Forwarded-Host', forwardedHost)
+            headers.set('X-Forwarded-Proto', forwardedProto)
+            headers.set('X-Forwarded-Port', publicUrl.port || (forwardedProto === 'https' ? '443' : '80'))
+            headers.set('X-Original-Host', forwardedHost)
+            if (forwardedHost && EDGE_PROXY_SECRET) {
+              headers.set('X-Sismu-Forwarded-Host', forwardedHost)
               headers.set('X-Sismu-Edge-Secret', EDGE_PROXY_SECRET)
             }
 
@@ -170,17 +174,13 @@ jobs:
             const incomingUrl = new URL(request.url)
             const backendUrl = new URL(request.url)
             const platformUtilityHost = isPlatformUtilityHost(incomingUrl.hostname)
-            const backendOrigin = new URL(platformUtilityHost ? ('https://' + PLATFORM_API_HOST) : BACKEND_ORIGIN)
+            const backendOrigin = new URL(BACKEND_ORIGIN)
+            const publicHost = platformUtilityHost ? PLATFORM_API_HOST : incomingUrl.hostname
             backendUrl.protocol = backendOrigin.protocol
             backendUrl.hostname = backendOrigin.hostname
             backendUrl.port = backendOrigin.port
 
-            const init = backendRequestInit(request, incomingUrl, !platformUtilityHost)
-
-            if (platformUtilityHost) {
-              backendUrl.hostname = PLATFORM_API_HOST
-              backendUrl.port = ''
-            }
+            const init = backendRequestInit(request, incomingUrl, publicHost)
 
             return fetch(new Request(backendUrl.toString(), init))
           }
