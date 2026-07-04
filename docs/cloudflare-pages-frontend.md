@@ -2,12 +2,12 @@
 
 Dokumen ini dipakai untuk memindahkan frontend SISMU ke Cloudflare Pages secara bertahap tanpa mengganggu VPS produksi.
 
-## Target tahap awal
+## Target migrasi bertahap
 
-- Frontend staging dilayani dari Cloudflare Pages.
-- Backend/API/database/MQTT/worker/scheduler tetap berjalan di VPS.
-- Domain produksi `sismu.biz.id` tetap ke VPS sampai hasil staging sudah lolos uji login dan alur utama.
-- Domain staging yang disarankan: `frontend.sismu.biz.id` atau `app-staging.sismu.biz.id`.
+- Frontend dilayani dari Cloudflare Pages.
+- Backend/API/database/MQTT/worker/scheduler tetap berjalan di VPS melalui origin khusus `origin.sismu.biz.id`.
+- `sismu.biz.id` apex dipindah paling akhir karena sebelumnya juga menjadi canonical backend/API host.
+- Selama transisi, frontend di VPS boleh tetap ada sebagai rollback. Setelah apex stabil di Pages, serving frontend di VPS bisa dimatikan sehingga VPS menjadi backend-only.
 
 ## Alur deploy
 
@@ -23,7 +23,7 @@ Alur:
 1. Install dependency frontend.
 2. Jalankan `npm run security:audit`.
 3. Build frontend dengan `npm run build`.
-4. Tambahkan header keamanan dan SPA fallback ke output `dist`.
+4. Tambahkan header keamanan, proxy backend, dan SPA fallback ke output `dist`.
 5. Buat project Cloudflare Pages jika belum ada.
 6. Deploy `dist` ke Cloudflare Pages.
 
@@ -44,6 +44,8 @@ Branch `staging-cloudflare` khusus dipakai untuk deploy frontend ke Cloudflare P
 Tambahkan di GitHub environment `cloudflare-pages-staging` jika ingin override default:
 
 - `CLOUDFLARE_PAGES_PROJECT_NAME=sismu-frontend-staging`
+- `CLOUDFLARE_PAGES_BACKEND_ORIGIN=https://origin.sismu.biz.id`
+- `CLOUDFLARE_PAGES_PLATFORM_API_HOST=sismu.biz.id`
 - `CLOUDFLARE_PAGES_STAGING_API_URL=https://sismu.biz.id`
 - `VITE_ROOT_DOMAIN=sismu.biz.id`
 - `VITE_ADMIN_SUBDOMAIN=admin26`
@@ -53,7 +55,9 @@ Tambahkan di GitHub environment `cloudflare-pages-staging` jika ingin override d
 - `VITE_GOOGLE_AUTH_LOGIN_URL=https://sismu.biz.id/api/auth/google/redirect`
 - `VITE_GOOGLE_AUTH_LINK_URL=https://sismu.biz.id/api/auth/google/link`
 
-Untuk staging Cloudflare Pages, API URL sengaja diarahkan absolut ke VPS. Jangan gunakan path relatif untuk Google redirect/link karena frontend berada di host yang berbeda.
+Worker Cloudflare Pages mem-proxy path backend (`/api`, `/sanctum`, `/storage`, dan `/broadcasting/auth`) ke `origin.sismu.biz.id`. Host publik tetap diteruskan lewat header bertanda `X-Sismu-Forwarded-Host` dan `X-Sismu-Edge-Secret`, sehingga backend bisa membedakan tenant/admin tanpa perlu menjadikan apex sebagai origin API.
+
+Untuk host utilitas platform seperti `sismu.biz.id`, `www.sismu.biz.id`, `frontend.sismu.biz.id`, dan `*.pages.dev`, Worker memakai `CLOUDFLARE_PAGES_PLATFORM_API_HOST=sismu.biz.id` sebagai konteks backend. Ini mencegah loop saat apex dipindah dari VPS ke Cloudflare Pages.
 
 ## Backend VPS
 
@@ -77,11 +81,12 @@ Dengan konfigurasi ini, `frontend.sismu.biz.id` masih satu site dengan API `sism
 - Tes Web Vitals tetap terkirim ke `/api/observability/web-vitals`.
 - Pastikan Console browser tidak ada error CSP/CORS/CSRF.
 
-## Cutover produksi
+## Cutover produksi bertahap
 
 Setelah staging stabil:
 
-1. Buat workflow production atau ubah project Pages staging menjadi production.
-2. Pindahkan `sismu.biz.id`/`www.sismu.biz.id` ke Cloudflare Pages.
-3. Pertahankan frontend VPS sebagai fallback selama beberapa hari.
-4. Backend tetap di VPS dan tetap dilindungi Cloudflare/WAF.
+1. Arahkan tenant/subdomain non-apex ke Cloudflare Pages lebih dulu, contoh `frontend`, `www`, `demo`, dan domain sekolah.
+2. Pastikan login Admin Sekolah/Guru/Siswa, upload kecil, export PDF, Web Vitals, `/api/mobile/schools`, webhook, dan `/sanctum/csrf-cookie` normal dari host Pages.
+3. Pindahkan `sismu.biz.id` apex ke Cloudflare Pages setelah Worker API dipastikan memakai `origin.sismu.biz.id`, bukan apex.
+4. Pertahankan frontend VPS sebagai rollback selama beberapa hari.
+5. Setelah monitoring stabil, ubah VPS menjadi backend-only dan hapus/disable serving frontend lama dari konfigurasi web server.
