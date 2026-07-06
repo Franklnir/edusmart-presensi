@@ -7,7 +7,8 @@ import AppBootShell from './components/AppBootShell'
 import WebVitalsReporter from './components/monitoring/WebVitalsReporter'
 import AppRoutes from './router'
 import { useAuthStore } from './store/useAuthStore'
-import { SESSION_EXPIRED_EVENT, hasAuthSessionHint, supabase } from './lib/supabase'
+import { API_UNAVAILABLE_EVENT, SESSION_EXPIRED_EVENT, hasAuthSessionHint, supabase } from './lib/supabase'
+import { useUIStore } from './store/useUIStore'
 import { scheduleRoutePrefetch } from './lib/routePrefetch'
 import { isMarketingLandingPath } from './utils/marketingHost'
 import {
@@ -38,6 +39,7 @@ const App = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, profile, initialized, init, expireSession, isSuperAdmin } = useAuthStore()
+  const pushToast = useUIStore((state) => state.pushToast)
   const deviceIdRef = useRef('')
   const lastPathRef = useRef('')
   const lastSessionRevalidateRef = useRef(0)
@@ -146,6 +148,25 @@ const App = () => {
     location.search,
     navigate
   ])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+
+    const handleApiUnavailable = (event) => {
+      const retryAfter = Math.max(3, Math.ceil(Number(event?.detail?.retryAfterMs || 0) / 1000))
+      pushToast(
+        'warning',
+        `Koneksi server sedang distabilkan. Coba lagi sekitar ${retryAfter} detik.`,
+        {
+          title: 'Server Menyambung Ulang',
+          duration: 6500
+        }
+      )
+    }
+
+    window.addEventListener(API_UNAVAILABLE_EVENT, handleApiUnavailable)
+    return () => window.removeEventListener(API_UNAVAILABLE_EVENT, handleApiUnavailable)
+  }, [pushToast])
 
   useEffect(() => {
     if (typeof window === 'undefined') return

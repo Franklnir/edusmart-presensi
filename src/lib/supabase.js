@@ -183,9 +183,12 @@ const GOOGLE_AUTH_LINK_URL = normalizeAuthEndpointUrl(
 )
 export const AUTH_SESSION_HINT_KEY = 'edusmart_auth_session_hint'
 export const SESSION_EXPIRED_EVENT = 'edusmart:session-expired'
+export const API_UNAVAILABLE_EVENT = 'edusmart:api-unavailable'
 const SESSION_EXPIRED_MESSAGE =
   'Sesi login Anda telah berakhir. Silakan masuk lagi untuk melanjutkan.'
 let lastSessionExpiredNotifiedAt = 0
+let lastApiUnavailableNotifiedAt = 0
+let apiUnavailableUntil = 0
 const pendingApiRequests = new Map()
 const staleRequestControllers = new Map()
 const apiResponseCache = new Map()
@@ -716,7 +719,59 @@ const makeError = (message, status, code, extra = {}) => ({
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const API_RETRY_DELAYS_MS = [350, 900]
+const API_UNAVAILABLE_PAUSE_MS = Number(
+  import.meta.env.VITE_API_UNAVAILABLE_PAUSE_MS || 15000
+)
+const TRANSIENT_API_STATUSES = new Set([502, 503, 504, 521, 522, 523, 524])
 const requestAbortReasons = typeof WeakMap !== 'undefined' ? new WeakMap() : null
+
+const isTransientApiStatus = (status) => TRANSIENT_API_STATUSES.has(Number(status || 0))
+
+const getApiUnavailableDelayMs = () => Math.max(0, apiUnavailableUntil - Date.now())
+
+const notifyApiUnavailable = ({ path = '', status = 0, retryAfterMs = API_UNAVAILABLE_PAUSE_MS } = {}) => {
+  if (typeof window === 'undefined') return
+
+  const now = Date.now()
+  if (now - lastApiUnavailableNotifiedAt < 10000) return
+  lastApiUnavailableNotifiedAt = now
+
+  window.dispatchEvent(
+    new CustomEvent(API_UNAVAILABLE_EVENT, {
+      detail: {
+        path: normalizeSessionHandlingPath(path),
+        status,
+        retryAfterMs
+      }
+    })
+  )
+}
+
+const markApiUnavailable = ({ path = '', status = 0 } = {}) => {
+  const pauseMs = Number.isFinite(API_UNAVAILABLE_PAUSE_MS)
+    ? Math.max(3000, API_UNAVAILABLE_PAUSE_MS)
+    : 15000
+  apiUnavailableUntil = Math.max(apiUnavailableUntil, Date.now() + pauseMs)
+  notifyApiUnavailable({ path, status, retryAfterMs: pauseMs })
+}
+
+const makeApiUnavailableResult = ({ path = '', status = 0, retryAfterMs = getApiUnavailableDelayMs() } = {}) => ({
+  data: null,
+  error: makeError(
+    'Server sedang menyambung ulang. Coba lagi beberapa saat.',
+    status,
+    'API_TEMPORARILY_UNAVAILABLE',
+    {
+      retryAfter: Math.ceil(Math.max(0, retryAfterMs) / 1000),
+      retryAfterMs: Math.max(0, retryAfterMs)
+    }
+  ),
+  raw: {
+    path: normalizeSessionHandlingPath(path),
+    status,
+    retry_after_seconds: Math.ceil(Math.max(0, retryAfterMs) / 1000)
+  }
+})
 
 const isAbortError = (error) => (
   error?.name === 'AbortError' ||
@@ -924,11 +979,20 @@ const runApiFetch = async (path, options = {}) => {
   const body = options.body
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData
   const signal = options.signal
+  const guardedByApiRecovery = options.apiRecoveryGuard !== false
+  const unavailableDelayMs = guardedByApiRecovery ? getApiUnavailableDelayMs() : 0
+
+  if (unavailableDelayMs > 0) {
+    return makeApiUnavailableResult({ path, retryAfterMs: unavailableDelayMs })
+  }
 
   if (method !== 'GET' && method !== 'HEAD') {
     try {
       await ensureCsrf()
-    } catch {
+    } catch (error) {
+      if (!isAbortError(error)) {
+        markApiUnavailable({ path, status: 0 })
+      }
       return {
         data: null,
         error: makeError(
@@ -1002,6 +1066,10 @@ const runApiFetch = async (path, options = {}) => {
       }
     }
 
+    if (!isAbortError(error)) {
+      markApiUnavailable({ path, status: 0 })
+    }
+
     return {
       data: null,
       error: makeError(
@@ -1048,6 +1116,10 @@ const runApiFetch = async (path, options = {}) => {
         }
       }
 
+      if (!isAbortError(error)) {
+        markApiUnavailable({ path, status: 0 })
+      }
+
       return {
         data: null,
         error: makeError(
@@ -1066,6 +1138,15 @@ const runApiFetch = async (path, options = {}) => {
   } catch { }
 
   if (!res.ok) {
+    if (isTransientApiStatus(res.status)) {
+      markApiUnavailable({ path, status: res.status })
+      return makeApiUnavailableResult({
+        path,
+        status: res.status,
+        retryAfterMs: getApiUnavailableDelayMs()
+      })
+    }
+
     if (isSessionExpiredStatus(res.status) && !shouldIgnoreSessionExpiredHandling(path)) {
       notifySessionExpired({
         path,
