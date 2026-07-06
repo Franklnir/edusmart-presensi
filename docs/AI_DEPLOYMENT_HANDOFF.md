@@ -227,6 +227,7 @@ Cek pola penting di browser:
 - Web Vitals masuk ke `/api/observability/web-vitals`.
 - Console tidak ada error CSP, CORS, CSRF, atau missing asset.
 - `npm run smoke:public` lulus untuk host publik yang diuji.
+- Jika `npm run smoke:public` gagal hanya pada `/cdn-cgi/rum`, itu berasal dari Browser Insights/RUM Cloudflare. Path `/cdn-cgi/*` reserved Cloudflare, jadi perbaikannya adalah mematikan Browser Insights/RUM di Cloudflare, bukan mem-proxy path itu dari repo.
 
 ## Rollback
 
