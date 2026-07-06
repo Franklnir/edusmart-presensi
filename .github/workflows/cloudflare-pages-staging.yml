@@ -103,6 +103,8 @@ jobs:
           const EDGE_PROXY_SECRET = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_EDGE_PROXY_SECRET || '')}
           const PLATFORM_API_HOST = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_PLATFORM_API_HOST || 'sismu.biz.id')}
           const ROOT_DOMAIN = ${JSON.stringify(process.env.VITE_ROOT_DOMAIN || 'sismu.biz.id')}
+          const ORIGIN_TRANSIENT_STATUSES = new Set([502, 503, 504, 520, 521, 522, 523, 524])
+          const SAFE_RETRY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
           const BACKEND_PREFIXES = [
             '/api',
@@ -152,6 +154,24 @@ jobs:
 
           const normalizeHost = (value) => String(value || '').trim().toLowerCase().replace(/:\d+$/, '')
 
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+          const originUnavailable = (retryAfterSeconds = 8) => new Response(
+            JSON.stringify({
+              message: 'Server sedang disambungkan ulang. Silakan coba lagi beberapa saat.'
+            }),
+            {
+              status: 503,
+              headers: {
+                'Cache-Control': 'no-store',
+                'Content-Type': 'application/json; charset=utf-8',
+                'Retry-After': String(retryAfterSeconds),
+                'X-Content-Type-Options': 'nosniff',
+                'X-Sismu-Origin-Status': 'unavailable'
+              }
+            }
+          )
+
           const backendRequestInit = (request, publicUrl, publicHost) => {
             const headers = new Headers(request.headers)
             const forwardedHost = normalizeHost(publicHost || publicUrl.host)
@@ -173,7 +193,7 @@ jobs:
             }
           }
 
-          const proxyBackend = (request) => {
+          const proxyBackend = async (request) => {
             const incomingUrl = new URL(request.url)
             const backendUrl = new URL(request.url)
             const platformUtilityHost = isPlatformUtilityHost(incomingUrl.hostname)
@@ -185,7 +205,37 @@ jobs:
 
             const init = backendRequestInit(request, incomingUrl, publicHost)
 
-            return fetch(new Request(backendUrl.toString(), init))
+            const backendRequest = () => new Request(backendUrl.toString(), init)
+            const shouldRetry = SAFE_RETRY_METHODS.has(request.method.toUpperCase())
+            let response
+
+            try {
+              response = await fetch(backendRequest())
+            } catch {
+              if (!shouldRetry) return originUnavailable()
+              await sleep(350)
+              try {
+                response = await fetch(backendRequest())
+              } catch {
+                return originUnavailable()
+              }
+            }
+
+            if (ORIGIN_TRANSIENT_STATUSES.has(response.status)) {
+              if (!shouldRetry) return originUnavailable()
+              await sleep(350)
+              try {
+                const retryResponse = await fetch(backendRequest())
+                if (!ORIGIN_TRANSIENT_STATUSES.has(retryResponse.status)) {
+                  return retryResponse
+                }
+              } catch {
+                return originUnavailable()
+              }
+              return originUnavailable()
+            }
+
+            return response
           }
 
           export default {
