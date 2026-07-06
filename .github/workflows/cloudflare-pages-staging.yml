@@ -115,6 +115,8 @@ jobs:
             BACKEND_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'))
           )
 
+          const isCloudflareRumPath = (pathname) => String(pathname || '') === '/cdn-cgi/rum'
+
           const SENSITIVE_FILE_PATTERN = /(?:^|\/)(?:\.env|\.git|backup|backups|dump|database)(?:[./_-]|$)|\.(?:7z|bak|backup|conf|config|env|gz|ini|key|log|old|pem|phar|php|rar|sql|tar|tgz|xz|zip)$/i
 
           const isSensitiveFileProbe = (pathname) => {
@@ -188,6 +190,16 @@ jobs:
           export default {
             async fetch(request, env) {
               const url = new URL(request.url)
+              if (isCloudflareRumPath(url.pathname)) {
+                return new Response(null, {
+                  status: 204,
+                  headers: {
+                    'Cache-Control': 'no-store',
+                    'X-Content-Type-Options': 'nosniff'
+                  }
+                })
+              }
+
               if (isBackendPath(url.pathname)) {
                 return proxyBackend(request)
               }

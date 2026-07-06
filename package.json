@@ -11,7 +11,8 @@
     "check": "npm run build",
     "security:env": "bash scripts/security/check-env-secrets.sh",
     "security:audit": "npm audit --omit=dev --audit-level=high",
-    "security:audit:full": "npm audit"
+    "security:audit:full": "npm audit",
+    "smoke:public": "node scripts/smoke/public-site-smoke.mjs"
   },
   "engines": {
     "node": ">=20.19.0"
