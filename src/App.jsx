@@ -17,6 +17,7 @@ import {
 } from './theme/userThemes'
 
 const AUTH_PATHS = ['/login', '/auth/google/popup', '/register', '/forgot-password', '/reset-password']
+const PROTECTED_PATH_PREFIXES = ['/admin', '/guru', '/siswa']
 const ADMIN_PRIORITY_PREFETCH_ROUTES = [
   '/admin/home',
   '/admin/organisasi',
@@ -44,13 +45,16 @@ const App = () => {
   const isAuthPage = AUTH_PATHS.some((p) => location.pathname.startsWith(p))
   const isMarketingPage = isMarketingLandingPath(location.pathname)
   const isQuizSessionPage = location.pathname.startsWith('/siswa/quiz/session/')
+  const isProtectedAppPath = PROTECTED_PATH_PREFIXES.some(
+    (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
+  )
   const hasGoogleAuthCallback = new URLSearchParams(location.search).has('google')
   const shouldInitAuth = !isMarketingPage &&
-    (!isAuthPage || hasAuthSessionHint() || hasGoogleAuthCallback)
+    (isProtectedAppPath || (isAuthPage && (hasAuthSessionHint() || hasGoogleAuthCallback)))
   const shouldShowBootShell =
     !initialized &&
     !user &&
-    !isAuthPage &&
+    isProtectedAppPath &&
     !isMarketingPage &&
     hasAuthSessionHint()
   const role = profile?.role || ''

@@ -1158,17 +1158,6 @@ const Login = () => {
               </div>
             </form>
 
-            {!isAdminHost && (
-              <div className="login__form-footer">
-                <p>
-                  Belum punya akun?
-                  <Link to="/register" className="login__register-link">
-                    {' '}
-                    Daftar Sekarang
-                  </Link>
-                </p>
-              </div>
-            )}
           </div>
         </div>
       </div>

@@ -4,7 +4,6 @@ const routeLoaders = {
   '/login': () => import('../pages/auth/Login'),
   '/landing': () => import('../pages/public/SismuLanding'),
   '/auth/google/popup': () => import('../pages/auth/GoogleAuthPopup'),
-  '/register': () => import('../pages/auth/Register'),
   '/forgot-password': () => import('../pages/auth/ForgotPassword'),
   '/reset-password': () => import('../pages/auth/ResetPassword'),
   '/siswa/home': () => import('../pages/siswa/Home'),

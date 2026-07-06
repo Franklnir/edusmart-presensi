@@ -10,7 +10,6 @@ import { isMarketingRootHost } from './utils/marketingHost'
 const Login = lazyRoute('/login')
 const SismuLanding = lazyRoute('/landing')
 const GoogleAuthPopup = lazyRoute('/auth/google/popup')
-const Register = lazyRoute('/register')
 const ForgotPassword = lazyRoute('/forgot-password')
 const ResetPassword = lazyRoute('/reset-password')
 
@@ -84,7 +83,7 @@ const AppRoutes = () => (
     {/* Auth (tidak butuh login) */}
     <Route path="/login" element={<TenantAuthRoute>{lazyElement(Login)}</TenantAuthRoute>} />
     <Route path="/auth/google/popup" element={lazyElement(GoogleAuthPopup)} />
-    <Route path="/register" element={<TenantAuthRoute>{lazyElement(Register)}</TenantAuthRoute>} />
+    <Route path="/register" element={<Navigate to="/login" replace />} />
     <Route path="/forgot-password" element={<TenantAuthRoute>{lazyElement(ForgotPassword)}</TenantAuthRoute>} />
     <Route path="/reset-password" element={<TenantAuthRoute>{lazyElement(ResetPassword)}</TenantAuthRoute>} />
 

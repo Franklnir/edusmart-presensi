@@ -83,7 +83,6 @@ export const menuConfig = {
       items: [
         { id: 'admin-pengaturan-identitas', to: '/admin/pengaturan?menu=identity', label: 'Identitas', icon: 'school' },
         { id: 'admin-pengaturan-akun-admin', to: '/admin/pengaturan?menu=admin', label: 'Akun Admin', icon: 'user' },
-        { id: 'admin-pengaturan-registrasi', to: '/admin/pengaturan?menu=registration', label: 'Registrasi', icon: 'users' },
       ],
     },
   ],

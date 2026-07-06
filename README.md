@@ -8,6 +8,12 @@ Branch production yang saat ini dipakai:
 backup/vps-ready-20260430
 ```
 
+Untuk AI/agent yang perlu memahami alur backend auto deploy dan frontend Cloudflare Pages, mulai dari:
+
+```text
+docs/AI_DEPLOYMENT_HANDOFF.md
+```
+
 ## Alur Deploy Production
 
 Alur CI/CD production saat ini:

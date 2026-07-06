@@ -2250,29 +2250,15 @@ class AuthController extends ApiController
         $email = strtolower(trim($payload['email']));
         $role = $payload['role'];
 
-        if (! $allowAdminCreate && $role === 'admin') {
-            return response()->json([
-                'error' => 'Registrasi admin publik tidak diizinkan. Admin baru harus dibuat dari panel admin.',
-            ], 403);
-        }
-
         if ($this->isReservedSuperAdminEmail($email)) {
             return response()->json(['error' => 'Email ini tidak bisa digunakan untuk registrasi'], 403);
         }
 
         if (! $allowAdminCreate) {
-            $settings = DB::table('settings')->where('tenant_id', $tenantId)->orderBy('id')->first();
-            $allow = $role === 'siswa';
-            if ($role === 'siswa' && $settings && isset($settings->registrasi_siswa_aktif)) {
-                $allow = (bool) $settings->registrasi_siswa_aktif;
-            }
-            if ($role === 'guru' && $settings && isset($settings->registrasi_guru_aktif)) {
-                $allow = (bool) $settings->registrasi_guru_aktif;
-            }
-
-            if (! $allow) {
-                return response()->json(['error' => 'Registrasi role ini tidak dibuka'], 403);
-            }
+            return response()->json([
+                'error' => 'Registrasi publik sudah dinonaktifkan. Akun dibuat oleh Admin Sekolah melalui menu Siswa, Guru, atau Admin.',
+                'code' => 'PUBLIC_REGISTRATION_DISABLED',
+            ], 403);
         }
 
         if ($this->profileForTenantEmail($tenantId, $email)) {

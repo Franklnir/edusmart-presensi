@@ -121,27 +121,20 @@ class ProfileProvisionOriginTest extends TestCase
         ]);
     }
 
-    public function test_public_registration_marks_profile_as_manual_registration(): void
+    public function test_admin_manual_provision_defaults_to_admin_created_origin(): void
     {
         $tenantId = $this->defaultTenantId();
-        DB::table('settings')->updateOrInsert(
-            ['tenant_id' => $tenantId],
-            [
-                'registrasi_siswa_aktif' => true,
-                'registrasi_guru_aktif' => false,
-                'registrasi_admin_aktif' => false,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]
-        );
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'Admin Sekolah', 'admin-manual-origin@example.com');
 
         $response = $this
-            ->withServerVariables(['REMOTE_ADDR' => '10.10.50.1'])
-            ->postJson('/api/auth/register', [
+            ->actingAs($admin)
+            ->postJson('/api/admin/users/provision', [
                 'nama' => 'Siswa Manual',
                 'email' => 'siswa.manual@example.com',
                 'password' => 'Str0ng!Passw0rd',
                 'role' => 'siswa',
+                'nis' => '10002',
+                'kelas' => 'X-2',
             ]);
 
         $response->assertCreated();
@@ -150,7 +143,8 @@ class ProfileProvisionOriginTest extends TestCase
             'tenant_id' => $tenantId,
             'nama' => 'Siswa Manual',
             'email' => 'siswa.manual@example.com',
-            'created_via' => 'manual_registration',
+            'created_via' => 'admin_created',
+            'created_by' => $admin->id,
         ]);
     }
 

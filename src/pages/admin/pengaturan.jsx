@@ -64,9 +64,6 @@ const SETTINGS_SELECT_COLUMNS = [
   'link_facebook',
   'link_youtube',
   'link_tiktok',
-  'registrasi_siswa_aktif',
-  'registrasi_guru_aktif',
-  'registrasi_admin_aktif',
   'max_ekskul_per_siswa',
   'tahun_ajaran',
   'semester_aktif',
@@ -171,8 +168,7 @@ const SETTINGS_MENU_IDS = new Set([
   'identity',
   'academic',
   'drive',
-  'admin',
-  'registration'
+  'admin'
 ])
 
 const resolveSettingsMenuFromSearch = (search = '') => {
@@ -541,9 +537,6 @@ export default function APengaturan() {
     link_facebook: '',
     link_youtube: '',
     link_tiktok: '',
-    registrasi_siswa_aktif: true,
-    registrasi_guru_aktif: false,
-    registrasi_admin_aktif: false,
     max_ekskul_per_siswa: 3
   })
 
@@ -733,9 +726,6 @@ export default function APengaturan() {
         link_facebook: data.link_facebook || '',
         link_youtube: data.link_youtube || '',
         link_tiktok: data.link_tiktok || '',
-        registrasi_siswa_aktif: data.registrasi_siswa_aktif ?? true,
-        registrasi_guru_aktif: data.registrasi_guru_aktif ?? false,
-        registrasi_admin_aktif: data.registrasi_admin_aktif ?? false,
         max_ekskul_per_siswa: normalizeEskulLimit(data.max_ekskul_per_siswa)
       }))
 
@@ -895,9 +885,6 @@ export default function APengaturan() {
             link_facebook: row.link_facebook || '',
             link_youtube: row.link_youtube || '',
             link_tiktok: row.link_tiktok || '',
-            registrasi_siswa_aktif: row.registrasi_siswa_aktif ?? true,
-            registrasi_guru_aktif: row.registrasi_guru_aktif ?? false,
-            registrasi_admin_aktif: row.registrasi_admin_aktif ?? false,
             max_ekskul_per_siswa: normalizeEskulLimit(row.max_ekskul_per_siswa)
           }))
           const nextPeriodForm = resolvePeriodForm(row)
@@ -1295,40 +1282,6 @@ export default function APengaturan() {
     form.max_ekskul_per_siswa
   ])
 
-  async function handleCheckboxChange(e) {
-    if (!isAuthorized) return
-
-    const { name, checked } = e.target
-    setForm((prev) => ({ ...prev, [name]: checked }))
-
-    try {
-      if (!settingsId) {
-        pushToast('error', 'ID pengaturan belum siap, coba beberapa detik lagi.')
-        return
-      }
-
-      const updateData = { [name]: checked, updated_at: new Date().toISOString() }
-
-      const { error } = await supabase
-        .from('settings')
-        .update(updateData)
-        .eq('id', settingsId)
-
-      if (error) throw error
-      const savedRow = {
-        ...(lastSettingsRowRef.current || queryClient.getQueryData(SETTINGS_QUERY_KEY) || {}),
-        ...updateData,
-        id: settingsId
-      }
-      lastSettingsRowRef.current = savedRow
-      writeCachedSettingsRow(savedRow)
-      queryClient.setQueryData(SETTINGS_QUERY_KEY, savedRow)
-      pushToast('success', 'Pengaturan registrasi berhasil diperbarui.')
-    } catch (err) {
-      pushToast('error', 'Gagal menyimpan pengaturan: ' + err.message)
-    }
-  }
-
   async function saveSettings(showToast = false) {
     if (!isAuthorized) return
     setSaving(true)
@@ -1350,9 +1303,6 @@ export default function APengaturan() {
         link_facebook: sanitizeUrl(form.link_facebook),
         link_youtube: sanitizeUrl(form.link_youtube),
         link_tiktok: sanitizeUrl(form.link_tiktok),
-        registrasi_siswa_aktif: form.registrasi_siswa_aktif,
-        registrasi_guru_aktif: form.registrasi_guru_aktif,
-        registrasi_admin_aktif: form.registrasi_admin_aktif,
         max_ekskul_per_siswa: normalizeEskulLimit(form.max_ekskul_per_siswa),
         updated_at: new Date().toISOString()
       }
@@ -1797,7 +1747,7 @@ export default function APengaturan() {
     }
   ]
   const showSettingsMainColumn = ['identity', 'drive'].includes(activeSettingsMenu)
-  const showSettingsSidebarColumn = ['identity', 'admin', 'registration'].includes(activeSettingsMenu)
+  const showSettingsSidebarColumn = ['identity', 'admin'].includes(activeSettingsMenu)
   const settingsContentClass = activeSettingsMenu === 'identity'
     ? 'grid grid-cols-1 lg:grid-cols-3 gap-6'
     : 'space-y-6'
@@ -1810,7 +1760,7 @@ export default function APengaturan() {
     : 'Pengaturan Sistem'
   const pageDescription = isAcademicStandalone
     ? 'Kelola tahun ajaran penuh dan rentang bulan Ganjil/Genap.'
-    : 'Kelola identitas sekolah, akun admin, dan registrasi publik.'
+    : 'Kelola identitas sekolah dan akun admin.'
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -3039,91 +2989,6 @@ export default function APengaturan() {
               </div>
               )}
 
-              {activeSettingsMenu === 'registration' && (
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center space-x-2">
-                  <span>👥</span>
-                  <span>Pengaturan Registrasi Publik</span>
-                </h2>
-
-                <div className="space-y-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                    <div className="text-sm text-blue-700">
-                      <strong>Info:</strong> Pengaturan ini akan langsung tersimpan otomatis ketika diubah. Role yang tidak aktif akan disembunyikan di halaman registrasi publik.
-                    </div>
-                  </div>
-
-                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                    <input
-                      type="checkbox"
-                      name="registrasi_siswa_aktif"
-                      checked={form.registrasi_siswa_aktif}
-                      onChange={handleCheckboxChange}
-                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                    />
-                    <div className="flex-1">
-                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Siswa</span>
-                      <p className="text-sm text-gray-500 mt-1">Siswa dapat membuat akun sendiri melalui halaman registrasi publik</p>
-                    </div>
-                    <div
-                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_siswa_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
-                    >
-                      {form.registrasi_siswa_aktif ? 'AKTIF' : 'NON-AKTIF'}
-                    </div>
-                  </label>
-
-                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                    <input
-                      type="checkbox"
-                      name="registrasi_guru_aktif"
-                      checked={form.registrasi_guru_aktif}
-                      onChange={handleCheckboxChange}
-                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                    />
-                    <div className="flex-1">
-                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Guru</span>
-                      <p className="text-sm text-gray-500 mt-1">Guru dapat membuat akun sendiri melalui halaman registrasi publik</p>
-                    </div>
-                    <div
-                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_guru_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
-                    >
-                      {form.registrasi_guru_aktif ? 'AKTIF' : 'NON-AKTIF'}
-                    </div>
-                  </label>
-
-                  <label className="flex items-center space-x-3 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors duration-200">
-                    <input
-                      type="checkbox"
-                      name="registrasi_admin_aktif"
-                      checked={form.registrasi_admin_aktif}
-                      onChange={handleCheckboxChange}
-                      className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-all duration-200"
-                    />
-                    <div className="flex-1">
-                      <span className="text-gray-900 font-medium">Aktifkan Registrasi Admin</span>
-                      <p className="text-sm text-gray-500 mt-1">Admin dapat membuat akun sendiri melalui halaman registrasi publik</p>
-                    </div>
-                    <div
-                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${form.registrasi_admin_aktif ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
-                    >
-                      {form.registrasi_admin_aktif ? 'AKTIF' : 'NON-AKTIF'}
-                    </div>
-                  </label>
-
-                  {form.registrasi_admin_aktif && (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 transition-all duration-200">
-                      <p className="text-sm text-yellow-700 font-medium">
-                        ⚠️ PERINGATAN: Membuka pendaftaran admin untuk publik sangat berisiko. Hanya aktifkan jika benar-benar diperlukan dan dalam lingkungan pengembangan.
-                      </p>
-                    </div>
-                  )}
-
-                </div>
-              </div>
-              )}
             </div>
             )}
           </div>
