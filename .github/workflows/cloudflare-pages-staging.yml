@@ -33,7 +33,6 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'sismu-frontend-staging' }}
       CLOUDFLARE_PAGES_BACKEND_ORIGIN: ${{ vars.CLOUDFLARE_PAGES_BACKEND_ORIGIN || 'https://origin.sismu.biz.id' }}
-      CLOUDFLARE_PAGES_BACKEND_RESOLVE_OVERRIDE: ${{ vars.CLOUDFLARE_PAGES_BACKEND_RESOLVE_OVERRIDE || 'origin.sismu.biz.id' }}
       CLOUDFLARE_PAGES_EDGE_PROXY_SECRET: ${{ secrets.CLOUDFLARE_PAGES_EDGE_PROXY_SECRET }}
       CLOUDFLARE_PAGES_PLATFORM_API_HOST: ${{ vars.CLOUDFLARE_PAGES_PLATFORM_API_HOST || 'sismu.biz.id' }}
       VITE_API_URL: ${{ vars.CLOUDFLARE_PAGES_STAGING_API_URL || 'https://sismu.biz.id' }}
@@ -101,7 +100,6 @@ jobs:
 
           const worker = String.raw`
           const BACKEND_ORIGIN = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_BACKEND_ORIGIN || 'https://origin.sismu.biz.id')}
-          const BACKEND_RESOLVE_OVERRIDE = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_BACKEND_RESOLVE_OVERRIDE || '')}
           const EDGE_PROXY_SECRET = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_EDGE_PROXY_SECRET || '')}
           const PLATFORM_API_HOST = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_PLATFORM_API_HOST || 'sismu.biz.id')}
           const ROOT_DOMAIN = ${JSON.stringify(process.env.VITE_ROOT_DOMAIN || 'sismu.biz.id')}
@@ -202,25 +200,22 @@ jobs:
             const backendOrigin = new URL(BACKEND_ORIGIN)
             const publicHost = platformUtilityHost ? PLATFORM_API_HOST : incomingUrl.hostname
             backendUrl.protocol = backendOrigin.protocol
-            backendUrl.hostname = BACKEND_RESOLVE_OVERRIDE ? publicHost : backendOrigin.hostname
+            backendUrl.hostname = backendOrigin.hostname
             backendUrl.port = backendOrigin.port
 
             const init = backendRequestInit(request, incomingUrl, publicHost)
-            const fetchOptions = BACKEND_RESOLVE_OVERRIDE
-              ? { cf: { resolveOverride: normalizeHost(BACKEND_RESOLVE_OVERRIDE) } }
-              : undefined
 
             const backendRequest = () => new Request(backendUrl.toString(), init)
             const shouldRetry = SAFE_RETRY_METHODS.has(request.method.toUpperCase())
             let response
 
             try {
-              response = await fetch(backendRequest(), fetchOptions)
+              response = await fetch(backendRequest())
             } catch {
               if (!shouldRetry) return originUnavailable()
               await sleep(350)
               try {
-                response = await fetch(backendRequest(), fetchOptions)
+                response = await fetch(backendRequest())
               } catch {
                 return originUnavailable()
               }
@@ -230,7 +225,7 @@ jobs:
               if (!shouldRetry) return originUnavailable()
               await sleep(350)
               try {
-                const retryResponse = await fetch(backendRequest(), fetchOptions)
+                const retryResponse = await fetch(backendRequest())
                 if (!ORIGIN_TRANSIENT_STATUSES.has(retryResponse.status)) {
                   return retryResponse
                 }
