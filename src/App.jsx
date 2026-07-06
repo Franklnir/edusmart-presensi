@@ -156,9 +156,9 @@ const App = () => {
       const retryAfter = Math.max(3, Math.ceil(Number(event?.detail?.retryAfterMs || 0) / 1000))
       pushToast(
         'warning',
-        `Koneksi server sedang distabilkan. Coba lagi sekitar ${retryAfter} detik.`,
+        `Permintaan ditahan sementara agar halaman tetap stabil. Coba lagi sekitar ${retryAfter} detik.`,
         {
-          title: 'Server Menyambung Ulang',
+          title: 'Koneksi Server Dipulihkan',
           duration: 6500
         }
       )
