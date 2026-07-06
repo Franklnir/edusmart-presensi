@@ -81,6 +81,7 @@ deploy/release-prod.sh --ref <release_ref>
 curl -i http://127.0.0.1:${NGINX_HTTP_PORT:-80}/api/health
 docker compose --env-file .env.production -f docker-compose.prod.yml ps
 docker compose --env-file .env.production -f docker-compose.prod.yml logs --since=5m backend
+npm run smoke:public
 ```
 
 Cek manual minimum:
@@ -89,6 +90,7 @@ Cek manual minimum:
 - Halaman nilai, absensi, laporan, backup.
 - Export Excel/PDF contoh file.
 - Save pengaturan admin.
+- Console browser di Incognito tidak memiliki error merah dari domain SISMU berupa `500`, `403`, `404 asset`, atau `CSP blocked`.
 - Cek header keamanan API:
   - `curl -I http://127.0.0.1:${NGINX_HTTP_PORT:-80}/api/health`
   - pastikan ada `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.

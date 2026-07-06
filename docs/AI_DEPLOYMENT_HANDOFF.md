@@ -186,6 +186,7 @@ Frontend:
 ```bash
 npm run build
 npm run check
+npm run smoke:public
 ```
 
 Backend:
@@ -225,6 +226,7 @@ Cek pola penting di browser:
 - Export PDF berhasil.
 - Web Vitals masuk ke `/api/observability/web-vitals`.
 - Console tidak ada error CSP, CORS, CSRF, atau missing asset.
+- `npm run smoke:public` lulus untuk host publik yang diuji.
 
 ## Rollback
 

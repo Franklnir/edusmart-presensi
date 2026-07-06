@@ -67,6 +67,8 @@ Worker Cloudflare Pages mem-proxy path backend (`/api`, `/sanctum`, `/storage`, 
 
 Untuk host utilitas platform seperti `sismu.biz.id`, `www.sismu.biz.id`, `frontend.sismu.biz.id`, dan `*.pages.dev`, Worker memakai `CLOUDFLARE_PAGES_PLATFORM_API_HOST=sismu.biz.id` sebagai konteks backend. Ini mencegah loop saat apex dipindah dari VPS ke Cloudflare Pages.
 
+Worker juga menjawab `POST /cdn-cgi/rum` dengan `204` agar injeksi Browser Insights Cloudflare tidak terlihat sebagai `404` dari domain sekolah saat DevTools dibuka. Monitoring performa utama tetap memakai endpoint internal `/api/observability/web-vitals`.
+
 ## Backend VPS
 
 Pastikan env backend mengizinkan subdomain staging:
@@ -88,6 +90,7 @@ Dengan konfigurasi ini, `frontend.sismu.biz.id` masih satu site dengan API `sism
 - Tes upload kecil dan export PDF.
 - Tes Web Vitals tetap terkirim ke `/api/observability/web-vitals`.
 - Pastikan Console browser tidak ada error CSP/CORS/CSRF.
+- Jalankan `npm run smoke:public` untuk cek halaman publik, CSRF, API health, asset utama, CSP, dan endpoint Cloudflare RUM.
 
 ## Cutover produksi bertahap
 
