@@ -216,7 +216,7 @@ class AuthSuperAdminHardeningTest extends TestCase
         $response->assertJsonPath('code', 'ROOT_DOMAIN_AUTH_DISABLED');
     }
 
-    public function test_public_register_checks_duplicate_email_inside_current_tenant_only(): void
+    public function test_public_register_is_disabled_even_when_registration_settings_are_enabled(): void
     {
         config()->set('tenancy.allow_header_override', true);
 
@@ -242,24 +242,12 @@ class AuthSuperAdminHardeningTest extends TestCase
                 'role' => 'siswa',
             ]);
 
-        $allowedInOtherTenant->assertCreated();
-        $this->assertDatabaseHas('profiles', [
+        $allowedInOtherTenant->assertStatus(403);
+        $allowedInOtherTenant->assertJsonPath('code', 'PUBLIC_REGISTRATION_DISABLED');
+        $this->assertDatabaseMissing('profiles', [
             'tenant_id' => $tenantB,
             'email' => 'lintas@example.com',
         ]);
-
-        $duplicateInSameTenant = $this
-            ->withServerVariables(['REMOTE_ADDR' => '10.10.21.2'])
-            ->withHeader('X-Tenant', 'sekolah-tiga')
-            ->postJson('/api/auth/register', [
-                'nama' => 'Duplikat',
-                'email' => 'lintas@example.com',
-                'password' => 'Str0ng!Passw0rd',
-                'role' => 'siswa',
-            ]);
-
-        $duplicateInSameTenant->assertStatus(409);
-        $duplicateInSameTenant->assertJsonPath('error', 'Email sudah terdaftar di sekolah ini');
     }
 
     public function test_public_register_rejects_admin_role_even_when_setting_enabled(): void
@@ -280,7 +268,7 @@ class AuthSuperAdminHardeningTest extends TestCase
         ]);
 
         $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Registrasi admin publik tidak diizinkan. Admin baru harus dibuat dari panel admin.');
+        $response->assertJsonPath('code', 'PUBLIC_REGISTRATION_DISABLED');
         $this->assertDatabaseMissing('users', [
             'email' => 'public-admin@example.com',
         ]);
@@ -301,13 +289,13 @@ class AuthSuperAdminHardeningTest extends TestCase
             ]);
 
         $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Registrasi role ini tidak dibuka');
+        $response->assertJsonPath('code', 'PUBLIC_REGISTRATION_DISABLED');
         $this->assertDatabaseMissing('users', [
             'email' => 'public-guru@example.com',
         ]);
     }
 
-    public function test_public_register_allows_guru_role_when_setting_is_explicitly_enabled(): void
+    public function test_public_register_rejects_guru_role_even_when_setting_is_explicitly_enabled(): void
     {
         $tenantId = $this->defaultTenantId();
         DB::table('settings')->where('tenant_id', $tenantId)->delete();
@@ -330,11 +318,11 @@ class AuthSuperAdminHardeningTest extends TestCase
                 'role' => 'guru',
             ]);
 
-        $response->assertStatus(201);
-        $this->assertDatabaseHas('profiles', [
+        $response->assertStatus(403);
+        $response->assertJsonPath('code', 'PUBLIC_REGISTRATION_DISABLED');
+        $this->assertDatabaseMissing('profiles', [
             'tenant_id' => $tenantId,
             'email' => 'enabled-guru@example.com',
-            'role' => 'guru',
         ]);
     }
 
