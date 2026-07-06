@@ -91,6 +91,7 @@ Cek manual minimum:
 - Export Excel/PDF contoh file.
 - Save pengaturan admin.
 - Console browser di Incognito tidak memiliki error merah dari domain SISMU berupa `500`, `403`, `404 asset`, atau `CSP blocked`.
+- Jika console/smoke hanya gagal pada `POST /cdn-cgi/rum`, matikan Browser Insights/RUM di Cloudflare karena `/cdn-cgi/*` adalah path reserved Cloudflare.
 - Cek header keamanan API:
   - `curl -I http://127.0.0.1:${NGINX_HTTP_PORT:-80}/api/health`
   - pastikan ada `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.

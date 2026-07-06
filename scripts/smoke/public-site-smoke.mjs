@@ -10,6 +10,7 @@ const urls = String(process.env.SMOKE_PUBLIC_URLS || process.env.SMOKE_BASE_URL 
   .filter(Boolean)
 
 const timeoutMs = Number(process.env.SMOKE_TIMEOUT_MS || 20000)
+const requireCloudflareRumClean = process.env.SMOKE_REQUIRE_CLOUDFLARE_RUM_CLEAN !== 'false'
 const failures = []
 const checkedAssets = new Set()
 
@@ -20,6 +21,10 @@ const fail = (message) => {
 
 const ok = (message) => {
   console.log(`[ok] ${message}`)
+}
+
+const skip = (message) => {
+  console.log(`[skip] ${message}`)
 }
 
 const withTimeout = async (promise, label) => {
@@ -160,6 +165,12 @@ const checkCloudflareRum = async (baseUrl) => {
     headers: { 'content-type': 'application/json' },
     body: '{}'
   })
+
+  if (response?.status === 404) {
+    fail(`${url} -> 404 (Cloudflare Browser Insights/RUM masih aktif, tetapi /cdn-cgi/* adalah path reserved Cloudflare. Matikan Browser Insights/RUM, atau set SMOKE_REQUIRE_CLOUDFLARE_RUM_CLEAN=false jika sengaja diterima.)`)
+    return
+  }
+
   assertStatus(url, response, [200, 202, 204])
 }
 
@@ -170,7 +181,11 @@ for (const baseUrl of urls) {
   await checkCsrf(baseUrl)
   await checkJsonEndpoint(baseUrl, '/api/health')
   await checkJsonEndpoint(baseUrl, '/api/public/settings')
-  await checkCloudflareRum(baseUrl)
+  if (requireCloudflareRumClean) {
+    await checkCloudflareRum(baseUrl)
+  } else {
+    skip(`${baseUrl}: pemeriksaan Cloudflare RUM dinonaktifkan`)
+  }
 }
 
 if (failures.length > 0) {
