@@ -142,20 +142,15 @@ export function buildNavigationMenu({ effectiveRole, isSuperAdmin, isWaliKelas, 
       }))
 
     if (scanFeatureKeys.length > 0) {
-      delegatedItems.push({
-        id: 'guru-admin-scan',
-        group: 'Scan Kehadiran',
-        icon: 'scan',
-        items: scanFeatureKeys
-          .map((featureKey) => ADMIN_FEATURE_BY_KEY[featureKey])
-          .filter(Boolean)
-          .map((feature) => ({
-            id: `guru-admin-${feature.key}`,
-            to: feature.guruPath,
-            label: feature.label,
-            icon: feature.icon,
-          })),
-      })
+      delegatedItems.push(...scanFeatureKeys
+        .map((featureKey) => ADMIN_FEATURE_BY_KEY[featureKey])
+        .filter(Boolean)
+        .map((feature) => ({
+          id: `guru-admin-${feature.key}`,
+          to: feature.guruPath,
+          label: feature.label,
+          icon: feature.icon,
+        })))
     }
 
     if (delegatedItems.length > 0) {
