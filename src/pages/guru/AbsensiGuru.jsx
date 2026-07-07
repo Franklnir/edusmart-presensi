@@ -6,6 +6,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
+import { sortStudentsByAttendanceOrder } from '../../utils/studentOrdering'
 import {
   filterSchedulesForSemester,
   scheduleScopeFromRow,
@@ -1723,7 +1724,7 @@ function AbsensiGuru() {
         pushToast('error', 'Gagal memuat data siswa')
         setSiswa([])
       } else {
-        setSiswa(students || [])
+        setSiswa(sortStudentsByAttendanceOrder(students || []))
       }
 
       const { data: absen, error: absenError } = absenRes
@@ -2061,7 +2062,7 @@ function AbsensiGuru() {
         return
       }
 
-      const siswa = siswaRes.data || []
+      const siswa = sortStudentsByAttendanceOrder(siswaRes.data || [])
       const absensi = absensiRes.data || []
       const ajuan = ajuanRes.data || []
       const absenUidSet = new Set(absensi.map(a => a.uid))

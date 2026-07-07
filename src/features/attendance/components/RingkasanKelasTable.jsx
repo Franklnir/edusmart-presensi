@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import ProfileAvatar from '../../../components/ProfileAvatar'
 import { supabase } from '../../../lib/supabase'
+import { compareStudentsByAttendanceOrder } from '../../../utils/studentOrdering'
 
 export default function RingkasanKelasTable({
   kelas,
@@ -95,7 +96,7 @@ export default function RingkasanKelasTable({
         }
       })
 
-      mapped.sort((a, b) => (a.nama || '').localeCompare(b.nama || ''))
+      mapped.sort(compareStudentsByAttendanceOrder)
       setDataSiswa(mapped)
     } catch (error) {
       console.error('Error loading data siswa:', error)

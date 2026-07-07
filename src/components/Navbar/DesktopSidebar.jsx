@@ -40,9 +40,9 @@ const DesktopSidebar = React.memo(({
   userName
 }) => (
   <>
-    <div className={`hidden md:block flex-shrink-0 transition-all duration-300 ease-in-out ${collapsed ? 'w-[64px]' : 'w-52'}`} />
+    <div className={`hidden md:block flex-shrink-0 transition-all duration-300 ease-in-out ${collapsed ? 'w-[64px]' : 'w-56'}`} />
 
-    <aside className={`theme-sidebar hidden md:flex fixed inset-y-0 left-0 flex-col min-h-0 z-40 bg-white border-r border-slate-100 shadow-sidebar transition-all duration-300 ease-in-out ${collapsed ? 'w-[64px]' : 'w-52'}`}>
+    <aside className={`theme-sidebar hidden md:flex fixed inset-y-0 left-0 flex-col min-h-0 z-40 bg-white border-r border-slate-100 shadow-sidebar transition-all duration-300 ease-in-out ${collapsed ? 'w-[64px]' : 'w-56'}`}>
       <div className="flex items-center gap-2 px-3 pt-3 pb-2 border-b border-slate-100">
         <div className="flex items-center justify-center w-9 h-9 rounded-full bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-sm flex-shrink-0 overflow-hidden ring-1 ring-white/80">
           {schoolLogoUrl ? (

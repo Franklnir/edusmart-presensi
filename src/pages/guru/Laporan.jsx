@@ -7,6 +7,7 @@ import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
+import { sortStudentsByAttendanceOrder } from '../../utils/studentOrdering'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
@@ -89,7 +90,7 @@ const toArray = (value) => {
 
 const normalizeTeacherSummaryData = (data) => ({
   ...(data || {}),
-  siswa: toArray(data?.siswa),
+  siswa: sortStudentsByAttendanceOrder(toArray(data?.siswa)),
   tugas: toArray(data?.tugas),
   quiz: toArray(data?.quiz),
   dateStrings: toArray(data?.dateStrings)
@@ -395,7 +396,7 @@ export default function LaporanRekap() {
           .in('id', targetIds)
           .order('nama')
         if (error) throw error
-        return data || []
+        return sortStudentsByAttendanceOrder(data || [])
       }
 
       let query = supabase
@@ -408,7 +409,7 @@ export default function LaporanRekap() {
       else return []
       const { data, error } = await query
       if (error) throw error
-      return data || []
+      return sortStudentsByAttendanceOrder(data || [])
     },
     [isActiveReportPeriod, reportPeriod.tahunAjaran]
   )
@@ -1052,9 +1053,7 @@ export default function LaporanRekap() {
         })
       })
 
-      const students = Array.from(studentsById.values()).sort((a, b) =>
-        String(a.nama || '').localeCompare(String(b.nama || ''), 'id')
-      )
+      const students = sortStudentsByAttendanceOrder(Array.from(studentsById.values()))
       const studentIds = students.map((s) => s.id).filter(Boolean)
 
       const detailBatchItems = []
@@ -1629,9 +1628,9 @@ export default function LaporanRekap() {
       if (quizResult.error) throw quizResult.error
       if (absensiResult.error) throw absensiResult.error
 
-      let siswaData = (siswaResult.data || []).filter((s) =>
+      let siswaData = sortStudentsByAttendanceOrder((siswaResult.data || []).filter((s) =>
         kelasAliasNormSet.has(normalizeKelasKey(s.kelas))
-      )
+      ))
       const jadwalKelasList = filterSchedulesForSemester(jadwalResult.data || [], selectedSemester)
       const tugasList = tugasResult.data || []
       const quizList = quizResult.data || []
@@ -1723,7 +1722,7 @@ export default function LaporanRekap() {
             .in('id', historicalStudentIds)
             .order('nama')
           if (historicalSiswaErr) throw historicalSiswaErr
-          siswaData = historicalSiswaRaw || []
+          siswaData = sortStudentsByAttendanceOrder(historicalSiswaRaw || [])
         } else {
           siswaData = []
         }
@@ -1899,7 +1898,7 @@ export default function LaporanRekap() {
           }
         })
 
-      const rekapEskulSiswa = (siswaData || []).map((s) => {
+      const rekapEskulSiswa = sortStudentsByAttendanceOrder((siswaData || []).map((s) => {
         const uid = String(s.id || '')
         const ekskulSet = anggotaEskulByUser.get(uid) || new Set()
         const perEskul = Array.from(ekskulSet)
@@ -1938,7 +1937,7 @@ export default function LaporanRekap() {
           perEskul,
           totalAbsensi
         }
-      })
+      }))
 
       const makeEmptyEskulRekap = () => ({
         jumlahEkskul: 0,
@@ -2758,17 +2757,18 @@ export default function LaporanRekap() {
   }, [rankedRekapWaliSiswa, searchRekapWali, rekapStatusFilter])
 
   const filteredRekapEskulSiswa = useMemo(() => {
-    if (!rankedRekapWaliSiswa.length) return []
+    const absenOrderedRows = sortStudentsByAttendanceOrder(rekapWaliData?.siswa || [])
+    if (!absenOrderedRows.length) return []
     const q = searchRekapEskul.trim().toLowerCase()
-    if (!q) return rankedRekapWaliSiswa
+    if (!q) return absenOrderedRows
 
-    return rankedRekapWaliSiswa.filter((s) => {
+    return absenOrderedRows.filter((s) => {
       const nama = String(s.nama || '').toLowerCase()
       const nis = String(s.nis || '').toLowerCase()
       const daftarEskul = String((s.eskul?.eskulList || []).join(', ')).toLowerCase()
       return nama.includes(q) || nis.includes(q) || daftarEskul.includes(q)
     })
-  }, [rankedRekapWaliSiswa, searchRekapEskul])
+  }, [rekapWaliData?.siswa, searchRekapEskul])
 
   const ensureNilaiMutationAllowed = useCallback(async () => {
     return true
@@ -3278,11 +3278,8 @@ export default function LaporanRekap() {
       })
     } else if (type === 'rekap_eskul' && rekapWaliData) {
       csv += `No${sep}Nama${sep}NIS${sep}Jml Eskul${sep}Daftar Eskul${sep}Eskul H${sep}Eskul I${sep}Eskul S${sep}Eskul A${sep}Total Presensi Eskul\n`
-      const rankedRows = rankSiswaWali(
-        rekapWaliData.siswa || [],
-        rekapWaliData.policy || rankingPolicy
-      )
-      rankedRows.forEach((s, i) => {
+      const rows = sortStudentsByAttendanceOrder(rekapWaliData.siswa || [])
+      rows.forEach((s, i) => {
         const daftarEskul = (s.eskul?.eskulList || []).join(', ')
         const safeDaftarEskul = String(daftarEskul || '-').replace(/"/g, '""')
         csv += `${i + 1}${sep}"${s.nama}"${sep}'${s.nis}'${sep}${s.eskul?.jumlahEkskul || 0}${sep}"${safeDaftarEskul}"${sep}${s.eskul?.totalAbsensi?.Hadir || 0}${sep}${s.eskul?.totalAbsensi?.Izin || 0}${sep}${s.eskul?.totalAbsensi?.Sakit || 0}${sep}${s.eskul?.totalAbsensi?.Alpha || 0}${sep}${s.eskul?.totalAbsensi?.total || 0}\n`
@@ -3521,11 +3518,8 @@ export default function LaporanRekap() {
       cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
     })
 
-    const rankedRows = rankSiswaWali(
-      rekapWaliData.siswa || [],
-      rekapWaliData.policy || rankingPolicy
-    )
-    rankedRows.forEach((s, i) => {
+    const rows = sortStudentsByAttendanceOrder(rekapWaliData.siswa || [])
+    rows.forEach((s, i) => {
       const row = ws.addRow([
         i + 1,
         s.nama,

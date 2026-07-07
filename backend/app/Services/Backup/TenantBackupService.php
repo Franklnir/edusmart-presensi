@@ -65,6 +65,13 @@ class TenantBackupService
                 'contains_storage_metadata' => true,
                 'contains_linked_users' => true,
                 'restore_strategy' => 'id_or_unique_key_upsert',
+                'storage_policy' => [
+                    'binary_file_policy' => 'metadata_only',
+                    'metadata_table' => 'storage_files',
+                    'reference_fields' => ['provider', 'bucket', 'path', 'storage_reference_url', 'metadata'],
+                    'signed_urls_included' => false,
+                    's3_r2_minio_objects_included' => false,
+                ],
                 'notes' => [
                     'Backup berisi database tenant dan metadata file storage. Isi file biner dari S3/R2/MinIO tidak ikut dibackup.',
                     'Restore mengarah ke tenant target yang dipilih, bukan memindahkan tenant asal.',
@@ -501,6 +508,11 @@ class TenantBackupService
         $active = $this->tenantActiveAcademicPeriod($tenantId);
         $year = $this->activeAcademicYear($tenantId);
         $months = $this->academicYearMonths($year);
+        if (empty($months)) {
+            $fallback = AcademicPeriod::current();
+            $year = (string) ($fallback['tahun_ajaran'] ?? $year);
+            $months = $this->academicYearMonths($year);
+        }
         $now = now('Asia/Jakarta');
         $cacheKey = $this->monthlyStatusCacheKey($tenantId, $year);
         if ($refresh) {
@@ -513,6 +525,7 @@ class TenantBackupService
         }
 
         $periodActivity = [];
+        $activityScanComplete = true;
         if (! empty($months)) {
             try {
                 $activityStart = Carbon::parse((string) ($months[0]['start_date'] ?? ''), 'Asia/Jakarta')->startOfDay();
@@ -524,6 +537,7 @@ class TenantBackupService
                     $periodActivity = $this->tenantDataActivityByDayCached($tenantId, $activityStart, $activityEnd, $refresh);
                 }
             } catch (\Throwable $e) {
+                $activityScanComplete = false;
                 $periodActivity = [];
             }
         }
@@ -558,9 +572,12 @@ class TenantBackupService
         }
 
         $backedUp = count(array_filter($items, static fn ($item) => (bool) ($item['is_backed_up'] ?? false)));
+        $firstMonth = $months[0] ?? null;
+        $lastMonth = $months[count($months) - 1] ?? null;
 
         $statusPayload = [
             'tenant' => $this->tenantSnapshot($tenantId),
+            'drive' => $this->monthlyGoogleDriveStatus($tenantId, $refresh),
             'schedule' => [
                 'enabled' => true,
                 'timezone' => 'Asia/Jakarta',
@@ -571,12 +588,21 @@ class TenantBackupService
                 'destination' => 'Google Drive sekolah',
                 'server_time' => $now->toIso8601String(),
                 'server_time_label' => $now->format('Y-m-d H:i:s').' WIB',
+                'activity_index' => [
+                    'complete' => $activityScanComplete,
+                    'source' => 'tenant_activity_priority_tables',
+                    'message' => $activityScanComplete
+                        ? 'Indeks aktivitas tenant berhasil dihitung.'
+                        : 'Jadwal tetap ditampilkan, tetapi detail aktivitas harian sedang memakai fallback kosong.',
+                ],
             ],
             'academic_period' => [
                 'tahun_ajaran' => $year,
                 'semester' => $active['semester'] ?? null,
                 'label' => 'Tahun ajaran '.$year,
-                'range_label' => ($months[0]['label'] ?? '').' - '.($months[count($months) - 1]['label'] ?? ''),
+                'range_label' => $firstMonth && $lastMonth
+                    ? (($firstMonth['label'] ?? '').' - '.($lastMonth['label'] ?? ''))
+                    : null,
             ],
             'summary' => [
                 'total_months' => count($items),
@@ -601,6 +627,56 @@ class TenantBackupService
         $spacing = (int) config('backup.monthly_auto_tenant_spacing_minutes', 4);
 
         return 'Setiap hari '.$start.' WIB, catch-up bulanan bertahap tiap '.$spacing.' menit per sekolah';
+    }
+
+    private function monthlyGoogleDriveStatus(string $tenantId, bool $refresh = false): array
+    {
+        try {
+            if ($refresh) {
+                $recovery = $this->googleDriveService->recoverTenantConnection($tenantId, 'monthly-status-refresh');
+                $payload = $recovery['status_payload'] ?? null;
+                if (is_array($payload)) {
+                    $payload['auto_recovery'] = [
+                        'attempted' => true,
+                        'recovered' => (bool) ($recovery['recovered'] ?? false),
+                        'requires_reconnect' => (bool) ($recovery['requires_reconnect'] ?? false),
+                        'message' => (string) ($recovery['message'] ?? ''),
+                    ];
+
+                    return $payload;
+                }
+            }
+
+            $status = $this->googleDriveService->statusForTenant($tenantId, false);
+            $status['auto_recovery'] = [
+                'attempted' => false,
+                'recovered' => false,
+                'requires_reconnect' => false,
+                'message' => null,
+            ];
+
+            return $status;
+        } catch (\Throwable $e) {
+            return [
+                'provider_configured' => false,
+                'configured' => false,
+                'ready' => false,
+                'status' => GoogleDriveService::STATUS_NEEDS_ATTENTION,
+                'status_label' => 'Google Drive perlu dicek',
+                'is_enabled' => false,
+                'account_email' => null,
+                'folder_name' => null,
+                'folder_url' => null,
+                'last_checked_at' => now('Asia/Jakarta')->toIso8601String(),
+                'last_error' => Str::limit($e->getMessage(), 500, ''),
+                'auto_recovery' => [
+                    'attempted' => $refresh,
+                    'recovered' => false,
+                    'requires_reconnect' => false,
+                    'message' => 'Status Google Drive belum bisa dibaca. Sistem akan mencoba lagi saat backup berjalan.',
+                ],
+            ];
+        }
     }
 
     public function backupFailureStatus(string $message): string
@@ -1051,7 +1127,7 @@ class TenantBackupService
 
     private function monthlyStatusCacheKey(string $tenantId, string $academicYear): string
     {
-        return 'tenant-backup-monthly-status:'.trim($tenantId).':'.trim($academicYear);
+        return 'tenant-backup-monthly-status:v2:'.trim($tenantId).':'.trim($academicYear);
     }
 
     private function buildMonthlyDayStatuses(array $window, Carbon $now, ?Carbon $lastBackupAt, array $dailyActivity): array
@@ -1204,47 +1280,132 @@ class TenantBackupService
     private function tenantDataActivityByDay(string $tenantId, Carbon $startAt, Carbon $endAt): array
     {
         $activity = [];
-        foreach ($this->backupTablesForTenant() as $table) {
-            $dateColumns = $this->tenantDataActivityColumns($table);
-            if (empty($dateColumns)) {
+        foreach ($this->tenantDataActivityTables() as $table) {
+            $dateColumn = $this->preferredTenantActivityColumn($table);
+            if (! $dateColumn) {
                 continue;
             }
 
-            foreach ($dateColumns as $dateColumn) {
-                try {
-                    $wrappedDateColumn = DB::connection()->getQueryGrammar()->wrap($dateColumn);
-                    $dateExpression = 'DATE('.$wrappedDateColumn.')';
-                    $rows = DB::table($table)
-                        ->where('tenant_id', $tenantId)
-                        ->where($dateColumn, '>=', $this->backupDateColumnValue($dateColumn, $startAt))
-                        ->where($dateColumn, '<=', $this->backupDateColumnValue($dateColumn, $endAt))
-                        ->selectRaw($dateExpression.' as backup_day, MAX('.$wrappedDateColumn.') as latest_at, COUNT(*) as row_count')
-                        ->groupByRaw($dateExpression)
-                        ->get();
+            try {
+                $wrappedDateColumn = DB::connection()->getQueryGrammar()->wrap($dateColumn);
+                $dateExpression = 'DATE('.$wrappedDateColumn.')';
+                $rows = DB::table($table)
+                    ->where('tenant_id', $tenantId)
+                    ->where($dateColumn, '>=', $this->backupDateColumnValue($dateColumn, $startAt))
+                    ->where($dateColumn, '<=', $this->backupDateColumnValue($dateColumn, $endAt))
+                    ->selectRaw($dateExpression.' as backup_day, MAX('.$wrappedDateColumn.') as latest_at, COUNT(*) as row_count')
+                    ->groupByRaw($dateExpression)
+                    ->get();
 
-                    foreach ($rows as $row) {
-                        $date = $this->normalizeActivityDate($row->backup_day ?? null);
-                        $latestAt = $this->normalizeActivityTimestamp($row->latest_at ?? null);
-                        if (! $date || ! $latestAt) {
-                            continue;
-                        }
-
-                        $currentLatest = $this->activityLatestAt($activity[$date] ?? null);
-                        $candidate = Carbon::parse($latestAt, 'Asia/Jakarta');
-                        if (! $currentLatest || $candidate->greaterThan($currentLatest)) {
-                            $activity[$date]['latest_at'] = $candidate->toIso8601String();
-                        }
-                        $activity[$date]['row_count'] = (int) ($activity[$date]['row_count'] ?? 0) + (int) ($row->row_count ?? 0);
+                foreach ($rows as $row) {
+                    $date = $this->normalizeActivityDate($row->backup_day ?? null);
+                    $latestAt = $this->normalizeActivityTimestamp($row->latest_at ?? null);
+                    if (! $date || ! $latestAt) {
+                        continue;
                     }
-                } catch (\Throwable $e) {
-                    continue;
+
+                    $currentLatest = $this->activityLatestAt($activity[$date] ?? null);
+                    $candidate = Carbon::parse($latestAt, 'Asia/Jakarta');
+                    if (! $currentLatest || $candidate->greaterThan($currentLatest)) {
+                        $activity[$date]['latest_at'] = $candidate->toIso8601String();
+                    }
+                    $activity[$date]['row_count'] = (int) ($activity[$date]['row_count'] ?? 0) + (int) ($row->row_count ?? 0);
                 }
+            } catch (\Throwable $e) {
+                continue;
             }
         }
 
         ksort($activity);
 
         return $activity;
+    }
+
+    private function tenantDataActivityTables(): array
+    {
+        $available = array_fill_keys($this->backupTablesForTenant(), true);
+        $preferred = [
+            'settings',
+            'profiles',
+            'student_class_histories',
+            'kelas',
+            'mata_pelajaran',
+            'guru_mapel_bobot',
+            'guru_mapel_manual_nilai',
+            'rapot_siswa',
+            'rapot_siswa_items',
+            'struktur_sekolah',
+            'kelas_struktur',
+            'jadwal',
+            'academic_schedule_period_decisions',
+            'academic_rollover_exceptions',
+            'pengumuman',
+            'ekskul',
+            'ekskul_anggota',
+            'organisasi',
+            'organisasi_anggota',
+            'osis_anggota',
+            'absensi_settings',
+            'absensi_rfid_settings',
+            'absensi',
+            'absensi_ajuan',
+            'absensi_eskul',
+            'absensi_scan_temp',
+            'rfid_scans',
+            'rfid_devices',
+            'rfid_device_events',
+            'jam_kosong',
+            'tugas',
+            'tugas_jawaban',
+            'quizzes',
+            'quiz_submissions',
+            'quiz_answers',
+            'quiz_retake_logs',
+            'quiz_violation_logs',
+            'certificates',
+            'printed_cards',
+            'storage_files',
+            'tenant_storage_quotas',
+            'whatsapp_integrations',
+            'whatsapp_notification_settings',
+        ];
+
+        return array_values(array_filter(
+            $preferred,
+            fn (string $table) => isset($available[$table]) && $this->tenantDataActivityColumns($table) !== []
+        ));
+    }
+
+    private function preferredTenantActivityColumn(string $table): ?string
+    {
+        $preferred = match ($table) {
+            'absensi' => ['updated_at', 'created_at', 'waktu', 'tanggal'],
+            'absensi_ajuan' => ['updated_at', 'created_at', 'waktu_respon', 'tanggal'],
+            'absensi_scan_temp' => ['updated_at', 'created_at', 'scan_at', 'tanggal'],
+            'rfid_scans' => ['updated_at', 'created_at', 'scan_at', 'scanned_at'],
+            'tugas_jawaban' => ['updated_at', 'dinilai_at', 'waktu_submit', 'created_at'],
+            'quiz_submissions' => ['updated_at', 'finished_at', 'started_at', 'created_at'],
+            'storage_files' => ['updated_at', 'uploaded_at', 'created_at'],
+            default => [
+                'updated_at',
+                'created_at',
+                'tanggal',
+                'waktu',
+                'measured_at',
+                'uploaded_at',
+                'queued_at',
+                'sent_at',
+                'requested_at',
+                'approved_at',
+                'printed_at',
+                'issued_at',
+                'started_at',
+                'finished_at',
+                'valid_from',
+            ],
+        };
+
+        return $this->firstExistingColumn($table, $preferred);
     }
 
     private function tenantDataActivityColumns(string $table): array

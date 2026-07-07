@@ -17,9 +17,12 @@ trait HasTenantBackupLogic
     {
         return [
             'users',
-            'settings', 'profiles', 'admin_users', 'admin_feature_permissions', 'kelas', 'mata_pelajaran', 'guru_mapel_bobot',
+            'settings', 'profiles', 'student_class_histories',
+            'admin_users', 'admin_feature_permissions', 'kelas', 'mata_pelajaran', 'guru_mapel_bobot',
             'guru_mapel_manual_nilai', 'rapot_siswa', 'rapot_siswa_items',
-            'struktur_sekolah', 'kelas_struktur', 'jadwal', 'pengumuman',
+            'struktur_sekolah', 'kelas_struktur', 'jadwal',
+            'academic_schedule_period_decisions', 'academic_rollover_exceptions',
+            'pengumuman',
             'ekskul', 'ekskul_anggota', 'organisasi', 'organisasi_anggota', 'osis_anggota',
             'absensi_settings', 'absensi_rfid_settings', 'absensi', 'absensi_ajuan',
             'absensi_eskul', 'absensi_scan_temp', 'rfid_scans', 'jam_kosong',
@@ -32,9 +35,10 @@ trait HasTenantBackupLogic
             'import_siswa_histories', 'import_siswa_history_items',
             'import_guru_histories', 'import_guru_history_items',
             'kelas_deleted_histories',
-            'user_presence',
+            'user_presence', 'web_vital_events',
+            'tenant_storage_quotas', 'storage_files', 'storage_cleanup_jobs',
             'tenant_domains',
-            'tenant_google_drive_configs', 'tenant_google_drive_files',
+            'tenant_google_drive_configs', 'tenant_google_drive_files', 'tenant_backup_jobs',
             'tenant_mqtt_configs',
             'rfid_devices', 'rfid_device_events',
             'whatsapp_integrations', 'whatsapp_notification_settings', 'whatsapp_message_logs',
@@ -124,6 +128,7 @@ trait HasTenantBackupLogic
         return [
             'settings',
             'profiles',
+            'student_class_histories',
             'kelas',
             'mata_pelajaran',
             'guru_mapel_bobot',
@@ -132,9 +137,22 @@ trait HasTenantBackupLogic
             'rapot_siswa_items',
             'kelas_struktur',
             'struktur_sekolah',
+            'jadwal',
+            'academic_schedule_period_decisions',
+            'academic_rollover_exceptions',
             'ekskul',
             'organisasi',
+            'absensi_settings',
+            'absensi_rfid_settings',
             'admin_users',
+            'tenant_domains',
+            'tenant_google_drive_configs',
+            'tenant_mqtt_configs',
+            'tenant_storage_quotas',
+            'storage_files',
+            'rfid_devices',
+            'whatsapp_integrations',
+            'whatsapp_notification_settings',
             'allowed_registrations',
             'registration_otps',
         ];
@@ -704,7 +722,7 @@ trait HasTenantBackupLogic
         $columns = [];
         $columnMap = [];
         foreach ($rows as $row) {
-            $normalized = $this->normalizeBackupRow(is_array($row) ? $row : (array) $row);
+            $normalized = $this->normalizeBackupRow(is_array($row) ? $row : (array) $row, $name);
             $normalizedRows[] = $normalized;
 
             foreach (array_keys($normalized) as $column) {
@@ -1501,10 +1519,20 @@ trait HasTenantBackupLogic
         return $tables;
     }
 
-    private function normalizeBackupRow(array $row): array
+    private function normalizeBackupRow(array $row, string $table = ''): array
     {
+        if ($table === 'storage_files') {
+            $row = $this->appendStorageMetadataReference($row);
+        }
+
         $normalized = [];
         foreach ($row as $key => $value) {
+            if ($this->shouldOmitBackupBinaryValue((string) $key)) {
+                $normalized[$key] = '[omitted: binary/storage content is not included in tenant backup]';
+
+                continue;
+            }
+
             if (is_array($value) || is_object($value)) {
                 $encoded = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                 $normalized[$key] = $encoded === false ? '' : $encoded;
@@ -1522,6 +1550,49 @@ trait HasTenantBackupLogic
         }
 
         return $normalized;
+    }
+
+    private function appendStorageMetadataReference(array $row): array
+    {
+        $provider = trim((string) ($row['provider'] ?? 'storage'));
+        $bucket = trim((string) ($row['bucket'] ?? ''));
+        $path = trim((string) ($row['path'] ?? ''));
+
+        if ($path === '' || array_key_exists('storage_reference_url', $row)) {
+            return $row;
+        }
+
+        $scheme = match ($provider) {
+            'object_storage' => 'object-storage',
+            'neva_s3' => 'neva-s3',
+            default => strtolower($provider) ?: 'storage',
+        };
+        $referencePath = ltrim($path, '/');
+        $row['storage_reference_url'] = $bucket !== ''
+            ? $scheme.'://'.$bucket.'/'.$referencePath
+            : $scheme.'://'.$referencePath;
+        $row['storage_backup_policy'] = 'metadata_only_no_binary_file';
+
+        return $row;
+    }
+
+    private function shouldOmitBackupBinaryValue(string $column): bool
+    {
+        $normalized = strtolower(trim($column));
+
+        return in_array($normalized, [
+            'file_content',
+            'binary_content',
+            'content_base64',
+            'base64_content',
+            'blob',
+            'file_blob',
+            'raw_file',
+            'payload_binary',
+            'data_uri',
+            'body_binary',
+            'object_body',
+        ], true);
     }
 
     private function normalizeBackupMapel($value): string

@@ -476,6 +476,16 @@ class GoogleDriveService
             ->first();
 
         if (! $config || $config->status !== self::STATUS_CONNECTED || ! $config->refresh_token) {
+            if ($config && $config->is_enabled && trim((string) ($config->refresh_token ?? '')) !== '') {
+                $this->recoverTenantConnection($tenantId, 'backup-upload-preflight');
+                $config = TenantGoogleDriveConfig::query()
+                    ->where('tenant_id', $tenantId)
+                    ->where('is_enabled', true)
+                    ->first();
+            }
+        }
+
+        if (! $config || $config->status !== self::STATUS_CONNECTED || ! $config->refresh_token) {
             throw new RuntimeException('Google Drive sekolah belum tersambung.');
         }
 
