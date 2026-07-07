@@ -438,6 +438,149 @@ class QuizAutomationTest extends TestCase
         $pastStartResponse->assertJsonPath('error', 'Tanggal mulai quiz tidak boleh di masa lalu');
     }
 
+    public function test_guru_can_clone_quiz_as_draft_without_student_attempt_data(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+        [$siswa] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+        $this->seedGuruTeachingMapel($tenantId, $guru->id, 'X-1', 'Matematika');
+        $this->seedGuruTeachingMapel($tenantId, $guru->id, 'X-2', 'Matematika');
+        $period = AcademicPeriod::current();
+
+        $quizId = (string) Str::uuid();
+        DB::table('quizzes')->insert([
+            'id' => $quizId,
+            'tenant_id' => $tenantId,
+            'guru_id' => $guru->id,
+            'kelas_id' => 'X-1',
+            'mapel' => 'Matematika',
+            'nama' => 'Quiz Sumber',
+            'starts_at' => now()->addDay(),
+            'deadline_at' => now()->addDays(2),
+            'penilaian' => 'poin',
+            'mode' => 'regular',
+            'is_live' => false,
+            'is_active' => true,
+            'result_visible_to_students' => true,
+            'shuffle_questions' => true,
+            'shuffle_options' => true,
+            'max_attempts' => 2,
+            'security_mode' => 'strict',
+            'access_device' => 'web',
+            'access_code_hash' => 'secret-hash',
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $questionId = (string) Str::uuid();
+        DB::table('quiz_questions')->insert([
+            'id' => $questionId,
+            'tenant_id' => $tenantId,
+            'quiz_id' => $quizId,
+            'nomor' => 1,
+            'question_type' => 'mcq',
+            'soal' => 'Soal sumber',
+            'poin' => 10,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $optionId = (string) Str::uuid();
+        DB::table('quiz_options')->insert([
+            'id' => $optionId,
+            'tenant_id' => $tenantId,
+            'question_id' => $questionId,
+            'label' => 'A',
+            'text' => 'Jawaban benar',
+            'is_correct' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $submissionId = (string) Str::uuid();
+        DB::table('quiz_submissions')->insert([
+            'id' => $submissionId,
+            'tenant_id' => $tenantId,
+            'quiz_id' => $quizId,
+            'siswa_id' => $siswa->id,
+            'status' => 'finished',
+            'started_at' => now()->subHour(),
+            'finished_at' => now()->subMinutes(30),
+            'score' => 100,
+            'total_points' => 10,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('quiz_answers')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'submission_id' => $submissionId,
+            'question_id' => $questionId,
+            'option_id' => $optionId,
+            'is_correct' => true,
+            'poin' => 10,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($guru)->postJson('/api/quiz/clone', [
+            'source_quiz_id' => $quizId,
+            'target_kelas_id' => 'X-2',
+            'target_mapel' => 'Matematika',
+            'nama' => 'Salinan Quiz Sumber',
+            'copy_security' => true,
+            'copy_schedule' => false,
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('data.question_count', 1);
+        $response->assertJsonPath('data.submissions_copied', 0);
+        $response->assertJsonPath('data.answers_copied', 0);
+
+        $clonedQuizId = $response->json('data.quiz.id');
+        $this->assertNotSame($quizId, $clonedQuizId);
+        $this->assertDatabaseHas('quizzes', [
+            'id' => $clonedQuizId,
+            'tenant_id' => $tenantId,
+            'guru_id' => $guru->id,
+            'kelas_id' => 'X-2',
+            'mapel' => 'Matematika',
+            'nama' => 'Salinan Quiz Sumber',
+            'is_active' => false,
+            'starts_at' => null,
+            'deadline_at' => null,
+            'copied_from_quiz_id' => $quizId,
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester' => $period['semester'],
+        ]);
+
+        $clonedQuestion = DB::table('quiz_questions')
+            ->where('tenant_id', $tenantId)
+            ->where('quiz_id', $clonedQuizId)
+            ->first();
+        $this->assertNotNull($clonedQuestion);
+        $this->assertNotSame($questionId, (string) $clonedQuestion->id);
+        $this->assertSame('Soal sumber', (string) $clonedQuestion->soal);
+
+        $clonedOption = DB::table('quiz_options')
+            ->where('tenant_id', $tenantId)
+            ->where('question_id', (string) $clonedQuestion->id)
+            ->first();
+        $this->assertNotNull($clonedOption);
+        $this->assertNotSame($optionId, (string) $clonedOption->id);
+        $this->assertSame('Jawaban benar', (string) $clonedOption->text);
+
+        $this->assertDatabaseMissing('quiz_submissions', [
+            'tenant_id' => $tenantId,
+            'quiz_id' => $clonedQuizId,
+        ]);
+        $this->assertNull(DB::table('quizzes')->where('id', $clonedQuizId)->value('access_code_hash'));
+    }
+
     public function test_guru_can_update_deadline_but_not_content_while_submission_ongoing(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-02-10 10:00:00'));

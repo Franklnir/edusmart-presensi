@@ -548,6 +548,10 @@ Query utama:
 
 Payload utama:
 
+- `POST /api/quiz/clone`: `source_quiz_id`, `target_kelas_id`,
+  `target_mapel`, optional `nama`, `copy_security`, `copy_schedule`,
+  `tahun_ajaran`, `semester`. Hasil salinan dibuat sebagai draft dan tidak
+  membawa submission/jawaban/log siswa.
 - `POST /api/quiz/start`: `quiz_id`, optional `access_code`, `client_meta`.
 - `POST /api/quiz/answer`: `quiz_id`, `submission_id`, `question_id`,
   optional `option_id`, `essay_answer`, `client_meta`.
@@ -1231,6 +1235,7 @@ Total route API aplikasi aktif: 207.
 | `POST` | `/api/quiz/answer` | `QuizController@saveAnswer` | Sanctum |
 | `POST` | `/api/quiz/answers/batch` | `QuizController@saveAnswersBatch` | Sanctum |
 | `POST` | `/api/quiz/close` | `QuizController@close` | Sanctum |
+| `POST` | `/api/quiz/clone` | `QuizController@clone` | Sanctum |
 | `POST` | `/api/quiz/complete-essay-review` | `QuizController@completeEssayReview` | Sanctum |
 | `GET` | `/api/quiz/dashboard` | `QuizController@dashboard` | Sanctum |
 | `POST` | `/api/quiz/grade-essay` | `QuizController@gradeEssay` | Sanctum |

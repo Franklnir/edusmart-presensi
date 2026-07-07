@@ -179,6 +179,7 @@ Route::post('/rfid/set-mode', [RfidController::class, 'setMode'])
 
 Route::prefix('quiz')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/dashboard', [QuizController::class, 'dashboard']);
+    Route::post('/clone', [QuizController::class, 'clone']);
     Route::get('/{quizId}/detail', [QuizController::class, 'detail']);
     Route::post('/submit', [QuizController::class, 'submit'])->middleware('throttle:quiz-submit');
     Route::post('/start', [QuizController::class, 'startAttempt']);

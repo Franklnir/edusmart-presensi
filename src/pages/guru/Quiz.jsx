@@ -127,6 +127,7 @@ export default function GuruQuiz() {
   const [detailRealtimeTick, setDetailRealtimeTick] = useState(0)
 
   const selectedQuizIdRef = useRef('')
+  const pendingSelectedQuizIdRef = useRef('')
   const trackedQuizIdsRef = useRef(new Set())
   const trackedStudentIdsRef = useRef(new Set())
   const trackedQuestionIdsRef = useRef(new Set())
@@ -139,6 +140,14 @@ export default function GuruQuiz() {
   const [quizForm, setQuizForm] = useState({
     nama: '',
     mode: 'regular'
+  })
+  const [showCloneForm, setShowCloneForm] = useState(false)
+  const [cloneSaving, setCloneSaving] = useState(false)
+  const [cloneForm, setCloneForm] = useState({
+    target_kelas_id: '',
+    target_mapel: '',
+    nama: '',
+    copy_security: true
   })
   const [scheduleForm, setScheduleForm] = useState({
     starts_at: '',
@@ -219,6 +228,15 @@ export default function GuruQuiz() {
   }, [selectedMonth, currentMonthKey])
 
   const selectedQuiz = filteredQuizList.find((q) => q.id === selectedQuizId) || null
+
+  const cloneTargetMapelOptions = useMemo(() => {
+    if (!cloneForm.target_kelas_id) return []
+    return jadwal
+      .filter((j) => j.kelas_id === cloneForm.target_kelas_id && j.mapel)
+      .map((j) => normalizeMapel(j.mapel))
+      .filter((v, i, s) => v && s.indexOf(v) === i)
+      .sort()
+  }, [cloneForm.target_kelas_id, jadwal])
 
   const selectedStats = selectedQuiz ? quizStatsById[selectedQuiz.id] || null : null
   const totalStudents = selectedStats?.total_students ?? participants.length
@@ -792,6 +810,21 @@ export default function GuruQuiz() {
     if (!selectedMapel && mapels.length) setSelectedMapel(mapels[0])
   }, [selectedKelas, jadwal, selectedMapel])
 
+  useEffect(() => {
+    if (!showCloneForm || !cloneForm.target_kelas_id) return
+
+    if (!cloneTargetMapelOptions.length) {
+      if (cloneForm.target_mapel) {
+        setCloneForm((prev) => ({ ...prev, target_mapel: '' }))
+      }
+      return
+    }
+
+    if (!cloneTargetMapelOptions.includes(cloneForm.target_mapel)) {
+      setCloneForm((prev) => ({ ...prev, target_mapel: cloneTargetMapelOptions[0] }))
+    }
+  }, [showCloneForm, cloneForm.target_kelas_id, cloneForm.target_mapel, cloneTargetMapelOptions])
+
   const loadQuizzes = async () => {
     if (!selectedKelas || !selectedMapel) {
       setQuizList([])
@@ -832,7 +865,13 @@ export default function GuruQuiz() {
       setQuizList(rows)
       setQuizStatsById(summary)
       const sortedRows = sortQuizzesByPriority(rows, new Date())
-      if (sortedRows.length && !selectedQuizId) setSelectedQuizId(sortedRows[0].id)
+      const pendingQuizId = pendingSelectedQuizIdRef.current
+      if (pendingQuizId && rows.some((row) => row.id === pendingQuizId)) {
+        pendingSelectedQuizIdRef.current = ''
+        setSelectedQuizId(pendingQuizId)
+      } else if (sortedRows.length && !selectedQuizId) {
+        setSelectedQuizId(sortedRows[0].id)
+      }
       if (!rows.length) setSelectedQuizId('')
     })
   }
@@ -1298,6 +1337,87 @@ export default function GuruQuiz() {
       mode: normalizeMode(selectedQuiz)
     })
     setShowQuizForm(true)
+  }
+
+  const openCloneQuizForm = () => {
+    if (!selectedQuiz) return
+
+    const targetClassId = selectedKelas || kelasList[0]?.id || ''
+    const targetMapels = jadwal
+      .filter((j) => j.kelas_id === targetClassId && j.mapel)
+      .map((j) => normalizeMapel(j.mapel))
+      .filter((v, i, s) => v && s.indexOf(v) === i)
+      .sort()
+    const targetMapel = targetMapels.includes(selectedMapel) ? selectedMapel : (targetMapels[0] || '')
+    const sourceName = selectedQuiz.nama || 'Quiz'
+
+    setCloneForm({
+      target_kelas_id: targetClassId,
+      target_mapel: targetMapel,
+      nama: sourceName.toLowerCase().startsWith('salinan -') ? sourceName : `Salinan - ${sourceName}`,
+      copy_security: true
+    })
+    setShowCloneForm(true)
+  }
+
+  const handleCloneQuiz = async () => {
+    if (!selectedQuiz?.id) {
+      pushToast('error', 'Pilih quiz sumber terlebih dahulu')
+      return
+    }
+    if (!cloneForm.target_kelas_id) {
+      pushToast('error', 'Pilih kelas tujuan')
+      return
+    }
+    if (!cloneForm.target_mapel) {
+      pushToast('error', 'Pilih mapel tujuan')
+      return
+    }
+    if (!cloneForm.nama.trim()) {
+      pushToast('error', 'Nama quiz salinan wajib diisi')
+      return
+    }
+
+    try {
+      setCloneSaving(true)
+      setLoading(true)
+      const { data, error } = await supabase.quiz.clone({
+        source_quiz_id: selectedQuiz.id,
+        target_kelas_id: cloneForm.target_kelas_id,
+        target_mapel: cloneForm.target_mapel,
+        nama: cloneForm.nama.trim(),
+        copy_security: Boolean(cloneForm.copy_security),
+        copy_schedule: false,
+        tahun_ajaran: period.tahunAjaran,
+        semester: period.semester
+      })
+      if (error) throw error
+
+      const clonedQuizId = data?.quiz?.id || ''
+      if (clonedQuizId) {
+        pendingSelectedQuizIdRef.current = clonedQuizId
+      }
+
+      setShowCloneForm(false)
+      const sameScope = cloneForm.target_kelas_id === selectedKelas && cloneForm.target_mapel === selectedMapel
+      if (!sameScope) {
+        setSelectedKelas(cloneForm.target_kelas_id)
+        setSelectedMapel(cloneForm.target_mapel)
+      }
+      setQuizRealtimeTick((value) => value + 1)
+
+      if (sameScope) {
+        await loadQuizzes()
+      }
+
+      const questionCount = Number(data?.question_count ?? 0)
+      pushToast('success', `Quiz berhasil diduplikat sebagai draft (${questionCount} soal)`)
+    } catch (err) {
+      pushToast('error', err?.error || err?.message || 'Gagal menduplikat quiz')
+    } finally {
+      setCloneSaving(false)
+      setLoading(false)
+    }
   }
 
   const handleSaveQuizForm = async () => {
@@ -2568,6 +2688,13 @@ export default function GuruQuiz() {
                     >
                       Edit Info Quiz
                     </button>
+                    <button
+                      type="button"
+                      onClick={openCloneQuizForm}
+                      className="inline-flex w-fit rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      Duplikat
+                    </button>
                     {selectedStatus && (
                       <span className={`inline-flex w-fit rounded-md border px-2.5 py-1 text-xs ${selectedStatus.tone}`}>
                         {selectedStatus.label}
@@ -3670,6 +3797,105 @@ export default function GuruQuiz() {
                 >
                   {editingQuizId ? 'Simpan Perubahan' : 'Simpan'}
                 </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCloneForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-5 border border-slate-200 shadow-2xl">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">Duplikat Quiz</p>
+              <h3 className="mt-1 text-lg font-bold text-slate-900">{selectedQuiz?.nama || 'Quiz'}</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Salinan dibuat sebagai draft. Jadwal, nilai, jawaban, retake, sesi pengerjaan, dan log pelanggaran siswa tidak ikut disalin.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div>
+                <label className="text-sm font-semibold text-slate-600">Kelas Tujuan</label>
+                <select
+                  name="clone_target_class"
+                  aria-label="Kelas tujuan duplikat quiz"
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+                  value={cloneForm.target_kelas_id}
+                  onChange={(e) => setCloneForm((prev) => ({ ...prev, target_kelas_id: e.target.value }))}
+                >
+                  <option value="">Pilih kelas</option>
+                  {kelasList.map((kelas) => (
+                    <option key={kelas.id} value={kelas.id}>
+                      {kelas.nama || kelas.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-slate-600">Mapel Tujuan</label>
+                <select
+                  name="clone_target_mapel"
+                  aria-label="Mapel tujuan duplikat quiz"
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+                  value={cloneForm.target_mapel}
+                  onChange={(e) => setCloneForm((prev) => ({ ...prev, target_mapel: e.target.value }))}
+                  disabled={!cloneTargetMapelOptions.length}
+                >
+                  <option value="">Pilih mapel</option>
+                  {cloneTargetMapelOptions.map((mapel) => (
+                    <option key={mapel} value={mapel}>{mapel}</option>
+                  ))}
+                </select>
+                {cloneForm.target_kelas_id && !cloneTargetMapelOptions.length && (
+                  <p className="mt-1 text-[11px] font-semibold text-amber-700">
+                    Belum ada mapel yang diampu untuk kelas ini pada periode terpilih.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-semibold text-slate-600">Nama Quiz Salinan</label>
+              <input
+                name="clone_quiz_name"
+                aria-label="Nama quiz salinan"
+                className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+                value={cloneForm.nama}
+                onChange={(e) => setCloneForm((prev) => ({ ...prev, nama: e.target.value }))}
+                maxLength={180}
+              />
+            </div>
+
+            <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600"
+                checked={cloneForm.copy_security}
+                onChange={(e) => setCloneForm((prev) => ({ ...prev, copy_security: e.target.checked }))}
+              />
+              <span>
+                <span className="block font-semibold text-slate-800">Salin pengaturan keamanan</span>
+                <span className="block text-xs text-slate-500">Shuffle, batas percobaan, mode keamanan, dan akses device ikut disalin. Kode akses tetap dikosongkan.</span>
+              </span>
+            </label>
+
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowCloneForm(false)}
+                className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                disabled={cloneSaving}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleCloneQuiz}
+                disabled={cloneSaving || !cloneForm.target_kelas_id || !cloneForm.target_mapel || !cloneForm.nama.trim()}
+                className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cloneSaving ? 'Membuat Salinan...' : 'Buat Salinan'}
+              </button>
             </div>
           </div>
         </div>

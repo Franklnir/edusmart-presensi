@@ -52,7 +52,8 @@ class QuizController extends ApiController
                 'mode', 'is_live', 'is_active', 'live_started_at', 'duration_minutes',
                 'result_visible_to_students', 'shuffle_questions', 'shuffle_options',
                 'max_attempts', 'security_mode', 'access_device', 'timezone', 'published_at', 'closed_at',
-                'access_code_hash', 'tahun_ajaran', 'semester', 'created_at', 'updated_at',
+                'access_code_hash', 'tahun_ajaran', 'semester', 'copied_from_quiz_id', 'clone_code',
+                'created_at', 'updated_at',
             ]));
 
         if ($this->isGuru($request) && ! $this->isAdmin($request)) {
@@ -361,6 +362,207 @@ class QuizController extends ApiController
                 'answers_by_submission' => $answersBySubmission,
             ],
         ]);
+    }
+
+    public function clone(Request $request)
+    {
+        if (! $this->isGuru($request) && ! $this->isAdmin($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = $this->tenantId($request);
+        if (! $tenantId) {
+            return response()->json(['error' => 'Tenant tidak valid'], 400);
+        }
+
+        $sourceQuizId = trim((string) $request->input('source_quiz_id', ''));
+        $targetKelasId = trim((string) $request->input('target_kelas_id', ''));
+        $targetMapel = trim((string) $request->input('target_mapel', ''));
+        $targetName = trim((string) $request->input('nama', ''));
+        $copySecurity = $request->has('copy_security') ? $request->boolean('copy_security') : true;
+        $copySchedule = $request->has('copy_schedule') ? $request->boolean('copy_schedule') : false;
+        $tenantPeriod = $this->currentAcademicPeriodForTenant($tenantId);
+        $targetAcademicYear = AcademicPeriod::normalizeAcademicYear($request->input('tahun_ajaran'))
+            ?: ($tenantPeriod['tahun_ajaran'] ?? null);
+        $targetSemester = AcademicPeriod::normalizeSemester($request->input('semester'))
+            ?: ($tenantPeriod['semester'] ?? null);
+
+        if ($sourceQuizId === '' || $targetKelasId === '' || $targetMapel === '') {
+            return response()->json([
+                'error' => 'source_quiz_id, target_kelas_id, dan target_mapel wajib diisi',
+            ], 422);
+        }
+
+        $sourceQuiz = $this->resolveQuizForTeacherAction($request, $tenantId, $sourceQuizId);
+        if (! $sourceQuiz) {
+            return $this->deny('Quiz sumber tidak ditemukan atau tidak diizinkan', 404);
+        }
+
+        if ($targetName === '') {
+            $targetName = 'Salinan - '.trim((string) ($sourceQuiz->nama ?? 'Quiz'));
+        }
+        if (Str::length($targetName) > 180) {
+            $targetName = Str::substr($targetName, 0, 180);
+        }
+
+        if (! $this->quizTargetClassExists($tenantId, $targetKelasId)) {
+            return response()->json(['error' => 'Kelas tujuan tidak ditemukan'], 422);
+        }
+
+        if ($this->isGuru($request) && ! $this->isAdmin($request)) {
+            if (! $this->teacherCanCloneQuizToTarget($request, $tenantId, $targetKelasId, $targetMapel, $targetAcademicYear, $targetSemester)) {
+                return $this->deny('Kelas dan mapel tujuan harus sesuai yang diampu guru', 422);
+            }
+        }
+
+        if ($copySchedule) {
+            $startsAt = $this->parseQuizDate($sourceQuiz->starts_at ?? null, $sourceQuiz);
+            $endsAt = $this->parseQuizDate($sourceQuiz->deadline_at ?? null, $sourceQuiz);
+            if (! $startsAt || ! $endsAt) {
+                return response()->json(['error' => 'Jadwal sumber belum lengkap, tidak bisa disalin'], 422);
+            }
+            $periodError = $this->validateQuizTimelineWithinActivePeriod($tenantId, $startsAt, $endsAt, $sourceQuiz);
+            if ($periodError !== null) {
+                return response()->json(['error' => $periodError], 422);
+            }
+        }
+
+        $now = now();
+        $newQuizId = (string) Str::uuid();
+        $cloneCode = $this->generateQuizCloneCode();
+
+        $created = DB::transaction(function () use (
+            $tenantId,
+            $sourceQuiz,
+            $targetKelasId,
+            $targetMapel,
+            $targetName,
+            $targetAcademicYear,
+            $targetSemester,
+            $copySecurity,
+            $copySchedule,
+            $now,
+            $newQuizId,
+            $cloneCode
+        ) {
+            $sourceMode = $this->quizMode($sourceQuiz);
+            $quizRow = [
+                'id' => $newQuizId,
+                'tenant_id' => $tenantId,
+                'guru_id' => (string) ($sourceQuiz->guru_id ?? ''),
+                'kelas_id' => $targetKelasId,
+                'mapel' => $targetMapel,
+                'nama' => $targetName,
+                'penilaian' => $sourceQuiz->penilaian ?? 'poin',
+                'mode' => $sourceMode,
+                'is_live' => $sourceMode !== 'regular',
+                'is_active' => false,
+                'starts_at' => $copySchedule ? ($sourceQuiz->starts_at ?? null) : null,
+                'deadline_at' => $copySchedule ? ($sourceQuiz->deadline_at ?? null) : null,
+                'live_started_at' => null,
+                'duration_minutes' => $sourceMode !== 'regular' ? (int) ($sourceQuiz->duration_minutes ?? 60) : null,
+                'result_visible_to_students' => false,
+                'shuffle_questions' => $copySecurity ? (bool) ($sourceQuiz->shuffle_questions ?? false) : false,
+                'shuffle_options' => $copySecurity ? (bool) ($sourceQuiz->shuffle_options ?? false) : false,
+                'max_attempts' => $copySecurity ? ($sourceQuiz->max_attempts ?? null) : null,
+                'security_mode' => $copySecurity ? ($sourceQuiz->security_mode ?? 'standard') : 'standard',
+                'access_device' => $copySecurity ? $this->quizAccessDevice($sourceQuiz) : 'both',
+                'timezone' => $sourceQuiz->timezone ?? self::DEFAULT_QUIZ_TIMEZONE,
+                'published_at' => null,
+                'closed_at' => null,
+                'tahun_ajaran' => $targetAcademicYear ?: ($sourceQuiz->tahun_ajaran ?? null),
+                'semester' => $targetSemester ?: ($sourceQuiz->semester ?? null),
+                'angkatan' => $sourceQuiz->angkatan ?? null,
+                'copied_from_quiz_id' => (string) $sourceQuiz->id,
+                'clone_code' => $cloneCode,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+
+            DB::table('quizzes')->insert($this->filterTablePayload('quizzes', $quizRow));
+
+            $questions = DB::table('quiz_questions')
+                ->where('quiz_id', (string) $sourceQuiz->id)
+                ->when(Schema::hasColumn('quiz_questions', 'tenant_id'), fn ($query) => $query->where('tenant_id', $tenantId))
+                ->orderBy('nomor')
+                ->get();
+
+            $questionIdMap = [];
+            foreach ($questions as $question) {
+                $newQuestionId = (string) Str::uuid();
+                $questionIdMap[(string) $question->id] = $newQuestionId;
+
+                $questionRow = [
+                    'id' => $newQuestionId,
+                    'tenant_id' => $tenantId,
+                    'quiz_id' => $newQuizId,
+                    'nomor' => (int) ($question->nomor ?? 1),
+                    'soal' => $question->soal ?? '',
+                    'image_path' => $question->image_path ?? null,
+                    'poin' => (int) ($question->poin ?? 1),
+                    'question_type' => $this->normalizeQuestionType($question->question_type ?? null),
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+
+                DB::table('quiz_questions')->insert($this->filterTablePayload('quiz_questions', $questionRow));
+            }
+
+            if (! empty($questionIdMap)) {
+                $options = DB::table('quiz_options')
+                    ->whereIn('question_id', array_keys($questionIdMap))
+                    ->when(Schema::hasColumn('quiz_options', 'tenant_id'), fn ($query) => $query->where('tenant_id', $tenantId))
+                    ->orderBy('question_id')
+                    ->orderBy('label')
+                    ->get();
+
+                foreach ($options as $option) {
+                    $newQuestionId = $questionIdMap[(string) $option->question_id] ?? null;
+                    if (! $newQuestionId) {
+                        continue;
+                    }
+
+                    $optionRow = [
+                        'id' => (string) Str::uuid(),
+                        'tenant_id' => $tenantId,
+                        'question_id' => $newQuestionId,
+                        'label' => $option->label ?? '',
+                        'text' => $option->text ?? '',
+                        'image_path' => $option->image_path ?? null,
+                        'is_correct' => (bool) ($option->is_correct ?? false),
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+
+                    DB::table('quiz_options')->insert($this->filterTablePayload('quiz_options', $optionRow));
+                }
+            }
+
+            return [
+                'question_count' => count($questionIdMap),
+            ];
+        }, 3);
+
+        $fresh = DB::table('quizzes')
+            ->where('id', $newQuizId)
+            ->when(Schema::hasColumn('quizzes', 'tenant_id'), fn ($query) => $query->where('tenant_id', $tenantId))
+            ->first();
+
+        try {
+            $this->contentCache->forget($tenantId, $newQuizId);
+        } catch (\Throwable) {
+            // Cache invalidation should not fail a completed clone.
+        }
+
+        return response()->json([
+            'data' => [
+                'quiz' => $this->quizPayload($fresh),
+                'question_count' => (int) ($created['question_count'] ?? 0),
+                'copied_from_quiz_id' => $sourceQuizId,
+                'submissions_copied' => 0,
+                'answers_copied' => 0,
+            ],
+        ], 201);
     }
 
     public function submit(Request $request)
@@ -2113,6 +2315,51 @@ class QuizController extends ApiController
         return trim((string) ($this->profile($request)?->kelas ?? ''));
     }
 
+    private function quizTargetClassExists(string $tenantId, string $kelasId): bool
+    {
+        if ($kelasId === '' || ! Schema::hasTable('kelas')) {
+            return false;
+        }
+
+        $query = DB::table('kelas')->where('id', $kelasId);
+        if (Schema::hasColumn('kelas', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        return $query->exists();
+    }
+
+    private function teacherCanCloneQuizToTarget(
+        Request $request,
+        string $tenantId,
+        string $kelasId,
+        string $mapel,
+        ?string $academicYear,
+        ?string $semester
+    ): bool {
+        $userId = (string) ($request->user()?->id ?? '');
+        if ($userId === '' || $kelasId === '' || $mapel === '' || ! Schema::hasTable('jadwal')) {
+            return false;
+        }
+
+        $query = DB::table('jadwal')
+            ->where('guru_id', $userId)
+            ->where('kelas_id', $kelasId)
+            ->whereRaw('lower(trim(mapel)) = ?', [strtolower(trim($mapel))]);
+
+        if (Schema::hasColumn('jadwal', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+        if ($academicYear && Schema::hasColumn('jadwal', 'tahun_ajaran')) {
+            $query->where('tahun_ajaran', $academicYear);
+        }
+        if ($semester && Schema::hasColumn('jadwal', 'semester')) {
+            $query->where('semester', $semester);
+        }
+
+        return $query->exists();
+    }
+
     private function sameClassId($left, $right): bool
     {
         return trim((string) $left) === trim((string) $right);
@@ -3541,6 +3788,33 @@ class QuizController extends ApiController
         unset($payload['access_code_hash']);
 
         return $payload;
+    }
+
+    private function filterTablePayload(string $table, array $payload): array
+    {
+        if (! Schema::hasTable($table)) {
+            return $payload;
+        }
+
+        return collect($payload)
+            ->filter(fn ($value, $column) => Schema::hasColumn($table, $column))
+            ->all();
+    }
+
+    private function generateQuizCloneCode(): ?string
+    {
+        if (! Schema::hasColumn('quizzes', 'clone_code')) {
+            return null;
+        }
+
+        for ($i = 0; $i < 20; $i++) {
+            $code = 'QZ-'.strtoupper(Str::random(6));
+            if (! DB::table('quizzes')->where('clone_code', $code)->exists()) {
+                return $code;
+            }
+        }
+
+        return 'QZ-'.strtoupper(Str::random(10));
     }
 
     private function resolveQuizForTeacherAction(Request $request, string $tenantId, string $quizId): ?object
