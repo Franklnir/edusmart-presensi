@@ -2903,6 +2903,10 @@ const auth = {
       const res = await apiFetch('/api/quiz/start', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error ? { ...res.error, ...(res.raw || {}) } : null }
     },
+    async clone(payload) {
+      const res = await apiFetch('/api/quiz/clone', { method: 'POST', body: payload })
+      return { data: res.raw?.data ?? res.data, error: res.error ? { ...res.error, ...(res.raw || {}) } : null }
+    },
     async saveAnswer(payload) {
       const res = await apiFetch('/api/quiz/answer', { method: 'POST', body: payload })
       return { data: res.raw?.data ?? res.data, error: res.error ? { ...res.error, ...(res.raw || {}) } : null }
