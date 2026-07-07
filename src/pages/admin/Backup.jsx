@@ -683,6 +683,9 @@ export default function BackupAdmin() {
         : await supabase.admin.backupMonthlyStatus({ refresh })
       if (error) throw error
       setMonthlyStatus(data || null)
+      if (data?.drive) {
+        setDriveStatus(data.drive)
+      }
       return data || null
     } catch (err) {
       if (!silent) pushToast('error', err?.message || 'Gagal memuat jadwal backup bulanan')

@@ -104,13 +104,17 @@ const NavGroup = React.memo(({ group, collapsed, level = 0, menuExpansion }) => 
   const nestedPadding = level > 0
     ? { paddingLeft: `${Math.min(0.6 + level * 0.8, 3)}rem` }
     : undefined
+  const isNestedGroup = level > 0
 
   return (
     <div>
       <button
         type="button"
         onClick={toggle}
-        className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[13px] font-bold transition-all duration-200 select-none ${
+        title={group.group}
+        className={`w-full flex items-center gap-2.5 px-2.5 rounded-xl transition-all duration-200 select-none ${
+          isNestedGroup ? 'py-2 text-[13px] font-semibold' : 'py-2 text-[13px] font-bold'
+        } ${
           hasActiveChild
             ? 'text-brand-700 bg-brand-50/50'
             : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
@@ -118,7 +122,9 @@ const NavGroup = React.memo(({ group, collapsed, level = 0, menuExpansion }) => 
         style={nestedPadding}
       >
         <Icon name={group.icon} className="w-4 h-4 flex-shrink-0" />
-        <span className="uppercase tracking-wider flex-1 text-left truncate">{group.group}</span>
+        <span className={`flex-1 text-left truncate ${isNestedGroup ? '' : 'uppercase tracking-wider'}`}>
+          {group.group}
+        </span>
         <Icon
           name="chevronDown"
           className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? '' : '-rotate-90'}`}

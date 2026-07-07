@@ -517,6 +517,8 @@ class ReportController extends ApiController
                     ->whereIn('id', $historyStudentIds)
                     ->select($this->existingColumns('profiles', ['id', 'nama', 'nis', 'kelas', 'status']))
                     ->orderBy('nama')
+                    ->orderBy('nis')
+                    ->orderBy('id')
                     ->get();
             }
 
@@ -536,7 +538,9 @@ class ReportController extends ApiController
             ->where('role', 'siswa')
             ->where('kelas', $kelas)
             ->select($this->existingColumns('profiles', ['id', 'nama', 'nis', 'kelas', 'status']))
-            ->orderBy('nama');
+            ->orderBy('nama')
+            ->orderBy('nis')
+            ->orderBy('id');
 
         if (Schema::hasColumn('profiles', 'status')) {
             $query->where('status', 'active');
