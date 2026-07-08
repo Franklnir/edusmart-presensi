@@ -1568,7 +1568,7 @@ export default function JadwalGuru() {
 
         let jadwalQuery = supabase
           .from('jadwal')
-          .select('id, kelas, mapel, hari, jam_mulai, jam_selesai, ruang')
+          .select('id, kelas_id, mapel, hari, jam_mulai, jam_selesai, ruang')
           .eq('guru_id', user.id)
           .order('jam_mulai', { ascending: true })
         
@@ -1649,7 +1649,11 @@ export default function JadwalGuru() {
 
         // 7. Set Jadwal
         if (!jadwalErr && jadwalData) {
-          setJadwal(filterSchedulesForSemester(jadwalData, activeAcademicPeriod.semester))
+          const normalizedJadwal = jadwalData.map((item) => ({
+            ...item,
+            kelas_id: item.kelas_id || item.kelas || ''
+          }))
+          setJadwal(filterSchedulesForSemester(normalizedJadwal, activeAcademicPeriod.semester))
         }
 
         // 8. Set Ekskul & Organisasi (Tuntaskan N+1 query jumlah anggota!)
