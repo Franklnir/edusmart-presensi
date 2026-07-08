@@ -5,6 +5,7 @@ import Navbar from './components/Navbar'
 import ConfirmDialog from './components/ConfirmDialog'
 import AppBootShell from './components/AppBootShell'
 import WebVitalsReporter from './components/monitoring/WebVitalsReporter'
+import { BrowserNfcProvider } from './components/browser-nfc/BrowserNfcProvider'
 import AppRoutes from './router'
 import { useAuthStore } from './store/useAuthStore'
 import { API_UNAVAILABLE_EVENT, SESSION_EXPIRED_EVENT, hasAuthSessionHint, supabase } from './lib/supabase'
@@ -296,17 +297,19 @@ const App = () => {
 
   // Layout setelah login (ada navbar)
   return (
-    <div className={`${appShellClassName} h-screen overflow-hidden`}>
-      <div className="flex h-full flex-col md:flex-row overflow-hidden">
-        <Navbar />
-        {/* pb-20 untuk mobile bottom nav, tidak mempengaruhi desktop */}
-        <main className="flex-1 w-full h-full overflow-y-auto pb-20 md:pb-0">
-          <AppRoutes />
-        </main>
+    <BrowserNfcProvider>
+      <div className={`${appShellClassName} h-screen overflow-hidden`}>
+        <div className="flex h-full flex-col md:flex-row overflow-hidden">
+          <Navbar />
+          {/* pb-20 untuk mobile bottom nav, tidak mempengaruhi desktop */}
+          <main className="flex-1 w-full h-full overflow-y-auto pb-20 md:pb-0">
+            <AppRoutes />
+          </main>
+        </div>
+        <WebVitalsReporter />
+        <ConfirmDialog />
       </div>
-      <WebVitalsReporter />
-      <ConfirmDialog />
-    </div>
+    </BrowserNfcProvider>
   )
 }
 
