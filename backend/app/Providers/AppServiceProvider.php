@@ -100,6 +100,17 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute($perMinute)->by('rfid|'.$tenant.'|'.$device.'|'.$request->ip());
         });
 
+        RateLimiter::for('browser-nfc', function (Request $request) use ($clampInt) {
+            $tenantId = (string) ($request->attributes->get('tenant_id') ?? 'global');
+            $userId = (string) ($request->user()?->id ?: 'guest');
+            $perUserPerMinute = $clampInt('BROWSER_NFC_RATE_LIMIT_PER_MINUTE', 180, 30, 600);
+
+            return [
+                Limit::perMinute($perUserPerMinute)->by("browser-nfc|{$tenantId}|{$userId}"),
+                Limit::perMinute(max($perUserPerMinute * 4, 240))->by("browser-nfc-ip|{$tenantId}|{$request->ip()}"),
+            ];
+        });
+
         RateLimiter::for('webhook', function (Request $request) use ($clampInt) {
             $perMinute = $clampInt('WEBHOOK_RATE_LIMIT_PER_MINUTE', 60, 10, 600);
 

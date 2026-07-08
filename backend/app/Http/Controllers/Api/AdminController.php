@@ -8,6 +8,7 @@ use App\Models\Profile;
 use App\Models\User;
 use App\Services\Admin\AdminPageCacheService;
 use App\Services\Rfid\RfidDeviceService;
+use App\Services\Rfid\RfidIngressService;
 use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -83,6 +84,85 @@ class AdminController extends ApiController
             ],
             'devices' => $devices->all(),
         ]);
+    }
+
+    public function rfidBrowserEvent(Request $request)
+    {
+        if (! $this->canAccessScanFeature($request, self::SCAN_LIVE_FEATURE_KEYS)) {
+            return $this->deny();
+        }
+
+        if (! Schema::hasTable('rfid_device_events') || ! Schema::hasTable('rfid_scans')) {
+            return $this->deny('Infrastruktur RFID belum siap.', 503);
+        }
+
+        $tenantId = $this->resolveOwnedTenantId($request) ?? $this->tenantId($request);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $tenantSlug = trim((string) ($request->attributes->get('tenant_slug') ?? ''));
+        if ($tenantSlug === '') {
+            $tenantSlug = (string) DB::table('tenants')
+                ->where('id', $tenantId)
+                ->value('slug');
+        }
+
+        if ($tenantSlug === '') {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $validated = Validator::make($request->all(), [
+            'card_uid' => ['required', 'string', 'max:128'],
+            'event_id' => ['nullable', 'string', 'max:191'],
+            'mode' => ['nullable', 'string', 'max:32'],
+            'scanned_at' => ['nullable', 'date'],
+            'browser_device_id' => ['nullable', 'string', 'max:191'],
+            'browser' => ['nullable', 'array'],
+        ])->validate();
+
+        $profile = $this->profile($request);
+        $actorId = (string) ($profile?->id ?? $request->user()?->id ?? '');
+        $actorName = trim((string) ($profile?->nama ?? $request->user()?->name ?? ''));
+        $actorRole = trim((string) ($profile?->role ?? ''));
+        $deviceId = 'WEB_NFC_BROWSER_'.substr(hash('sha256', $tenantId.'|'.$actorId), 0, 16);
+        $eventId = trim((string) ($validated['event_id'] ?? ''));
+        if ($eventId === '') {
+            $eventId = 'web-nfc-'.(string) Str::uuid();
+        }
+
+        $payload = array_merge($request->except(['device_id', 'tenant_slug']), [
+            'browser_nfc' => true,
+            'source' => 'web-nfc',
+            'actor_id' => $actorId !== '' ? $actorId : null,
+            'actor_name' => $actorName !== '' ? $actorName : null,
+            'actor_role' => $actorRole !== '' ? $actorRole : null,
+            'tenant_slug' => $tenantSlug,
+            'browser_device_id' => $validated['browser_device_id'] ?? null,
+            'user_agent' => substr((string) $request->userAgent(), 0, 500),
+            'ip' => $request->ip(),
+        ]);
+
+        $result = app(RfidIngressService::class)->processScanByTenantSlug(
+            tenantSlug: $tenantSlug,
+            cardUid: (string) $validated['card_uid'],
+            deviceId: $deviceId,
+            mode: (string) ($validated['mode'] ?? ''),
+            source: 'web-nfc',
+            eventId: $eventId,
+            scannedAt: (string) ($validated['scanned_at'] ?? ''),
+            payload: $payload,
+        );
+
+        $data = is_array($result['data'] ?? null) ? $result['data'] : [];
+        $data['source'] = $data['source'] ?? 'web-nfc';
+        $data['actor'] = [
+            'id' => $actorId !== '' ? $actorId : null,
+            'name' => $actorName !== '' ? $actorName : null,
+            'role' => $actorRole !== '' ? $actorRole : null,
+        ];
+
+        return response()->json($data, (int) ($result['status'] ?? 500));
     }
 
     public function copyAcademicStructure(Request $request)

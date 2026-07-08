@@ -1153,13 +1153,79 @@ export default function Scan() {
     [loadScanSummary, sessionSettings, scanOperationalActive, pushToast, setLoading, tanggal]
   )
 
+  const makeBrowserNfcEventId = useCallback(() => {
+    const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+    return `web-nfc-${randomPart}`.slice(0, 180)
+  }, [])
+
+  const handleBrowserNfcEvent = useCallback(async (uid, meta = {}) => {
+    if (!scanOperationalActive) {
+      pushToast('warning', 'Aktifkan scan harian realtime atau mode scan manual di Live Scan sebelum memproses kartu NFC HP.')
+      return
+    }
+
+    const cleanedUid = normalizeBrowserNfcUid(uid)
+    if (!cleanedUid) {
+      pushToast('error', 'UID kartu tidak terbaca.')
+      return
+    }
+
+    const browserInfo = typeof navigator !== 'undefined'
+      ? {
+          platform: navigator.platform || '',
+          language: navigator.language || '',
+          user_agent: navigator.userAgent || ''
+        }
+      : {}
+
+    const scannedAt = meta?.readAt || new Date().toISOString()
+    const { data, error } = await supabase.admin.rfidBrowserEvent({
+      card_uid: cleanedUid,
+      event_id: meta?.eventId || makeBrowserNfcEventId(),
+      scanned_at: scannedAt,
+      source: 'web_nfc',
+      browser_device_id: 'WEB_NFC_BROWSER',
+      browser: browserInfo
+    })
+
+    refreshScanSummarySoon()
+    loadRfidDevices({ silent: true })
+
+    if (error) {
+      pushToast('error', error.message || 'Kartu terbaca, tapi gagal diproses ke server.')
+      return
+    }
+
+    if (rfidStreamStatus !== 'connected') {
+      if (data?.success) {
+        pushToast('success', `NFC Browser ${data.nama || cleanedUid} berhasil diproses.`)
+        try {
+          const audio = new Audio('/beep.mp3')
+          audio.play().catch(() => { })
+        } catch { }
+      } else {
+        pushToast('warning', data?.message || data?.reason || 'Scan NFC Browser belum berhasil diproses.')
+      }
+    }
+  }, [
+    loadRfidDevices,
+    makeBrowserNfcEventId,
+    pushToast,
+    refreshScanSummarySoon,
+    rfidStreamStatus,
+    scanOperationalActive
+  ])
+
   useEffect(() => registerBrowserNfcReadHandler(
-    (uid) => handleProcessScan(uid, { source: 'web_nfc' }),
+    (uid, meta) => handleBrowserNfcEvent(uid, meta),
     {
       enabled: scanOperationalActive,
       inactiveMessage: 'Aktifkan scan harian realtime atau mode scan manual di Live Scan sebelum memproses kartu NFC HP.'
     }
-  ), [handleProcessScan, registerBrowserNfcReadHandler, scanOperationalActive])
+  ), [handleBrowserNfcEvent, registerBrowserNfcReadHandler, scanOperationalActive])
 
   useEffect(() => {
     if (browserNfcStatus !== 'active' || scanOperationalActive) return
