@@ -23,15 +23,14 @@ import {
   CalendarCheck,
   UserCheck,
   BarChart3,
-  Smartphone,
-  Radio,
-  ShieldCheck,
-  XCircle
+  SmartphoneNfc
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { id as localeId } from 'date-fns/locale'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { formatDateTime } from '../../lib/time'
+import { useBrowserNfc } from '../../components/browser-nfc/BrowserNfcProvider'
+import { normalizeBrowserNfcUid } from '../../utils/browserNfc'
 
 /* ========= Helpers ========= */
 
@@ -58,103 +57,6 @@ const normalizeScanMenu = (value) => {
 }
 
 const canReceiveLiveScanInput = (menu) => menu === 'pengaturan' || menu === 'live-scan'
-
-const BROWSER_NFC_VALIDATION_STEPS = [
-  { id: 'mobile', label: 'Browser dibuka dari HP Android Chrome' },
-  { id: 'secure', label: 'Halaman aman HTTPS dan bukan iframe' },
-  { id: 'api', label: 'Web NFC tersedia di browser' },
-  { id: 'permission', label: 'Izin NFC dan sensor siap membaca kartu' }
-]
-
-const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-const initialBrowserNfcChecks = () => BROWSER_NFC_VALIDATION_STEPS.map((step) => ({
-  ...step,
-  status: 'pending',
-  detail: ''
-}))
-
-const detectBrowserNfcEnvironment = () => {
-  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
-    return {
-      isAndroid: false,
-      isChromeAndroid: false,
-      isSecure: false,
-      isTopLevel: false,
-      hasWebNfc: false
-    }
-  }
-
-  const ua = navigator.userAgent || ''
-  const isAndroid = /Android/i.test(ua)
-  const isChrome = /Chrome\/\d+/i.test(ua)
-  const isExcludedChromium = /EdgA|Edg\/|OPR\/|Opera|SamsungBrowser|Firefox|CriOS|FxiOS/i.test(ua)
-
-  return {
-    isAndroid,
-    isChromeAndroid: isAndroid && isChrome && !isExcludedChromium,
-    isSecure: Boolean(window.isSecureContext),
-    isTopLevel: window.self === window.top,
-    hasWebNfc: 'NDEFReader' in window
-  }
-}
-
-const normalizeBrowserNfcUid = (value) => {
-  const raw = String(value || '').trim()
-  if (!raw) return ''
-
-  try {
-    const parsed = JSON.parse(raw)
-    const parsedUid = parsed?.uid || parsed?.card_uid || parsed?.rfid_uid
-    if (parsedUid) return normalizeBrowserNfcUid(parsedUid)
-  } catch {
-    // Bukan JSON; lanjutkan parsing teks biasa.
-  }
-
-  const prefixed = raw.match(/SISMU:UID:([0-9a-z:-]+)/i)
-  if (prefixed?.[1]) return normalizeBrowserNfcUid(prefixed[1])
-
-  const queryUid = raw.match(/(?:uid|card_uid|rfid_uid)=([0-9a-z:-]+)/i)
-  if (queryUid?.[1]) return normalizeBrowserNfcUid(queryUid[1])
-
-  return raw
-    .replace(/^SISMU:UID:/i, '')
-    .replace(/[^0-9a-z]/gi, '')
-    .toUpperCase()
-}
-
-const decodeNdefRecordData = (record) => {
-  if (!record?.data) return ''
-
-  try {
-    const encoding = record.encoding || 'utf-8'
-    return new TextDecoder(encoding).decode(record.data)
-  } catch {
-    try {
-      return new TextDecoder().decode(record.data)
-    } catch {
-      return ''
-    }
-  }
-}
-
-const extractBrowserNfcUid = (event) => {
-  const candidates = []
-  if (event?.serialNumber) candidates.push(event.serialNumber)
-
-  const records = Array.from(event?.message?.records || [])
-  records.forEach((record) => {
-    const decoded = decodeNdefRecordData(record)
-    if (decoded) candidates.unshift(decoded)
-  })
-
-  for (const candidate of candidates) {
-    const uid = normalizeBrowserNfcUid(candidate)
-    if (uid) return uid
-  }
-
-  return ''
-}
 
 const toDateStartEnd = (daysAgo = 0) => {
   const start = new Date()
@@ -302,6 +204,7 @@ export default function Scan() {
   const location = useLocation()
   const navigate = useNavigate()
   const profile = useAuthStore((state) => state.profile)
+  const browserNfc = useBrowserNfc()
   const isTeacherProfile = isTeacherRole(profile?.role)
   const isDelegatedScanPath = typeof window !== 'undefined' &&
     window.location?.pathname?.startsWith('/guru/admin/scan')
@@ -341,9 +244,6 @@ export default function Scan() {
   const kelaslistRef = useRef([])
   const rfidStreamCursorRef = useRef(0)
   const rfidStreamRefreshTimerRef = useRef(null)
-  const browserNfcAbortRef = useRef(null)
-  const browserNfcReaderRef = useRef(null)
-  const browserNfcLastReadRef = useRef({ uid: '', at: 0 })
 
   // --- STATE MODE 1 (SCANNING) ---
   const [sessionSettings, setSessionSettings] = useState(() => ({
@@ -358,11 +258,19 @@ export default function Scan() {
   const [scannedStudents, setScannedStudents] = useState([])
   const [scanMode, setScanMode] = useState('masuk')
   const scanOperationalActive = scanAlwaysActive || manualModeEnabled
-  const [browserNfcStatus, setBrowserNfcStatus] = useState('idle')
-  const [browserNfcMessage, setBrowserNfcMessage] = useState('Belum aktif')
-  const [browserNfcChecks, setBrowserNfcChecks] = useState(() => initialBrowserNfcChecks())
-  const [browserNfcLastUid, setBrowserNfcLastUid] = useState('')
-  const [browserNfcReadCount, setBrowserNfcReadCount] = useState(0)
+  const {
+    activeOwnerName: browserNfcOwnerName,
+    activatedBy: browserNfcActivatedBy,
+    lastActiveAt: browserNfcLastActiveAt,
+    lastUid: browserNfcLastUid,
+    message: browserNfcMessage,
+    openPanel: openBrowserNfcPanel,
+    readCount: browserNfcReadCount,
+    registerReadHandler: registerBrowserNfcReadHandler,
+    status: browserNfcStatus,
+    statusMeta: browserNfcStatusMeta,
+    stop: stopBrowserNfc
+  } = browserNfc
 
   // Buffer RFID reader
   const rfidBufferRef = useRef('')
@@ -1245,147 +1153,22 @@ export default function Scan() {
     [loadScanSummary, sessionSettings, scanOperationalActive, pushToast, setLoading, tanggal]
   )
 
-  const setBrowserNfcCheckStatus = useCallback((id, status, detail = '') => {
-    setBrowserNfcChecks((prev) => prev.map((step) => (
-      step.id === id ? { ...step, status, detail } : step
-    )))
-  }, [])
-
-  const stopBrowserNfcReader = useCallback(() => {
-    try {
-      browserNfcAbortRef.current?.abort()
-    } catch {
-      // ignore
+  useEffect(() => registerBrowserNfcReadHandler(
+    (uid) => handleProcessScan(uid, { source: 'web_nfc' }),
+    {
+      enabled: scanOperationalActive,
+      inactiveMessage: 'Aktifkan scan harian realtime atau mode scan manual di Live Scan sebelum memproses kartu NFC HP.'
     }
-    browserNfcAbortRef.current = null
-    browserNfcReaderRef.current = null
-    browserNfcLastReadRef.current = { uid: '', at: 0 }
-  }, [])
-
-  const handleStopBrowserNfc = useCallback(() => {
-    stopBrowserNfcReader()
-    setBrowserNfcStatus('idle')
-    setBrowserNfcMessage('Belum aktif')
-    setBrowserNfcChecks(initialBrowserNfcChecks())
-  }, [stopBrowserNfcReader])
-
-  const handleStartBrowserNfc = useCallback(async () => {
-    if (browserNfcStatus === 'active' || browserNfcStatus === 'validating') {
-      return
-    }
-
-    if (!scanOperationalActive) {
-      pushToast('error', 'Aktifkan scan harian realtime atau mode scan manual dulu.')
-      return
-    }
-
-    const env = detectBrowserNfcEnvironment()
-    const failValidation = (id, message) => {
-      setBrowserNfcCheckStatus(id, 'fail', message)
-      setBrowserNfcStatus('error')
-      setBrowserNfcMessage(message)
-      pushToast('error', message)
-    }
-    const runStaticCheck = async (id, ok, failMessage) => {
-      setBrowserNfcCheckStatus(id, 'checking')
-      await wait(320)
-      if (!ok) {
-        failValidation(id, failMessage)
-        return false
-      }
-      setBrowserNfcCheckStatus(id, 'ok')
-      return true
-    }
-
-    stopBrowserNfcReader()
-    setBrowserNfcStatus('validating')
-    setBrowserNfcMessage('Memvalidasi perangkat dan browser...')
-    setBrowserNfcChecks(initialBrowserNfcChecks())
-    setBrowserNfcLastUid('')
-
-    if (!await runStaticCheck('mobile', env.isChromeAndroid, 'Browser NFC hanya didukung stabil di Chrome Android. Buka halaman ini dari HP Android dengan Chrome.')) return
-    if (!await runStaticCheck('secure', env.isSecure && env.isTopLevel, 'Web NFC wajib memakai HTTPS dan dibuka sebagai halaman utama, bukan iframe.')) return
-    if (!await runStaticCheck('api', env.hasWebNfc, 'Browser ini belum menyediakan Web NFC. Gunakan Chrome Android atau reader RFID fisik.')) return
-
-    setBrowserNfcCheckStatus('permission', 'checking', 'Menunggu izin NFC dari browser...')
-    setBrowserNfcMessage('Menunggu izin NFC. Pastikan NFC HP aktif, lalu izinkan saat diminta.')
-
-    try {
-      const reader = new window.NDEFReader()
-      const controller = new AbortController()
-      browserNfcReaderRef.current = reader
-      browserNfcAbortRef.current = controller
-
-      await reader.scan({ signal: controller.signal })
-
-      reader.onreading = async (event) => {
-        const uid = extractBrowserNfcUid(event)
-        if (!uid) {
-          setBrowserNfcMessage('Kartu terbaca, tapi UID/NDEF kosong.')
-          pushToast('warning', 'Kartu terbaca, tapi UID/NDEF kosong.')
-          return
-        }
-
-        const nowMs = Date.now()
-        const lastRead = browserNfcLastReadRef.current
-        if (lastRead.uid === uid && nowMs - lastRead.at < 1500) {
-          return
-        }
-        browserNfcLastReadRef.current = { uid, at: nowMs }
-
-        setBrowserNfcLastUid(uid)
-        setBrowserNfcReadCount((count) => count + 1)
-        setBrowserNfcMessage(`Kartu terbaca: ${uid}`)
-        await handleProcessScan(uid, { source: 'web_nfc' })
-      }
-
-      reader.onreadingerror = () => {
-        setBrowserNfcMessage('Kartu belum bisa dibaca. Tempelkan ulang ke area NFC HP.')
-        pushToast('warning', 'Kartu belum bisa dibaca. Tempelkan ulang ke area NFC HP.')
-      }
-
-      setBrowserNfcCheckStatus('permission', 'ok', 'NFC browser aktif')
-      setBrowserNfcStatus('active')
-      setBrowserNfcMessage('Browser NFC aktif. Tempelkan kartu ke belakang HP.')
-      pushToast('success', 'Browser NFC aktif. Tempelkan kartu ke belakang HP.')
-    } catch (error) {
-      stopBrowserNfcReader()
-      const errorName = String(error?.name || '')
-      let message = error?.message || 'Gagal mengaktifkan Browser NFC.'
-      if (errorName === 'NotAllowedError') {
-        message = 'Izin NFC ditolak. Aktifkan izin NFC browser lalu coba lagi.'
-      } else if (errorName === 'NotReadableError') {
-        message = 'NFC HP belum aktif atau sensor belum siap. Aktifkan NFC di pengaturan HP lalu coba lagi.'
-      } else if (errorName === 'NotSupportedError') {
-        message = 'Web NFC tidak didukung oleh browser/perangkat ini.'
-      } else if (errorName === 'AbortError') {
-        message = 'Aktivasi Browser NFC dibatalkan.'
-      }
-
-      setBrowserNfcCheckStatus('permission', 'fail', message)
-      setBrowserNfcStatus('error')
-      setBrowserNfcMessage(message)
-      pushToast('error', message)
-    }
-  }, [
-    browserNfcStatus,
-    handleProcessScan,
-    pushToast,
-    scanOperationalActive,
-    setBrowserNfcCheckStatus,
-    stopBrowserNfcReader
-  ])
-
-  useEffect(() => () => {
-    stopBrowserNfcReader()
-  }, [stopBrowserNfcReader])
+  ), [handleProcessScan, registerBrowserNfcReadHandler, scanOperationalActive])
 
   useEffect(() => {
-    if (browserNfcStatus !== 'active') return
-    if (activeTab !== 'live-scan' || !scanOperationalActive) {
-      handleStopBrowserNfc()
-    }
-  }, [activeTab, browserNfcStatus, handleStopBrowserNfc, scanOperationalActive])
+    if (browserNfcStatus !== 'active' || scanOperationalActive) return
+
+    stopBrowserNfc({
+      notify: true,
+      message: 'NFC Browser dimatikan karena mode scan sedang tidak aktif.'
+    })
+  }, [browserNfcStatus, scanOperationalActive, stopBrowserNfc])
 
   const handleDeleteScan = async (record) => {
     if (!scanOperationalActive) {
@@ -1937,52 +1720,27 @@ export default function Scan() {
     </div>
   )
   const rfidDeviceRows = Array.isArray(rfidDevices?.devices) ? rfidDevices.devices : []
-  const rfidDeviceSummary = rfidDevices?.summary || {
-    total: rfidDeviceRows.length,
-    online: rfidDeviceRows.filter((device) => device?.is_online).length,
-    offline: rfidDeviceRows.filter((device) => !device?.is_online).length
+  const physicalRfidOnline = rfidDeviceRows.filter((device) => device?.is_online).length
+  const physicalRfidOffline = rfidDeviceRows.filter((device) => !device?.is_online).length
+  const browserNfcIsOnline = browserNfcStatus === 'active'
+  const rfidDeviceSummary = {
+    total: rfidDeviceRows.length + 1,
+    online: physicalRfidOnline + (browserNfcIsOnline ? 1 : 0),
+    offline: physicalRfidOffline + (browserNfcIsOnline ? 0 : 1)
   }
-  const browserNfcStatusMeta = useMemo(() => {
-    if (browserNfcStatus === 'active') {
-      return {
-        label: 'Online',
-        tone: 'border-emerald-200 bg-emerald-50/70',
-        badge: 'bg-emerald-600 text-white',
-        dot: 'animate-pulse bg-white',
-        icon: Radio
-      }
-    }
-    if (browserNfcStatus === 'validating') {
-      return {
-        label: 'Validasi',
-        tone: 'border-blue-200 bg-blue-50/70',
-        badge: 'bg-blue-600 text-white',
-        dot: 'animate-pulse bg-white',
-        icon: ShieldCheck
-      }
-    }
-    if (browserNfcStatus === 'error') {
-      return {
-        label: 'Tidak siap',
-        tone: 'border-rose-200 bg-rose-50/70',
-        badge: 'bg-rose-100 text-rose-700',
-        dot: 'bg-rose-500',
-        icon: XCircle
-      }
-    }
-
-    return {
-      label: 'Standby',
-      tone: 'border-gray-200 bg-gray-50',
-      badge: 'bg-slate-100 text-slate-700',
-      dot: 'bg-slate-400',
-      icon: Smartphone
-    }
-  }, [browserNfcStatus])
   const BrowserNfcIcon = browserNfcStatusMeta.icon
   const browserNfcDisplayMessage = !scanOperationalActive && browserNfcStatus !== 'active'
     ? 'Aktifkan scan harian realtime atau mode scan manual dulu sebelum memakai NFC HP.'
     : browserNfcMessage
+  const browserNfcOwnerLabel = browserNfcOwnerName || 'Belum aktif'
+  const browserNfcLastSeenLabel = browserNfcLastActiveAt ? formatDateTime(browserNfcLastActiveAt) : 'Belum pernah aktif'
+  const browserNfcDeviceId = `web-nfc-${String(browserNfcActivatedBy?.id || profile?.id || 'browser')
+    .replace(/[^0-9a-z]/gi, '')
+    .slice(0, 12) || 'browser'}`
+  const openBrowserNfcSetupPanel = () => openBrowserNfcPanel({
+    canStart: scanOperationalActive,
+    inactiveMessage: 'Aktifkan scan harian realtime atau mode scan manual dulu sebelum memakai NFC HP.'
+  })
 
   /* ========= RENDER ========= */
 
@@ -2514,7 +2272,7 @@ export default function Scan() {
                         </span>
                       </div>
                       <p className="mt-1 text-sm text-gray-600">
-                        Perangkat dianggap online saat heartbeat terakhir masih aktif.
+                        Reader fisik mengikuti heartbeat alat, sedangkan NFC Browser mengikuti sesi browser yang sedang aktif.
                       </p>
                       {rfidDevicesError && (
                         <p className="mt-2 text-xs font-semibold text-rose-600">
@@ -2533,98 +2291,46 @@ export default function Scan() {
                     </button>
                   </div>
 
-                  <div className={`mt-4 rounded-xl border p-4 ${browserNfcStatusMeta.tone}`}>
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="flex min-w-0 items-start gap-3">
-                        <div className="rounded-xl bg-white p-2 text-slate-700 shadow-sm">
-                          <BrowserNfcIcon className={`h-5 w-5 ${browserNfcStatus === 'validating' ? 'animate-pulse' : ''}`} />
-                        </div>
+                  <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                    <div className={`rounded-xl border p-4 ${browserNfcStatusMeta.card}`}>
+                      <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-semibold text-gray-900">
+                            <p className="truncate font-semibold text-gray-900">
                               Alat RFID versi HP Browser
                             </p>
-                            <span
-                              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${browserNfcStatusMeta.badge}`}
-                            >
-                              <span className={`h-2 w-2 rounded-full ${browserNfcStatusMeta.dot}`} />
-                              {browserNfcStatusMeta.label}
+                            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                              BROWSER
                             </span>
                           </div>
-                          <p className="mt-1 text-sm text-gray-600">
-                            {browserNfcDisplayMessage}
+                          <p className="mt-1 break-all font-mono text-xs text-gray-500">
+                            {browserNfcDeviceId}
                           </p>
-                          <p className="mt-1 text-xs font-medium text-gray-500">
-                            Khusus Chrome Android dengan Web NFC. Kartu perlu mendukung serial NFC atau NDEF berisi UID.
-                          </p>
+                        </div>
+                        <span
+                          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${browserNfcStatusMeta.badge}`}
+                        >
+                          <span className={`h-2 w-2 rounded-full ${browserNfcStatusMeta.dot}`} />
+                          {browserNfcStatusMeta.label}
+                        </span>
+                      </div>
+
+                      <div className="mt-3 flex items-start gap-2 rounded-lg bg-white/80 px-3 py-2 text-sm text-gray-600">
+                        <BrowserNfcIcon className={`mt-0.5 h-4 w-4 shrink-0 ${browserNfcStatus === 'validating' ? 'animate-pulse text-blue-600' : 'text-slate-600'}`} />
+                        <p>{browserNfcDisplayMessage}</p>
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="rounded-lg bg-white px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase text-gray-500">Terakhir aktif</p>
+                          <p className="mt-1 text-sm font-semibold text-gray-900">{browserNfcLastSeenLabel}</p>
+                        </div>
+                        <div className="rounded-lg bg-white px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase text-gray-500">Pemilik akun</p>
+                          <p className="mt-1 truncate text-sm font-semibold text-gray-900">{browserNfcOwnerLabel}</p>
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={browserNfcStatus === 'active' ? handleStopBrowserNfc : handleStartBrowserNfc}
-                        disabled={browserNfcStatus === 'validating' || !scanOperationalActive}
-                        className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                          browserNfcStatus === 'active'
-                            ? 'border border-rose-200 bg-white text-rose-700 hover:bg-rose-50'
-                            : 'bg-blue-600 text-white hover:bg-blue-700'
-                        }`}
-                      >
-                        {browserNfcStatus === 'validating' ? (
-                          <RefreshCcw className="h-4 w-4 animate-spin" />
-                        ) : browserNfcStatus === 'active' ? (
-                          <XCircle className="h-4 w-4" />
-                        ) : (
-                          <Smartphone className="h-4 w-4" />
-                        )}
-                        {browserNfcStatus === 'validating'
-                          ? 'Memvalidasi...'
-                          : browserNfcStatus === 'active'
-                            ? 'Matikan NFC Browser'
-                            : 'Aktifkan NFC Browser'}
-                      </button>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {browserNfcChecks.map((step) => {
-                        const isChecking = step.status === 'checking'
-                        const isOk = step.status === 'ok'
-                        const isFail = step.status === 'fail'
-
-                        return (
-                          <div
-                            key={step.id}
-                            className={`flex items-start gap-2 rounded-lg border bg-white px-3 py-2 text-sm ${
-                              isOk
-                                ? 'border-emerald-200 text-emerald-800'
-                                : isFail
-                                  ? 'border-rose-200 text-rose-800'
-                                  : isChecking
-                                    ? 'border-blue-200 text-blue-800'
-                                    : 'border-gray-200 text-gray-600'
-                            }`}
-                          >
-                            {isOk ? (
-                              <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                            ) : isFail ? (
-                              <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
-                            ) : isChecking ? (
-                              <RefreshCcw className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-blue-600" />
-                            ) : (
-                              <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-gray-300" />
-                            )}
-                            <div className="min-w-0">
-                              <div className="font-semibold">{step.label}</div>
-                              {step.detail && (
-                                <div className="mt-0.5 text-xs opacity-80">{step.detail}</div>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-
-                    {(browserNfcLastUid || browserNfcReadCount > 0) && (
                       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div className="rounded-lg bg-white px-3 py-2">
                           <p className="text-[11px] font-semibold uppercase text-gray-500">UID terakhir</p>
@@ -2639,15 +2345,23 @@ export default function Scan() {
                           </p>
                         </div>
                       </div>
-                    )}
-                  </div>
 
-                  {rfidDevicesLoading && !rfidDeviceRows.length ? (
-                    <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
-                      Memuat status alat RFID...
+                      <button
+                        type="button"
+                        onClick={openBrowserNfcSetupPanel}
+                        className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+                      >
+                        <SmartphoneNfc className="h-4 w-4" />
+                        Kelola NFC Browser
+                      </button>
                     </div>
-                  ) : rfidDeviceRows.length ? (
-                    <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+
+                    {rfidDevicesLoading && !rfidDeviceRows.length ? (
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
+                        Memuat status alat RFID...
+                      </div>
+                    ) : rfidDeviceRows.length ? (
+                      <>
                       {rfidDeviceRows.map((device) => {
                         const isOnline = Boolean(device?.is_online)
                         const boardType = String(device?.board_type || 'esp8266').toUpperCase()
@@ -2698,12 +2412,13 @@ export default function Scan() {
                           </div>
                         )
                       })}
-                    </div>
-                  ) : (
-                    <div className="mt-4 rounded-xl border border-dashed border-gray-300 px-4 py-6 text-center text-sm text-gray-500">
-                      Belum ada alat RFID terdaftar untuk sekolah ini.
-                    </div>
-                  )}
+                      </>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-gray-300 px-4 py-6 text-center text-sm text-gray-500">
+                        Belum ada alat RFID terdaftar untuk sekolah ini.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
