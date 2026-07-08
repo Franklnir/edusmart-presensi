@@ -848,6 +848,84 @@ class DbSecurityTest extends TestCase
         }
     }
 
+    public function test_guru_can_select_period_scoped_absensi_for_taught_class(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+        [$siswa] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+
+        DB::table('settings')->where('tenant_id', $tenantId)->delete();
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Test',
+            'tahun_ajaran' => '2026/2027',
+            'semester_aktif' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('kelas')->insert([
+            'id' => 'X-1',
+            'tenant_id' => $tenantId,
+            'nama' => 'X 1',
+            'grade' => 'X',
+            'suffix' => '1',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('jadwal')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'kelas_id' => 'X-1',
+            'hari' => 'Senin',
+            'mapel' => 'Biologi',
+            'guru_id' => $guru->id,
+            'guru_nama' => 'guru test',
+            'jam_mulai' => '08:00:00',
+            'jam_selesai' => '09:00:00',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('absensi')->insert([
+            'tenant_id' => $tenantId,
+            'uid' => $siswa->id,
+            'nama' => 'siswa test',
+            'kelas' => 'X-1',
+            'tanggal' => '2026-07-06',
+            'mapel' => 'Biologi',
+            'status' => 'Hadir',
+            'waktu' => '2026-07-06 08:30:00',
+            'oleh' => 'guru',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+        ]);
+
+        $response = $this->actingAs($guru)->postJson('/api/db', [
+            'table' => 'absensi',
+            'action' => 'select',
+            'columns' => 'id,kelas,tanggal,uid,mapel,status,nama,waktu,komentar,oleh,dikonfirmasi,tahun_ajaran,semester',
+            'filters' => [
+                'eq' => [
+                    'kelas' => 'X-1',
+                    'tanggal' => '2026-07-06',
+                    'mapel' => 'Biologi',
+                    'tahun_ajaran' => '2026/2027',
+                ],
+            ],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('data.0.kelas', 'X-1');
+        $response->assertJsonPath('data.0.tahun_ajaran', '2026/2027');
+        $response->assertJsonPath('data.0.semester', AcademicPeriod::SEMESTER_GANJIL);
+    }
+
     public function test_siswa_cannot_update_or_delete_absensi_through_db_gateway(): void
     {
         $tenantId = $this->defaultTenantId();
