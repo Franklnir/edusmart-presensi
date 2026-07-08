@@ -247,6 +247,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::get('/certificates', [AdminController::class, 'certificates']);
     Route::post('/certificates/{id}/send-email', [AdminController::class, 'sendCertificateEmail']);
     Route::get('/rfid-devices', [AdminController::class, 'rfidDevices']);
+    Route::post('/rfid/browser-event', [AdminController::class, 'rfidBrowserEvent'])
+        ->middleware('throttle:browser-nfc');
     Route::get('/rfid-events/stream', [AdminController::class, 'rfidEventsStream']);
     Route::get('/scan-session-summary', [AdminController::class, 'scanSessionSummary']);
     Route::get('/feature-permissions', [AdminFeaturePermissionController::class, 'index']);

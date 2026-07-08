@@ -263,6 +263,17 @@ const adminApi = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async rfidBrowserEvent(payload = {}) {
+      const res = await apiFetch('/api/admin/rfid/browser-event', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        dedupe: false,
+        timeoutMs: 12000
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw ?? res.data, error: res.error }
+    },
     rfidEventsStreamUrl(cursor = 0) {
       const params = new URLSearchParams()
       if (Number(cursor) > 0) params.set('cursor', String(Math.trunc(Number(cursor))))

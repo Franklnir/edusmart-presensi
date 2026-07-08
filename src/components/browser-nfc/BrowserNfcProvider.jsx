@@ -493,7 +493,10 @@ export function BrowserNfcProvider({ children }) {
         const handlerEntry = readHandlerRef.current
         if (handlerEntry?.enabled && typeof handlerEntry.handler === 'function') {
           try {
-            await handlerEntry.handler(uid)
+            await handlerEntry.handler(uid, {
+              readAt: nowIso,
+              source: 'web_nfc'
+            })
           } catch (error) {
             console.error('Browser NFC handler failed:', error)
             pushToast('error', 'Kartu terbaca, tapi gagal diproses ke absensi.')
