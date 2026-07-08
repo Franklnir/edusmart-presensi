@@ -5,7 +5,7 @@ Tanggal audit: 2026-07-03
 Dokumen ini merangkum kontrak endpoint API backend EduSmart dari source
 `backend/routes/api.php`, hasil verifikasi `php artisan route:list --path=api`,
 dan pembacaan controller utama. Total endpoint API aplikasi aktif saat audit:
-209 route. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai
+210 route. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai
 API aplikasi.
 
 ## Status Kualitas Dokumen
@@ -595,6 +595,9 @@ Tugas mendukung filter periode via DB proxy dan controller: `kelas`, `mapel`,
 ### RFID Device
 
 Endpoint public RFID tetap memakai credential device dan throttle `rfid`.
+Endpoint admin browser NFC memakai Sanctum, permission Live Scan, tenant aktif,
+dan throttle `browser-nfc`, lalu tetap masuk jalur `RfidIngressService` agar
+event tercatat di feed Live Scan dan audit RFID.
 
 Payload utama:
 
@@ -605,6 +608,8 @@ Payload utama:
   `ip_address`, `firmware_version`, `wifi_rssi`, `free_heap`, `meta`.
 - `POST /api/rfid/set-mode`: admin, `mode` salah satu `auto`, `manual`,
   `enroll`, optional `tenant_slug`.
+- `POST /api/admin/rfid/browser-event`: `card_uid`, optional `event_id`,
+  `mode`, `scanned_at`, `browser_device_id`, `browser`.
 
 ### Storage
 
@@ -1055,7 +1060,7 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 
 Katalog ini digenerate ulang pada 2026-07-02 dari `php artisan route:list --json --path=api` dan hanya memasukkan route aplikasi dengan URI `api/*`. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai API aplikasi.
 
-Total route API aplikasi aktif: 207.
+Total route API aplikasi aktif: 210.
 
 ### Admin
 
@@ -1097,6 +1102,7 @@ Total route API aplikasi aktif: 207.
 | `GET` | `/api/admin/home-bootstrap` | `AdminController@homeBootstrap` | Sanctum |
 | `GET` | `/api/admin/monitoring` | `AdminController@monitoring` | Sanctum |
 | `GET` | `/api/admin/organisasi-bootstrap` | `AdminController@organisasiBootstrap` | Sanctum |
+| `POST` | `/api/admin/rfid/browser-event` | `AdminController@rfidBrowserEvent` | Sanctum |
 | `GET` | `/api/admin/rfid-devices` | `AdminController@rfidDevices` | Sanctum |
 | `GET` | `/api/admin/rfid-events/stream` | `AdminController@rfidEventsStream` | Sanctum |
 | `GET` | `/api/admin/scan-session-summary` | `AdminController@scanSessionSummary` | Sanctum |
