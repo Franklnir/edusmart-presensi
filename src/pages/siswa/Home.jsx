@@ -22,6 +22,8 @@ const DASHBOARD_TASK_QUERY_LIMIT = 80
 const DASHBOARD_TASK_COLUMNS = 'id, kelas, judul, mapel, deadline, keterangan, file_url, link'
 const ACADEMIC_PERIOD_STORAGE_KEY = 'edusmart.siswa.home.periodFilter'
 const DEFAULT_EKSKUL_LIMIT = 3
+const EKSKUL_SELECT_COLUMNS = 'id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at'
+const LEGACY_EKSKUL_SELECT_COLUMNS = 'id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id'
 
 const isValidDate = (date) => date instanceof Date && !Number.isNaN(date.getTime())
 const normalizeEskulLimit = (value) => Math.max(1, Math.min(99, Number.parseInt(value, 10) || DEFAULT_EKSKUL_LIMIT))
@@ -97,6 +99,10 @@ const isLegacyAcademicColumnError = (error) => {
   const message = String(error?.message || error?.error || '')
   return /tahun_ajaran|semester|angkatan|kolom filter|filter tidak diizinkan|kolom.*tidak diizinkan/i.test(message)
 }
+
+const shouldRetryLegacyEskulSelect = (error) => (
+  isLegacyAcademicColumnError(error) || [400, 422].includes(Number(error?.status))
+)
 
 // Komponen Modal untuk Detail Organisasi
 const OrganisasiModal = ({ organisasi, isOpen, onClose }) => {
@@ -956,14 +962,14 @@ export default function SHome() {
       const period = await loadActiveAcademicPeriod()
       let eskulQuery = supabase
         .from('ekskul')
-        .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at')
+        .select(EKSKUL_SELECT_COLUMNS)
         .order('nama')
 
       let { data: eskulData, error: eskulError } = await eskulQuery
-      if (eskulError && isLegacyAcademicColumnError(eskulError)) {
+      if (eskulError && shouldRetryLegacyEskulSelect(eskulError)) {
         ; ({ data: eskulData, error: eskulError } = await supabase
           .from('ekskul')
-          .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at')
+          .select(LEGACY_EKSKUL_SELECT_COLUMNS)
           .order('nama'))
       }
 
@@ -1028,8 +1034,8 @@ export default function SHome() {
       setEkskul(formattedEskul)
       setMyEkskul(myEskulSet)
     } catch (err) {
-      console.error('Error loading ekskul:', err)
-      pushToast('error', 'Gagal memuat data ekstrakurikuler')
+      setEkskul([])
+      setMyEkskul(new Set())
     }
   }
 
