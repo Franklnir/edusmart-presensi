@@ -1256,6 +1256,132 @@ class DbSecurityTest extends TestCase
         $this->assertSame('nama', $fields[0]['key'] ?? null);
     }
 
+    public function test_ekskul_select_defaults_to_active_academic_period(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$admin] = $this->createUserWithProfile($tenantId, 'admin', 'X-1');
+
+        DB::table('settings')->where('tenant_id', $tenantId)->delete();
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Test',
+            'tahun_ajaran' => '2026/2027',
+            'semester_aktif' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('ekskul')->insert([
+            [
+                'id' => 'basket-2025',
+                'tenant_id' => $tenantId,
+                'nama' => 'Basket Lama',
+                'registration_deadline_at' => now()->addDays(7),
+                'tahun_ajaran' => '2025/2026',
+                'semester' => AcademicPeriod::SEMESTER_GANJIL,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'id' => 'basket-2026',
+                'tenant_id' => $tenantId,
+                'nama' => 'Basket Baru',
+                'registration_deadline_at' => now()->addDays(7),
+                'tahun_ajaran' => '2026/2027',
+                'semester' => AcademicPeriod::SEMESTER_GANJIL,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/db', [
+            'table' => 'ekskul',
+            'action' => 'select',
+            'columns' => 'id,nama,tahun_ajaran,semester',
+            'order' => [
+                ['field' => 'nama', 'dir' => 'asc'],
+            ],
+        ]);
+
+        $response->assertOk();
+        $this->assertSame(['basket-2026'], collect($response->json('data') ?? [])->pluck('id')->all());
+
+        $archive = $this->actingAs($admin)->postJson('/api/db', [
+            'table' => 'ekskul',
+            'action' => 'select',
+            'columns' => 'id,nama,tahun_ajaran,semester',
+            'filters' => [
+                'eq' => [
+                    'tahun_ajaran' => '2025/2026',
+                    'semester' => AcademicPeriod::SEMESTER_GANJIL,
+                ],
+            ],
+        ]);
+
+        $archive->assertOk();
+        $this->assertSame(['basket-2025'], collect($archive->json('data') ?? [])->pluck('id')->all());
+    }
+
+    public function test_ekskul_membership_is_attached_to_active_period_and_cannot_target_archive(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$admin] = $this->createUserWithProfile($tenantId, 'admin', 'X-1');
+        [$siswa] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+
+        DB::table('settings')->where('tenant_id', $tenantId)->delete();
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Test',
+            'tahun_ajaran' => '2026/2027',
+            'semester_aktif' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('ekskul')->insert([
+            'id' => 'pramuka-2026',
+            'tenant_id' => $tenantId,
+            'nama' => 'Pramuka',
+            'registration_deadline_at' => now()->addDays(7),
+            'tahun_ajaran' => '2026/2027',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/db', [
+            'table' => 'ekskul_anggota',
+            'action' => 'insert',
+            'payload' => [
+                'ekskul_id' => 'pramuka-2026',
+                'user_id' => $siswa->id,
+            ],
+        ]);
+
+        $response->assertOk();
+        $this->assertDatabaseHas('ekskul_anggota', [
+            'tenant_id' => $tenantId,
+            'ekskul_id' => 'pramuka-2026',
+            'user_id' => $siswa->id,
+            'tahun_ajaran' => '2026/2027',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+        ]);
+
+        $archiveAttempt = $this->actingAs($admin)->postJson('/api/db', [
+            'table' => 'ekskul_anggota',
+            'action' => 'insert',
+            'payload' => [
+                'ekskul_id' => 'pramuka-2026',
+                'user_id' => $siswa->id,
+                'tahun_ajaran' => '2025/2026',
+                'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            ],
+        ]);
+
+        $archiveAttempt->assertStatus(422);
+        $archiveAttempt->assertJsonPath('error', 'Anggota ekstrakurikuler hanya dapat ditambahkan pada periode aktif');
+    }
+
     private function defaultTenantId(): string
     {
         $tenantId = (string) DB::table('tenants')

@@ -223,7 +223,7 @@ export default function AccountSecurityPanel({ className = '', tone = 'blue' }) 
 
           <div className="rounded-2xl border border-slate-200 p-3">
             <h3 className="mb-3 text-sm font-bold text-slate-900">Riwayat Login</h3>
-            <div className="space-y-2">
+            <div className={`space-y-2 ${loginHistory.length > 5 ? 'max-h-[26rem] overflow-y-auto pr-1' : ''}`}>
               {loginHistory.length === 0 && (
                 <p className="rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-500">
                   Riwayat login belum tersedia.

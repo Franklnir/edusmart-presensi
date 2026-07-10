@@ -337,14 +337,12 @@ export default function LaporanRekap() {
 
   // Tables that are already scoped by parent IDs (tugas_id IN [...]) — do NOT
   // add extra tahun_ajaran filter here because the column is frequently null
-  // for older records, causing all historical data to vanish silently.
+  // for older answer records, causing all historical data to vanish silently.
   const SKIP_TAHUN_AJARAN_FILTER_TABLES = useMemo(
     () => new Set([
       'tugas_jawaban',
       'quiz_submissions',
       'quiz_answers',
-      'ekskul_anggota',
-      'absensi_ekskul',
     ]),
     []
   )
