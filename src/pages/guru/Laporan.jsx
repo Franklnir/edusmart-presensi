@@ -1745,10 +1745,13 @@ export default function LaporanRekap() {
 
       let ekskulList = []
       if (ekskulIds.length) {
-        const { data, error } = await supabase
+        let ekskulQuery = supabase
           .from('ekskul')
           .select('id, nama')
           .in('id', ekskulIds)
+
+        ekskulQuery = applyReportAcademicFilters(ekskulQuery, 'ekskul')
+        const { data, error } = await ekskulQuery
         if (error) throw error
         ekskulList = data || []
       }

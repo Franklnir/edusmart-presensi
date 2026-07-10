@@ -70,6 +70,13 @@ const normalizeDateKey = (value) => {
   return Number.isNaN(date.getTime()) ? '' : toLocalDateKey(date)
 }
 
+const applyAcademicPeriodFilters = (query, period, { semester = true } = {}) => {
+  let next = query
+  if (period?.tahunAjaran) next = next.eq('tahun_ajaran', period.tahunAjaran)
+  if (semester && period?.semester) next = next.eq('semester', period.semester)
+  return next
+}
+
 const semesterForDateKey = (dateKey, fallbackSemester = '') => {
   const month = Number(String(dateKey || '').slice(5, 7))
   if (!Number.isFinite(month) || month < 1 || month > 12) return fallbackSemester || null
@@ -1556,15 +1563,15 @@ export default function JadwalGuru() {
           .eq('user_id', user.id)
           .order('issued_at', { ascending: false })
 
-        const strukturSekolahQuery = supabase
+        const strukturSekolahQuery = applyAcademicPeriodFilters(supabase
           .from('struktur_sekolah')
           .select('id, jabatan, nama, guru_id')
-          .order('jabatan')
+          .order('jabatan'), activeAcademicPeriod)
 
-        const waliKelasQuery = supabase
+        const waliKelasQuery = applyAcademicPeriodFilters(supabase
           .from('kelas_struktur')
           .select('kelas_id, wali_guru_id, wali_guru_nama')
-          .eq('wali_guru_id', user.id)
+          .eq('wali_guru_id', user.id), activeAcademicPeriod)
 
         let jadwalQuery = supabase
           .from('jadwal')
@@ -1582,11 +1589,12 @@ export default function JadwalGuru() {
           .select('id, nama, deskripsi')
           .eq('pembina_guru_id', user.id)
 
-        // Filter academic period untuk jadwal dan ekskul jika ada
+        // Jadwal dipotong per tahun lalu difilter semester dari periode_berlaku.
         if (activeAcademicPeriod.tahunAjaran) {
           jadwalQuery = jadwalQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
-          ekskulQuery = ekskulQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
         }
+        ekskulQuery = applyAcademicPeriodFilters(ekskulQuery, activeAcademicPeriod)
+        orgQuery = applyAcademicPeriodFilters(orgQuery, activeAcademicPeriod)
 
         // Eksekusi semua query secara paralel menggunakan Promise.all
         const [
@@ -1675,10 +1683,7 @@ export default function JadwalGuru() {
             .from('ekskul_anggota')
             .select('ekskul_id') // Hanya butuh foreign key untuk dihitung
             .in('ekskul_id', ekskulIds)
-          
-          if (activeAcademicPeriod.tahunAjaran) {
-             memberQuery = memberQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
-          }
+          memberQuery = applyAcademicPeriodFilters(memberQuery, activeAcademicPeriod)
           
           const { data: members } = await memberQuery
           
@@ -1697,19 +1702,37 @@ export default function JadwalGuru() {
         }
 
         // MENGATASI N+1 QUERY UNTUK ORGANISASI: Lakukan 1 query dengan .in()
-        if (orgData && orgData.length > 0) {
-          const orgIds = orgData.map(o => o.id)
-          const { data: orgMembers } = await supabase
+        let finalOrgData = orgData || []
+        if (orgErr && /tahun_ajaran|semester/i.test(orgErr.message || '')) {
+          const { data: fallbackOrg } = await supabase
+            .from('organisasi')
+            .select('id, nama, deskripsi')
+            .eq('pembina_guru_id', user.id)
+          finalOrgData = fallbackOrg || []
+        }
+
+        if (finalOrgData.length > 0) {
+          const orgIds = finalOrgData.map(o => o.id)
+          let orgMemberQuery = supabase
             .from('organisasi_anggota')
             .select('organisasi_id')
             .in('organisasi_id', orgIds)
+          orgMemberQuery = applyAcademicPeriodFilters(orgMemberQuery, activeAcademicPeriod)
+
+          let { data: orgMembers, error: orgMembersError } = await orgMemberQuery
+          if (orgMembersError && /tahun_ajaran|semester/i.test(orgMembersError.message || '')) {
+            ; ({ data: orgMembers } = await supabase
+              .from('organisasi_anggota')
+              .select('organisasi_id')
+              .in('organisasi_id', orgIds))
+          }
 
           const orgMemberCounts = (orgMembers || []).reduce((acc, curr) => {
             acc[curr.organisasi_id] = (acc[curr.organisasi_id] || 0) + 1
             return acc
           }, {})
 
-          setOrganisasiDiampu(orgData.map(o => ({
+          setOrganisasiDiampu(finalOrgData.map(o => ({
             ...o,
             jumlah_anggota: orgMemberCounts[o.id] || 0
           })))

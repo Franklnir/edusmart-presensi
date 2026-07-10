@@ -569,7 +569,7 @@ const SkeletonLoader = () => (
 )
 
 export default function SHome() {
-  const { profile, user } = useAuthStore()
+  const { profile, user, settings } = useAuthStore()
   const { pushToast } = useUIStore()
   const navigate = useNavigate()
   const userId = profile?.id || user?.id
@@ -587,7 +587,8 @@ export default function SHome() {
   const [pengumuman, setPengumuman] = useLocalCache('siswa_dashboard_pengumuman', [])
   const [ekskul, setEkskul] = useLocalCache('siswa_dashboard_ekskul', [])
   const [myEskul, setMyEskul] = useState(new Set())
-  const [maxEskulPerStudent, setMaxEskulPerStudent] = useState(DEFAULT_EKSKUL_LIMIT)
+  const [maxEskulPerStudent, setMaxEskulPerStudent] = useState(() => normalizeEskulLimit(settings?.max_ekskul_per_siswa))
+  const [eskulPeriodInfo, setEskulPeriodInfo] = useState(() => resolveAcademicPeriod(settings || {}))
   const [organisasi, setOrganisasi] = useLocalCache('siswa_dashboard_organisasi', [])
   const [selectedOrganisasi, setSelectedOrganisasi] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -604,6 +605,24 @@ export default function SHome() {
   const [isLoading, setIsLoading] = useState(!hasRingkas)
   const tugasLoadSeqRef = useRef(0)
   const activeAcademicPeriodRef = useRef(null)
+
+  useEffect(() => {
+    if (!settings) return
+    setMaxEskulPerStudent(normalizeEskulLimit(settings.max_ekskul_per_siswa))
+    setEskulPeriodInfo(resolveAcademicPeriod(settings || {}))
+    activeAcademicPeriodRef.current = null
+  }, [
+    settings?.tahun_ajaran,
+    settings?.semester_aktif,
+    settings?.periode_mulai,
+    settings?.periode_selesai,
+    settings?.periode_ganjil_mulai,
+    settings?.periode_ganjil_selesai,
+    settings?.periode_genap_mulai,
+    settings?.periode_genap_selesai,
+    settings?.max_ekskul_per_siswa,
+    settings?.updated_at
+  ])
 
   const getToday = () => {
     const d = new Date()
@@ -631,6 +650,8 @@ export default function SHome() {
 
   const loadActiveAcademicPeriod = async ({ force = false } = {}) => {
     if (!force && activeAcademicPeriodRef.current) {
+      setMaxEskulPerStudent(normalizeEskulLimit(activeAcademicPeriodRef.current.maxEskulPerStudent))
+      setEskulPeriodInfo(activeAcademicPeriodRef.current)
       return activeAcademicPeriodRef.current
     }
 
@@ -657,6 +678,7 @@ export default function SHome() {
       : activePeriod
     period.maxEskulPerStudent = maxEskul
     activeAcademicPeriodRef.current = period
+    setEskulPeriodInfo(period)
     return period
   }
 
@@ -698,6 +720,9 @@ export default function SHome() {
       activeAcademicPeriodRef.current = null
       void loadAbsensi()
       void loadTugas()
+      void loadEskul()
+      void loadOrganisasi()
+      void loadStrukturSekolah()
     }
 
     const channel = supabase
@@ -705,8 +730,18 @@ export default function SHome() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, refreshAcademicScopedData)
       .subscribe()
 
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'hidden') return
+      refreshAcademicScopedData()
+    }
+
+    window.addEventListener('focus', refreshAcademicScopedData)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+
     return () => {
       supabase.removeChannel(channel)
+      window.removeEventListener('focus', refreshAcademicScopedData)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, profileClass])
@@ -734,10 +769,20 @@ export default function SHome() {
   // Load Data Struktur Sekolah
   const loadStrukturSekolah = async () => {
     try {
-      const { data, error } = await supabase
+      const period = await loadActiveAcademicPeriod()
+      let query = supabase
         .from('struktur_sekolah')
         .select('*')
         .order('jabatan')
+
+      query = applySemesterPeriodFilters(query, period)
+      let { data, error } = await query
+      if (error && isLegacyAcademicColumnError(error)) {
+        ; ({ data, error } = await supabase
+          .from('struktur_sekolah')
+          .select('*')
+          .order('jabatan'))
+      }
 
       if (error) throw error
       setStrukturSekolah(data || [])
@@ -1044,17 +1089,44 @@ export default function SHome() {
     if (!userId) return
 
     try {
-      const { data: organisasiData, error: organisasiError } = await supabase
+      const period = await loadActiveAcademicPeriod()
+      let organisasiQuery = supabase
         .from('organisasi')
         .select('*')
         .order('nama')
 
+      organisasiQuery = applySemesterPeriodFilters(organisasiQuery, period)
+      let { data: organisasiData, error: organisasiError } = await organisasiQuery
+      if (organisasiError && isLegacyAcademicColumnError(organisasiError)) {
+        ; ({ data: organisasiData, error: organisasiError } = await supabase
+          .from('organisasi')
+          .select('*')
+          .order('nama'))
+      }
+
       if (organisasiError) throw organisasiError
 
-      const { data: anggotaData, error: anggotaError } = await supabase
+      const organisasiIds = (organisasiData || []).map((org) => org.id).filter(Boolean)
+      if (!organisasiIds.length) {
+        setOrganisasi([])
+        return
+      }
+
+      let anggotaQuery = supabase
         .from('organisasi_anggota')
         .select('*')
+        .in('organisasi_id', organisasiIds)
         .order('jabatan', { ascending: false })
+
+      anggotaQuery = applySemesterPeriodFilters(anggotaQuery, period)
+      let { data: anggotaData, error: anggotaError } = await anggotaQuery
+      if (anggotaError && isLegacyAcademicColumnError(anggotaError)) {
+        ; ({ data: anggotaData, error: anggotaError } = await supabase
+          .from('organisasi_anggota')
+          .select('*')
+          .in('organisasi_id', organisasiIds)
+          .order('jabatan', { ascending: false }))
+      }
 
       if (anggotaError) throw anggotaError
 
@@ -1171,6 +1243,9 @@ export default function SHome() {
    * ============================ */
   const greetingHour = new Date().getHours()
   const greeting = greetingHour < 12 ? 'Selamat Pagi' : greetingHour < 15 ? 'Selamat Siang' : greetingHour < 18 ? 'Selamat Sore' : 'Selamat Malam'
+  const effectiveEskulLimit = normalizeEskulLimit(maxEskulPerStudent)
+  const eskulPeriodLabel = eskulPeriodInfo?.tahunAjaran || 'Periode aktif'
+  const eskulSemesterLabel = eskulPeriodInfo?.semester ? `Semester ${eskulPeriodInfo.semester}` : ''
 
   if (isLoading) return <SkeletonLoader />
 
@@ -1366,10 +1441,14 @@ export default function SHome() {
                   <div className="w-2 h-8 bg-orange-500 rounded-full" />
                   <div>
                     <h2 className="text-base font-bold text-slate-900">Ekstrakurikuler</h2>
-                    <p className="text-slate-500 text-xs">Maks. <span className="font-semibold text-orange-600">{maxEskulPerStudent} ekskul</span></p>
+                    <p className="text-slate-500 text-xs">
+                      {eskulPeriodLabel}
+                      {eskulSemesterLabel ? ` • ${eskulSemesterLabel}` : ''}
+                      {' '}• Maks. <span className="font-semibold text-orange-600">{effectiveEskulLimit} ekskul</span>
+                    </p>
                   </div>
                 </div>
-                <span className="px-3 py-1 bg-orange-50 text-orange-700 rounded-full text-xs font-semibold">{myEskul.size}/{maxEskulPerStudent} Terdaftar</span>
+                <span className="px-3 py-1 bg-orange-50 text-orange-700 rounded-full text-xs font-semibold">{myEskul.size}/{effectiveEskulLimit} Terdaftar</span>
               </div>
               <div className="p-5">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
