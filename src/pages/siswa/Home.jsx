@@ -93,6 +93,11 @@ const applySemesterPeriodFilters = (query, period) => {
   return next
 }
 
+const isLegacyAcademicColumnError = (error) => {
+  const message = String(error?.message || error?.error || '')
+  return /tahun_ajaran|semester|angkatan|kolom filter|filter tidak diizinkan|kolom.*tidak diizinkan/i.test(message)
+}
+
 // Komponen Modal untuk Detail Organisasi
 const OrganisasiModal = ({ organisasi, isOpen, onClose }) => {
   if (!isOpen || !organisasi) return null
@@ -951,12 +956,11 @@ export default function SHome() {
       const period = await loadActiveAcademicPeriod()
       let eskulQuery = supabase
         .from('ekskul')
-        .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at, tahun_ajaran, semester')
+        .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at')
         .order('nama')
-      eskulQuery = applySemesterPeriodFilters(eskulQuery, period)
 
       let { data: eskulData, error: eskulError } = await eskulQuery
-      if (eskulError && /tahun_ajaran|semester/i.test(eskulError.message || '')) {
+      if (eskulError && isLegacyAcademicColumnError(eskulError)) {
         ; ({ data: eskulData, error: eskulError } = await supabase
           .from('ekskul')
           .select('id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at')
@@ -969,7 +973,7 @@ export default function SHome() {
       anggotaQuery = applySemesterPeriodFilters(anggotaQuery, period)
 
       let { data: anggotaData, error: anggotaError } = await anggotaQuery
-      if (anggotaError && /tahun_ajaran|semester/i.test(anggotaError.message || '')) {
+      if (anggotaError && isLegacyAcademicColumnError(anggotaError)) {
         ; ({ data: anggotaData, error: anggotaError } = await supabase
           .from('ekskul_anggota')
           .select('id, ekskul_id, user_id'))
@@ -1100,7 +1104,7 @@ export default function SHome() {
         deleteQuery = applySemesterPeriodFilters(deleteQuery, period)
 
         let { error } = await deleteQuery
-        if (error && /tahun_ajaran|semester/i.test(error.message || '')) {
+        if (error && isLegacyAcademicColumnError(error)) {
           ; ({ error } = await supabase
             .from('ekskul_anggota')
             .delete()
@@ -1122,7 +1126,7 @@ export default function SHome() {
         let { error } = await supabase
           .from('ekskul_anggota')
           .insert(insertPayload)
-        if (error && /tahun_ajaran|semester|angkatan/i.test(error.message || '')) {
+        if (error && isLegacyAcademicColumnError(error)) {
           const { tahun_ajaran, semester, angkatan, ...legacyPayload } = insertPayload
           ; ({ error } = await supabase.from('ekskul_anggota').insert(legacyPayload))
         }
