@@ -651,6 +651,24 @@ export default function AHome() {
   const loadEskulDetail = useCallback(async () => {
     if (!eskulSel) return
 
+    const applyDetailForm = (data = {}) => {
+      setEskulForm({
+        nama: data.nama || '',
+        keterangan: data.keterangan || '',
+        hari: data.hari || '',
+        jam_mulai: data.jam_mulai || '',
+        jam_selesai: data.jam_selesai || '',
+        pembina_guru_id: data.pembina_guru_id || '',
+        registration_deadline_at: toDateTimeLocalValue(data.registration_deadline_at)
+      })
+    }
+
+    const selectedFromList = eskulList.find((item) => item.id === eskulSel)
+    if (selectedFromList) {
+      applyDetailForm(selectedFromList)
+      return
+    }
+
     try {
       let detailQuery = supabase
         .from('ekskul')
@@ -658,26 +676,22 @@ export default function AHome() {
         .eq('id', eskulSel)
       detailQuery = applySemesterPeriodFilters(detailQuery, eskulDataPeriod)
 
-      let { data, error } = await detailQuery.maybeSingle()
+      let { data, error } = await detailQuery
+        .order('updated_at', { ascending: false })
+        .limit(1)
       if (error && /tahun_ajaran|semester/i.test(error.message || '')) {
         ; ({ data, error } = await supabase
           .from('ekskul')
           .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at')
           .eq('id', eskulSel)
-          .maybeSingle())
+          .order('updated_at', { ascending: false })
+          .limit(1))
       }
 
       if (error) throw error
-      if (data) {
-        setEskulForm({
-          nama: data.nama || '',
-          keterangan: data.keterangan || '',
-          hari: data.hari || '',
-          jam_mulai: data.jam_mulai || '',
-          jam_selesai: data.jam_selesai || '',
-          pembina_guru_id: data.pembina_guru_id || '',
-          registration_deadline_at: toDateTimeLocalValue(data.registration_deadline_at)
-        })
+      const row = Array.isArray(data) ? data[0] : data
+      if (row) {
+        applyDetailForm(row)
       } else {
         setEskulForm({
           nama: '',
@@ -692,7 +706,7 @@ export default function AHome() {
     } catch (error) {
       pushToast('error', 'Gagal memuat detail eskul')
     }
-  }, [activeEskulPeriod, eskulDataPeriod, eskulSel, pushToast])
+  }, [activeEskulPeriod, eskulDataPeriod, eskulList, eskulSel, pushToast])
 
   useEffect(() => {
     loadEskulList()
