@@ -605,6 +605,7 @@ export default function SiswaQuiz() {
   const essaySaveTimersRef = useRef({})
   const essayDraftMetaRef = useRef({})
   const pendingAnswersRef = useRef({})
+  const flushPendingAnswersRef = useRef(null)
   const batchFlushInFlightRef = useRef(false)
   const quizDetailRequestSeqRef = useRef(0)
   const quizReloadTimerRef = useRef(null)
@@ -1142,7 +1143,7 @@ export default function SiswaQuiz() {
       message,
       reason: normalizedType
     })
-    void flushPendingAnswers({ silent: true })
+    void flushPendingAnswersRef.current?.({ silent: true })
     void logViolationEvent(normalizedType, message, {
       warning_count: nextCount,
       incident_id: incidentId,
@@ -1150,7 +1151,7 @@ export default function SiswaQuiz() {
       shield: true,
       ...(meta && typeof meta === 'object' ? meta : {})
     })
-  }, [isTaking, isStrictSecurity, selectedQuiz?.id, activeSubmissionId, logViolationEvent, flushPendingAnswers])
+  }, [isTaking, isStrictSecurity, selectedQuiz?.id, activeSubmissionId, logViolationEvent])
 
   const markSessionStarted = (bootKey) => {
     sessionInitRef.current = bootKey
@@ -1828,6 +1829,7 @@ export default function SiswaQuiz() {
       batchFlushInFlightRef.current = false
     }
   }
+  flushPendingAnswersRef.current = flushPendingAnswers
 
   const saveAnswer = async (questionId, value, questionType = 'mcq', options = {}) => {
     if (!selectedQuiz) return
