@@ -934,6 +934,7 @@ export default function SiswaQuiz() {
     : 0
   const unansweredCount = Math.max(0, totalQuestions - answeredCount)
   const activeQuestionType = normalizeQuestionType(activeQuestion?.question_type)
+  const activeQuestionId = activeQuestion?.id || ''
   const sessionTimerSeconds = remainingSeconds ?? selectedRemainingSeconds
   const sessionTimerTone = sessionTimerSeconds != null && sessionTimerSeconds <= 60
     ? 'border-red-200 bg-red-50 text-red-700'
@@ -1929,12 +1930,14 @@ export default function SiswaQuiz() {
   }
 
   const onEssayChange = useCallback((e) => {
-    handleEssayChangeRef.current?.(activeQuestion.id, e.target.value)
-  }, [activeQuestion.id])
+    if (!activeQuestionId) return
+    handleEssayChangeRef.current?.(activeQuestionId, e.target.value)
+  }, [activeQuestionId])
 
   const onEssayBlur = useCallback((e) => {
-    handleEssayBlurRef.current?.(activeQuestion.id, e.target.value)
-  }, [activeQuestion.id])
+    if (!activeQuestionId) return
+    handleEssayBlurRef.current?.(activeQuestionId, e.target.value)
+  }, [activeQuestionId])
 
   useEffect(() => {
     if (!isTaking || !selectedQuiz?.id || !activeSubmissionId) return

@@ -970,17 +970,18 @@ export default function SHome() {
       let anggotaQuery = supabase
         .from('ekskul_anggota')
         .select('id, ekskul_id, user_id')
+        .eq('user_id', userId)
       anggotaQuery = applySemesterPeriodFilters(anggotaQuery, period)
 
       let { data: anggotaData, error: anggotaError } = await anggotaQuery
       if (anggotaError && isLegacyAcademicColumnError(anggotaError)) {
         ; ({ data: anggotaData, error: anggotaError } = await supabase
           .from('ekskul_anggota')
-          .select('id, ekskul_id, user_id'))
+          .select('id, ekskul_id, user_id')
+          .eq('user_id', userId))
       }
 
       if (eskulError) throw eskulError
-      if (anggotaError) throw anggotaError
 
       const pembinaIds = Array.from(
         new Set((eskulData || []).map((e) => e.pembina_guru_id).filter(Boolean)),
@@ -993,23 +994,19 @@ export default function SHome() {
           .select('id, nama')
           .in('id', pembinaIds)
 
-        if (pembinaError) throw pembinaError
-        pembinaMap = Object.fromEntries(
-          (pembinaData || []).map((p) => [p.id, p.nama || '']),
-        )
+        if (!pembinaError) {
+          pembinaMap = Object.fromEntries(
+            (pembinaData || []).map((p) => [p.id, p.nama || '']),
+          )
+        }
       }
 
-      const anggotaByEkskul = {}
       const myEskulSet = new Set()
-
-        ; (anggotaData || []).forEach((row) => {
-          if (!row.ekskul_id) return
-          anggotaByEkskul[row.ekskul_id] =
-            (anggotaByEkskul[row.ekskul_id] || 0) + 1
-          if (row.user_id === userId) {
-            myEskulSet.add(row.ekskul_id)
-          }
-        })
+      const anggotaRows = !anggotaError && Array.isArray(anggotaData) ? anggotaData : []
+      anggotaRows.forEach((row) => {
+        if (!row.ekskul_id || row.user_id !== userId) return
+        myEskulSet.add(row.ekskul_id)
+      })
 
       const formattedEskul = (eskulData || []).map((e) => ({
         id: e.id,
@@ -1025,7 +1022,7 @@ export default function SHome() {
           endsAt: period.endsAt || period.periodeSelesai || ''
         },
         pembina_nama: pembinaMap[e.pembina_guru_id] || '',
-        jumlah_anggota: anggotaByEkskul[e.id] || 0,
+        jumlah_anggota: 0,
       }))
 
       setEkskul(formattedEskul)
