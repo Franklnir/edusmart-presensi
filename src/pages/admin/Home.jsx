@@ -652,11 +652,20 @@ export default function AHome() {
     if (!eskulSel) return
 
     try {
-      const { data, error } = await supabase
+      let detailQuery = supabase
         .from('ekskul')
-        .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at')
+        .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,tahun_ajaran,semester')
         .eq('id', eskulSel)
-        .single()
+      detailQuery = applySemesterPeriodFilters(detailQuery, eskulDataPeriod)
+
+      let { data, error } = await detailQuery.maybeSingle()
+      if (error && /tahun_ajaran|semester/i.test(error.message || '')) {
+        ; ({ data, error } = await supabase
+          .from('ekskul')
+          .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at')
+          .eq('id', eskulSel)
+          .maybeSingle())
+      }
 
       if (error) throw error
       if (data) {
@@ -669,11 +678,21 @@ export default function AHome() {
           pembina_guru_id: data.pembina_guru_id || '',
           registration_deadline_at: toDateTimeLocalValue(data.registration_deadline_at)
         })
+      } else {
+        setEskulForm({
+          nama: '',
+          keterangan: '',
+          hari: '',
+          jam_mulai: '',
+          jam_selesai: '',
+          pembina_guru_id: '',
+          registration_deadline_at: defaultRegistrationDeadlineLocal(7, activeEskulPeriod)
+        })
       }
     } catch (error) {
       pushToast('error', 'Gagal memuat detail eskul')
     }
-  }, [eskulSel, pushToast])
+  }, [activeEskulPeriod, eskulDataPeriod, eskulSel, pushToast])
 
   useEffect(() => {
     loadEskulList()

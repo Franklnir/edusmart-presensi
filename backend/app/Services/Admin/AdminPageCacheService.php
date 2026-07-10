@@ -313,6 +313,8 @@ class AdminPageCacheService
 
     private function buildDashboardSummary(string $tenantId, array $settings, string $year): array
     {
+        $period = AcademicPeriod::fromSettings((object) $settings);
+        $semester = (string) ($period['semester'] ?? ($settings['semester_aktif'] ?? ''));
         $profileCounts = Schema::hasTable('profiles')
             ? DB::table('profiles')
                 ->select('role', DB::raw('count(*) as aggregate'))
@@ -339,7 +341,7 @@ class AdminPageCacheService
             'kelas' => $this->classesForAcademicYear($tenantId, $year)->count(),
             'absensi' => Schema::hasTable('absensi') ? (int) $attendanceQuery->count() : 0,
             'pengumuman' => $this->tenantTableCount('pengumuman', $tenantId),
-            'eskul' => $this->tenantTableCount('ekskul', $tenantId),
+            'eskul' => $this->tenantAcademicPeriodTableCount('ekskul', $tenantId, $year, $semester),
             'tahun_ajaran' => $year,
             'generated_at' => now()->toISOString(),
         ];
@@ -708,6 +710,23 @@ class AdminPageCacheService
         }
 
         return (int) $this->tenantQuery($table, $tenantId)->count();
+    }
+
+    private function tenantAcademicPeriodTableCount(string $table, string $tenantId, string $year, string $semester = ''): int
+    {
+        if (! Schema::hasTable($table)) {
+            return 0;
+        }
+
+        $query = $this->tenantQuery($table, $tenantId);
+        if ($year !== '' && Schema::hasColumn($table, 'tahun_ajaran')) {
+            $query->where('tahun_ajaran', $year);
+        }
+        if ($semester !== '' && Schema::hasColumn($table, 'semester')) {
+            $query->where('semester', $semester);
+        }
+
+        return (int) $query->count();
     }
 
     private function existingColumns(string $table, array $columns): array
