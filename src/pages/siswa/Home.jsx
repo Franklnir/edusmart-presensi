@@ -22,7 +22,7 @@ const DASHBOARD_TASK_QUERY_LIMIT = 80
 const DASHBOARD_TASK_COLUMNS = 'id, kelas, judul, mapel, deadline, keterangan, file_url, link'
 const ACADEMIC_PERIOD_STORAGE_KEY = 'edusmart.siswa.home.periodFilter'
 const DEFAULT_EKSKUL_LIMIT = 3
-const EKSKUL_SELECT_COLUMNS = 'id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at'
+const EKSKUL_SELECT_COLUMNS = 'id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at, tahun_ajaran, semester'
 const LEGACY_EKSKUL_SELECT_COLUMNS = 'id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id'
 
 const isValidDate = (date) => date instanceof Date && !Number.isNaN(date.getTime())
@@ -964,6 +964,7 @@ export default function SHome() {
         .from('ekskul')
         .select(EKSKUL_SELECT_COLUMNS)
         .order('nama')
+      eskulQuery = applySemesterPeriodFilters(eskulQuery, period)
 
       let { data: eskulData, error: eskulError } = await eskulQuery
       if (eskulError && shouldRetryLegacyEskulSelect(eskulError)) {

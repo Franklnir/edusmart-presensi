@@ -1000,11 +1000,15 @@ export default function AHome() {
       return
 
     try {
-      // Hapus anggota terlebih dahulu
-      const { error: errorAnggota } = await supabase
+      // Hapus anggota periode aktif terlebih dahulu. Arsip periode lain tetap aman
+      // pada instalasi lama yang pernah memakai id ekskul sama lintas periode.
+      let anggotaDeleteQuery = supabase
         .from('ekskul_anggota')
         .delete()
         .eq('ekskul_id', eskulSel)
+      anggotaDeleteQuery = applySemesterPeriodFilters(anggotaDeleteQuery, activeEskulPeriod)
+
+      const { error: errorAnggota } = await anggotaDeleteQuery
 
       if (errorAnggota) throw errorAnggota
 
@@ -1023,7 +1027,7 @@ export default function AHome() {
     } catch (error) {
       pushToast('error', 'Gagal menghapus eskul')
     }
-  }, [eskulSel, eskulForm.nama, isViewingArchivePeriod, loadEskulList, loadStatistics, pushToast])
+  }, [activeEskulPeriod, eskulSel, eskulForm.nama, isViewingArchivePeriod, loadEskulList, loadStatistics, pushToast])
 
   const normalizeStudentRows = useCallback((rows = []) => (
     (rows || [])

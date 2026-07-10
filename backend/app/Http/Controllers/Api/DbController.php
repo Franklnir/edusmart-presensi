@@ -90,6 +90,7 @@ class DbController extends ApiController
         'absensi_settings',
         'absensi_eskul',
         'jam_kosong',
+        'ekskul',
         'ekskul_anggota',
         'anggota_ekskul',
         'struktur_sekolah',

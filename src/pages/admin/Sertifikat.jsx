@@ -844,6 +844,10 @@ const GeneratorSection = ({ templateVersion }) => {
     let alive = true
     const init = async () => {
       try {
+        const period = await loadCurrentAcademicPeriod()
+        let ekskulQuery = supabase.from('ekskul').select('id, nama, tahun_ajaran, semester').order('nama')
+        ekskulQuery = applySemesterPeriodFilters(ekskulQuery, period)
+
         const [tplRes, klsRes, eksRes] = await Promise.all([
           supabase
             .from('templat_sertifikat_publik')
@@ -851,7 +855,7 @@ const GeneratorSection = ({ templateVersion }) => {
             .eq('is_active', true)
             .order('created_at', { ascending: false }),
           supabase.from('kelas').select('*').order('nama'),
-          supabase.from('ekskul').select('id, nama').order('nama')
+          ekskulQuery
         ])
 
         if (!alive) return
@@ -884,7 +888,17 @@ const GeneratorSection = ({ templateVersion }) => {
         if (resolved.length > 0) setSelectedTemplateId(resolved[0].id)
 
         setKelasList(klsRes.data || [])
-        setEskulList(eksRes.data || [])
+        if (eksRes.error && /tahun_ajaran|semester/i.test(eksRes.error.message || '')) {
+          const { data: legacyEskul, error: legacyEkskulError } = await supabase
+            .from('ekskul')
+            .select('id, nama')
+            .order('nama')
+          if (legacyEkskulError) throw legacyEkskulError
+          setEskulList(legacyEskul || [])
+        } else {
+          if (eksRes.error) throw eksRes.error
+          setEskulList(eksRes.data || [])
+        }
       } catch (err) {
         toast('error', err.message || 'Gagal memuat data')
       }
