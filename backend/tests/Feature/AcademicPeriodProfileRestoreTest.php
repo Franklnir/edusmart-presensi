@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\Academic\ExtracurricularPeriodService;
 use App\Support\AcademicPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -208,6 +209,192 @@ class AcademicPeriodProfileRestoreTest extends TestCase
             'status' => 'active',
             'source' => 'auto_rollover',
         ]);
+    }
+
+    public function test_auto_rollover_copies_ekskul_catalog_but_resets_members_by_default(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-ekskul-reset@example.com', 'admin');
+        $student = $this->createUserWithProfile($tenantId, 'siswa', 'student-ekskul-reset@example.com', 'x-a', [
+            'angkatan' => '2025',
+        ]);
+
+        $this->insertClass($tenantId, 'x-a', 'X A', 'X', 'A', '2025', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'xi-a', 'XI A', 'XI', 'A', '2025', '2026/2027', 'Ganjil');
+        $this->insertSettingsPeriod($tenantId, '2025/2026', 'Genap');
+        $this->insertEskul($tenantId, 'basket-source', 'Basket', '2025/2026', 'Genap');
+        DB::table('ekskul_anggota')->insert([
+            'tenant_id' => $tenantId,
+            'ekskul_id' => 'basket-source',
+            'user_id' => $student->id,
+            'tahun_ajaran' => '2025/2026',
+            'semester' => 'Genap',
+            'angkatan' => '2025',
+            'created_at' => now(),
+        ]);
+
+        Sanctum::actingAs($admin);
+        $response = $this->postJson('/api/admin/academic-period/apply', $this->periodPayload('2026/2027', 'Ganjil', [
+            'auto_rollover' => true,
+            'calendar_confirmed' => true,
+        ]));
+
+        $response->assertOk()
+            ->assertJsonPath('data.rollover.eskul_catalog_copied', 1)
+            ->assertJsonPath('data.rollover.eskul_members_copied', 0);
+
+        $targetEskul = DB::table('ekskul')
+            ->where('tenant_id', $tenantId)
+            ->where('tahun_ajaran', '2026/2027')
+            ->where('semester', 'Ganjil')
+            ->where('nama', 'Basket')
+            ->first();
+
+        $this->assertNotNull($targetEskul);
+        $this->assertNotSame('basket-source', (string) $targetEskul->id);
+        $this->assertDatabaseHas('ekskul', [
+            'id' => 'basket-source',
+            'tenant_id' => $tenantId,
+            'tahun_ajaran' => '2025/2026',
+            'semester' => 'Genap',
+        ]);
+        $this->assertDatabaseMissing('ekskul_anggota', [
+            'tenant_id' => $tenantId,
+            'user_id' => $student->id,
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Ganjil',
+        ]);
+    }
+
+    public function test_auto_rollover_maps_carried_members_to_new_ekskul_catalog_ids(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-ekskul-copy@example.com', 'admin');
+        $student = $this->createUserWithProfile($tenantId, 'siswa', 'student-ekskul-copy@example.com', 'x-a', [
+            'angkatan' => '2025',
+        ]);
+
+        $this->insertClass($tenantId, 'x-a', 'X A', 'X', 'A', '2025', '2025/2026', 'Genap');
+        $this->insertClass($tenantId, 'xi-a', 'XI A', 'XI', 'A', '2025', '2026/2027', 'Ganjil');
+        $this->insertSettingsPeriod($tenantId, '2025/2026', 'Genap');
+        $this->insertEskul($tenantId, 'pramuka-source', 'Pramuka', '2025/2026', 'Genap');
+        DB::table('ekskul_anggota')->insert([
+            'tenant_id' => $tenantId,
+            'ekskul_id' => 'pramuka-source',
+            'user_id' => $student->id,
+            'tahun_ajaran' => '2025/2026',
+            'semester' => 'Genap',
+            'angkatan' => '2025',
+            'created_at' => now(),
+        ]);
+
+        Sanctum::actingAs($admin);
+        $response = $this->postJson('/api/admin/academic-period/apply', $this->periodPayload('2026/2027', 'Ganjil', [
+            'auto_rollover' => true,
+            'carry_eskul_members' => true,
+            'calendar_confirmed' => true,
+        ]));
+
+        $response->assertOk()
+            ->assertJsonPath('data.rollover.eskul_catalog_copied', 1)
+            ->assertJsonPath('data.rollover.eskul_members_copied', 1);
+
+        $targetEskulId = (string) DB::table('ekskul')
+            ->where('tenant_id', $tenantId)
+            ->where('tahun_ajaran', '2026/2027')
+            ->where('semester', 'Ganjil')
+            ->where('nama', 'Pramuka')
+            ->value('id');
+
+        $this->assertNotSame('', $targetEskulId);
+        $this->assertNotSame('pramuka-source', $targetEskulId);
+        $this->assertDatabaseHas('ekskul_anggota', [
+            'tenant_id' => $tenantId,
+            'ekskul_id' => $targetEskulId,
+            'user_id' => $student->id,
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Ganjil',
+        ]);
+        $this->assertDatabaseMissing('ekskul_anggota', [
+            'tenant_id' => $tenantId,
+            'ekskul_id' => 'pramuka-source',
+            'user_id' => $student->id,
+            'tahun_ajaran' => '2026/2027',
+        ]);
+    }
+
+    public function test_semester_change_copies_catalog_without_copying_members(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2027-01-10 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-ekskul-semester@example.com', 'admin');
+        $student = $this->createUserWithProfile($tenantId, 'siswa', 'student-ekskul-semester@example.com', 'x-a');
+        $this->insertSettingsPeriod($tenantId, '2026/2027', 'Ganjil');
+        $this->insertEskul($tenantId, 'futsal-ganjil', 'Futsal', '2026/2027', 'Ganjil');
+        DB::table('ekskul_anggota')->insert([
+            'tenant_id' => $tenantId,
+            'ekskul_id' => 'futsal-ganjil',
+            'user_id' => $student->id,
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Ganjil',
+            'created_at' => now(),
+        ]);
+
+        Sanctum::actingAs($admin);
+        $response = $this->postJson('/api/admin/academic-period/apply', $this->periodPayload('2026/2027', 'Genap'));
+
+        $response->assertOk()
+            ->assertJsonPath('data.semester_only_change', true)
+            ->assertJsonPath('data.eskul_catalog_copied', 1);
+
+        $targetEskulId = (string) DB::table('ekskul')
+            ->where('tenant_id', $tenantId)
+            ->where('tahun_ajaran', '2026/2027')
+            ->where('semester', 'Genap')
+            ->where('nama', 'Futsal')
+            ->value('id');
+
+        $this->assertNotSame('', $targetEskulId);
+        $this->assertNotSame('futsal-ganjil', $targetEskulId);
+        $this->assertDatabaseMissing('ekskul_anggota', [
+            'tenant_id' => $tenantId,
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Genap',
+            'user_id' => $student->id,
+        ]);
+    }
+
+    public function test_empty_active_catalog_repair_is_tenant_scoped_and_idempotent(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-11 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $this->insertSettingsPeriod($tenantId, '2026/2027', 'Ganjil');
+        $this->insertEskul($tenantId, 'pmr-archive', 'PMR', '2025/2026', 'Genap');
+
+        $service = app(ExtracurricularPeriodService::class);
+        $this->assertSame(1, $service->repairEmptyActiveCatalogs());
+        $this->assertSame(0, $service->repairEmptyActiveCatalogs());
+
+        $this->assertDatabaseHas('ekskul', [
+            'tenant_id' => $tenantId,
+            'nama' => 'PMR',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Ganjil',
+        ]);
+        $this->assertSame(
+            1,
+            DB::table('ekskul')
+                ->where('tenant_id', $tenantId)
+                ->where('tahun_ajaran', '2026/2027')
+                ->where('semester', 'Ganjil')
+                ->count()
+        );
     }
 
     public function test_schedule_copy_is_decided_from_schedule_page_after_rollover(): void
@@ -646,6 +833,29 @@ class AcademicPeriodProfileRestoreTest extends TestCase
             'tahun_ajaran' => $year,
             'semester' => $semester,
             'periode_berlaku' => 'tahunan',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function insertEskul(
+        string $tenantId,
+        string $id,
+        string $name,
+        string $year,
+        string $semester
+    ): void {
+        DB::table('ekskul')->insert([
+            'id' => $id,
+            'tenant_id' => $tenantId,
+            'nama' => $name,
+            'keterangan' => 'Katalog ekskul periode sumber.',
+            'hari' => 'Sabtu',
+            'jam_mulai' => '08:00',
+            'jam_selesai' => '10:00',
+            'registration_deadline_at' => Carbon::parse('2026-06-20 23:59:00', 'Asia/Jakarta'),
+            'tahun_ajaran' => $year,
+            'semester' => $semester,
             'created_at' => now(),
             'updated_at' => now(),
         ]);

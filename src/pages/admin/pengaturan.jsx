@@ -1062,6 +1062,7 @@ export default function APengaturan() {
               'Jika kelas tujuan belum tersedia, sistem akan menyiapkannya otomatis dari pola kelas asal.',
               'Metadata kelas aktif, filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.',
               'Jadwal periode baru tidak disalin dari halaman ini. Saat membuka menu Jadwal, admin akan memilih buat baru atau memakai jadwal periode sebelumnya.',
+              'Daftar ekskul disalin sebagai katalog periode baru; riwayat katalog dan anggota periode lama tetap utuh.',
               carryEskulMembers
                 ? 'Anggota eskul aktif akan disalin sebagai keanggotaan baru pada periode target.'
                 : 'Anggota eskul tidak disalin otomatis; keanggotaan periode baru bisa diatur manual.'
@@ -1119,6 +1120,7 @@ export default function APengaturan() {
         details: [
           'Perubahan rentang bulan tidak memindahkan kelas, tidak memfilter data global, dan tidak membuat riwayat kelas baru.',
           'Jadwal berlaku untuk 1 tahun ajaran penuh.',
+          'Jika semester berubah dan katalog target masih kosong, daftar ekskul disiapkan sebagai snapshot baru tanpa menyalin anggota.',
           'Halaman tugas, quiz, laporan, absensi, dan storage tetap berada dalam satu tahun ajaran kecuali fiturnya memakai filter sendiri.',
           `Cakupan aktif setelah disimpan: ${tahunAjaran} penuh.`
         ]
@@ -1189,14 +1191,18 @@ export default function APengaturan() {
       const restoredText = data?.period_snapshot_restored
         ? ` Siswa diselaraskan: ${data.student_profile_restores || 0}, di luar periode: ${data.student_profiles_outside_period || 0}.`
         : ''
+      const catalogCopied = Number(data?.eskul_catalog_copied ?? rollover?.eskul_catalog_copied ?? 0)
+      const catalogText = catalogCopied > 0
+        ? ` Katalog ekskul disiapkan: ${catalogCopied}.`
+        : ''
       const eskulText = rollover && payload.carry_eskul_members
-        ? ` Eskul disalin: ${rollover.eskul_members_copied || 0}.`
+        ? ` Anggota ekskul disalin: ${rollover.eskul_members_copied || 0}.`
         : ''
       const jadwalText = rollover
         ? ' Jadwal belum disalin; buka menu Jadwal untuk memilih buat baru atau pakai jadwal periode sebelumnya.'
         : ''
 
-      pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh.${rolloverText}${createdClassText}${restoredText}${eskulText}${jadwalText}`, {
+      pushToast('success', `Tahun ajaran ${tahunAjaran} aktif penuh.${rolloverText}${createdClassText}${restoredText}${catalogText}${eskulText}${jadwalText}`, {
         title: 'Kalender akademik diperbarui'
       })
       setCarryEskulMembers(false)

@@ -16,6 +16,7 @@ import {
   normalizeSemester,
   resolveAcademicPeriod
 } from '../../utils/academicPeriod'
+import { logError } from '../../utils/logger'
 
 const DASHBOARD_TASK_LIMIT = 6
 const DASHBOARD_TASK_QUERY_LIMIT = 80
@@ -587,6 +588,8 @@ export default function SHome() {
   const [pengumuman, setPengumuman] = useLocalCache('siswa_dashboard_pengumuman', [])
   const [ekskul, setEkskul] = useLocalCache('siswa_dashboard_ekskul', [])
   const [myEskul, setMyEskul] = useState(new Set())
+  const [isEskulLoading, setIsEskulLoading] = useState(false)
+  const [eskulLoadError, setEskulLoadError] = useState('')
   const [maxEskulPerStudent, setMaxEskulPerStudent] = useState(() => normalizeEskulLimit(settings?.max_ekskul_per_siswa))
   const [eskulPeriodInfo, setEskulPeriodInfo] = useState(() => resolveAcademicPeriod(settings || {}))
   const [organisasi, setOrganisasi] = useLocalCache('siswa_dashboard_organisasi', [])
@@ -655,15 +658,18 @@ export default function SHome() {
       return activeAcademicPeriodRef.current
     }
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('settings')
       .select('tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai, max_ekskul_per_siswa')
       .order('id')
       .limit(1)
       .maybeSingle()
 
-    const activePeriod = resolveAcademicPeriod(data || {})
-    const maxEskul = normalizeEskulLimit(data?.max_ekskul_per_siswa)
+    if (error && !settings) throw error
+
+    const settingsRow = data || settings || {}
+    const activePeriod = resolveAcademicPeriod(settingsRow)
+    const maxEskul = normalizeEskulLimit(settingsRow.max_ekskul_per_siswa)
     setMaxEskulPerStudent(maxEskul)
     const storedPeriod = readStoredAcademicPeriodFilter(activePeriod)
     const period = storedPeriod
@@ -1003,6 +1009,8 @@ export default function SHome() {
 
   const loadEskul = async () => {
     if (!userId) return
+    setIsEskulLoading(true)
+    setEskulLoadError('')
     try {
       const period = await loadActiveAcademicPeriod()
       let eskulQuery = supabase
@@ -1034,6 +1042,7 @@ export default function SHome() {
       }
 
       if (eskulError) throw eskulError
+      if (anggotaError) throw anggotaError
 
       const pembinaIds = Array.from(
         new Set((eskulData || []).map((e) => e.pembina_guru_id).filter(Boolean)),
@@ -1078,10 +1087,12 @@ export default function SHome() {
       }))
 
       setEkskul(formattedEskul)
-      setMyEkskul(myEskulSet)
+      setMyEskul(myEskulSet)
     } catch (err) {
-      setEkskul([])
-      setMyEkskul(new Set())
+      logError('Error loading ekskul:', err)
+      setEskulLoadError(err?.message || 'Data ekstrakurikuler belum berhasil dimuat.')
+    } finally {
+      setIsEskulLoading(false)
     }
   }
 
@@ -1489,7 +1500,28 @@ export default function SHome() {
                       </div>
                     )
                   })}
-                  {!ekskul.length && (
+                  {isEskulLoading && !ekskul.length && (
+                    <div className="col-span-full flex min-h-32 items-center justify-center">
+                      <div className="flex items-center gap-3 text-sm font-medium text-slate-500">
+                        <span className="h-5 w-5 animate-spin rounded-full border-2 border-orange-200 border-t-orange-500" />
+                        Memuat ekstrakurikuler...
+                      </div>
+                    </div>
+                  )}
+                  {!isEskulLoading && eskulLoadError && !ekskul.length && (
+                    <div className="col-span-full flex min-h-36 flex-col items-center justify-center px-4 text-center">
+                      <p className="text-sm font-semibold text-slate-700">Data ekstrakurikuler belum dapat dimuat</p>
+                      <p className="mt-1 max-w-md text-xs leading-5 text-slate-500">Periksa koneksi lalu coba lagi. Data yang tersimpan tidak diubah.</p>
+                      <button
+                        type="button"
+                        onClick={() => void loadEskul()}
+                        className="mt-4 rounded-lg border border-orange-200 bg-orange-50 px-4 py-2 text-xs font-semibold text-orange-700 transition-colors hover:bg-orange-100"
+                      >
+                        Coba lagi
+                      </button>
+                    </div>
+                  )}
+                  {!isEskulLoading && !eskulLoadError && !ekskul.length && (
                     <div className="col-span-full text-center py-10">
                       <div className="text-4xl mb-2 opacity-30">⚽</div>
                       <p className="text-slate-500 text-sm">Belum ada ekskul tersedia</p>
@@ -1556,7 +1588,7 @@ export default function SHome() {
 	                </button>
                 <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
                   <span className="text-sm text-slate-600 font-medium">Ekskul Diikuti</span>
-                  <span className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold">{myEskul.size}/{maxEskulPerStudent}</span>
+                  <span className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold">{myEskul.size}/{effectiveEskulLimit}</span>
                 </div>
                 <div className="flex justify-between items-center p-2.5 bg-slate-50 rounded-lg">
                   <span className="text-sm text-slate-600 font-medium">Sertifikat</span>

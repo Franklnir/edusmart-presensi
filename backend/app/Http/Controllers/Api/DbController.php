@@ -6992,6 +6992,12 @@ class DbController extends ApiController
             'semester_aktif',
             'periode_mulai',
             'periode_selesai',
+            'periode_ganjil_mulai',
+            'periode_ganjil_selesai',
+            'periode_genap_mulai',
+            'periode_genap_selesai',
+            'max_ekskul_per_siswa',
+            'updated_at',
             'registrasi_siswa_aktif',
             'registrasi_guru_aktif',
         ];

@@ -6,6 +6,7 @@ use App\Jobs\RefreshAdminPageCacheJob;
 use App\Mail\SertifikatMail;
 use App\Models\Profile;
 use App\Models\User;
+use App\Services\Academic\ExtracurricularPeriodService;
 use App\Services\Admin\AdminPageCacheService;
 use App\Services\Rfid\RfidDeviceService;
 use App\Services\Rfid\RfidIngressService;
@@ -2059,6 +2060,7 @@ class AdminController extends ApiController
                 $previousClassHistorySnapshots = 0;
                 $studentProfileRestores = 0;
                 $studentProfilesOutsidePeriod = 0;
+                $eskulCatalogCopied = 0;
 
                 if ($yearChanged) {
                     $previousClassHistorySnapshots = $this->snapshotStudentClassHistoriesForPeriod(
@@ -2072,6 +2074,16 @@ class AdminController extends ApiController
                 }
 
                 $settings = $this->saveAcademicPeriodSettings($tenantId, $existing, $settingsPayload);
+
+                if ($semesterOnlyChange) {
+                    $catalogCopy = app(ExtracurricularPeriodService::class)->copyCatalog(
+                        $tenantId,
+                        $previousYear,
+                        $previousSemester,
+                        $activePeriod
+                    );
+                    $eskulCatalogCopied = (int) ($catalogCopy['copied_count'] ?? 0);
+                }
 
                 if ($restoreFromClassSnapshot) {
                     $classesSynced = $this->syncClassPeriodMetadata($tenantId, $activePeriod);
@@ -2125,6 +2137,9 @@ class AdminController extends ApiController
                         'semester' => $calendarPeriod['semester'],
                     ],
                     'classes_synced' => $classesSynced,
+                    'eskul_catalog_copied' => $rollover
+                        ? (int) ($rollover['eskul_catalog_copied'] ?? 0)
+                        : $eskulCatalogCopied,
                     'rollover' => $rollover,
                 ];
             });
@@ -3804,12 +3819,24 @@ class AdminController extends ApiController
         string $previousSemester,
         bool $carryEskulMembers
     ): array {
+        $catalogCopy = app(ExtracurricularPeriodService::class)->copyCatalog(
+            $tenantId,
+            $previousYear,
+            $previousSemester,
+            $period
+        );
+        $eskulCatalogCopied = (int) ($catalogCopy['copied_count'] ?? 0);
+        $eskulIdMap = is_array($catalogCopy['id_map'] ?? null)
+            ? $catalogCopy['id_map']
+            : [];
+
         if (Schema::hasTable('kelas') === false || Schema::hasTable('profiles') === false) {
             return [
                 'promoted_students' => 0,
                 'alumni_students' => 0,
                 'skipped_students' => 0,
                 'classes_synced' => 0,
+                'eskul_catalog_copied' => $eskulCatalogCopied,
                 'eskul_members_copied' => 0,
             ];
         }
@@ -3976,7 +4003,8 @@ class AdminController extends ApiController
                 $previousYear,
                 $previousSemester,
                 $period,
-                array_keys($studentClassSnapshots)
+                array_keys($studentClassSnapshots),
+                $eskulIdMap
             )
             : 0;
 
@@ -4004,6 +4032,7 @@ class AdminController extends ApiController
             'created_target_classes' => $createdTargetClasses,
             'classes_synced' => $this->syncClassPeriodMetadata($tenantId, $period),
             'related_snapshots_synced' => $snapshotUpdates,
+            'eskul_catalog_copied' => $eskulCatalogCopied,
             'eskul_members_copied' => $eskulMembersCopied,
         ];
     }
@@ -4301,7 +4330,8 @@ class AdminController extends ApiController
         string $sourceYear,
         string $sourceSemester,
         array $targetPeriod,
-        array $studentIds
+        array $studentIds,
+        array $eskulIdMap = []
     ): int {
         $studentIds = array_values(array_unique(array_filter(array_map(
             fn ($value) => trim((string) $value),
@@ -4345,18 +4375,23 @@ class AdminController extends ApiController
             }
         }
 
-        $validEskulIds = null;
+        $validTargetEskulIds = [];
         if (Schema::hasTable('ekskul') && Schema::hasColumn('ekskul', 'id')) {
-            $validEskulIds = [];
             $ekskulQuery = DB::table('ekskul');
             if (Schema::hasColumn('ekskul', 'tenant_id')) {
                 $ekskulQuery->where('tenant_id', $tenantId);
+            }
+            if (Schema::hasColumn('ekskul', 'tahun_ajaran')) {
+                $ekskulQuery->where('tahun_ajaran', $targetYear);
+            }
+            if (Schema::hasColumn('ekskul', 'semester')) {
+                $ekskulQuery->where('semester', $targetSemester);
             }
 
             foreach ($ekskulQuery->pluck('id') as $ekskulId) {
                 $id = trim((string) $ekskulId);
                 if ($id !== '') {
-                    $validEskulIds[$id] = true;
+                    $validTargetEskulIds[$id] = true;
                 }
             }
         }
@@ -4408,15 +4443,16 @@ class AdminController extends ApiController
         $seenSourceKeys = [];
         foreach ($sourceRows as $row) {
             $userId = trim((string) ($row->user_id ?? ''));
-            $ekskulId = trim((string) ($row->ekskul_id ?? ''));
-            if ($userId === '' || $ekskulId === '') {
+            $sourceEskulId = trim((string) ($row->ekskul_id ?? ''));
+            $targetEskulId = trim((string) ($eskulIdMap[$sourceEskulId] ?? ''));
+            if ($userId === '' || $sourceEskulId === '' || $targetEskulId === '') {
                 continue;
             }
-            if ($validEskulIds !== null && isset($validEskulIds[$ekskulId]) === false) {
+            if (! isset($validTargetEskulIds[$targetEskulId])) {
                 continue;
             }
 
-            $key = $userId.'|'.$ekskulId;
+            $key = $userId.'|'.$targetEskulId;
             if (isset($seenSourceKeys[$key]) || isset($existingTargetKeys[$key])) {
                 continue;
             }
@@ -4424,7 +4460,7 @@ class AdminController extends ApiController
             $seenSourceKeys[$key] = true;
             $insertRows[] = $this->filterExistingPayload('ekskul_anggota', [
                 'tenant_id' => $tenantId,
-                'ekskul_id' => $ekskulId,
+                'ekskul_id' => $targetEskulId,
                 'user_id' => $userId,
                 'tahun_ajaran' => $targetYear,
                 'semester' => $targetSemester,
