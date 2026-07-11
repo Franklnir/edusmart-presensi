@@ -95,6 +95,11 @@ class DbSecurityTest extends TestCase
             'email' => 'sekolah@example.com',
             'tahun_ajaran' => '2026/2027',
             'semester_aktif' => 'ganjil',
+            'periode_ganjil_mulai' => '2026-07-01',
+            'periode_ganjil_selesai' => '2026-12-31',
+            'periode_genap_mulai' => '2027-01-01',
+            'periode_genap_selesai' => '2027-06-30',
+            'max_ekskul_per_siswa' => 5,
             'ranking_weight_tugas' => 40,
             'ranking_weight_quiz' => 40,
             'ranking_weight_absensi' => 20,
@@ -126,6 +131,10 @@ class DbSecurityTest extends TestCase
         $this->assertIsArray($row);
         $this->assertSame('Sekolah Aman', $row['nama_sekolah'] ?? null);
         $this->assertSame('2026/2027', $row['tahun_ajaran'] ?? null);
+        $this->assertSame('2026-07-01', $row['periode_ganjil_mulai'] ?? null);
+        $this->assertSame('2027-06-30', $row['periode_genap_selesai'] ?? null);
+        $this->assertSame(5, $row['max_ekskul_per_siswa'] ?? null);
+        $this->assertArrayHasKey('updated_at', $row);
         $this->assertArrayNotHasKey('ranking_weight_tugas', $row);
         $this->assertArrayNotHasKey('ranking_tiebreak_order', $row);
         $this->assertArrayNotHasKey('nilai_freeze_enabled', $row);
