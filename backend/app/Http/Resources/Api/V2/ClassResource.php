@@ -19,6 +19,10 @@ class ClassResource extends JsonResource
             'nama' => (string) $this->nama,
             'grade' => $this->grade ? (string) $this->grade : null,
             'suffix' => $this->suffix ? (string) $this->suffix : null,
+            'angkatan' => $this->angkatan ? (string) $this->angkatan : null,
+            'tahun_ajaran' => $this->tahun_ajaran ? (string) $this->tahun_ajaran : null,
+            'semester' => $this->semester ? (string) $this->semester : null,
+            'is_active' => (bool) $this->is_active,
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
         ];

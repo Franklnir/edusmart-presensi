@@ -10,6 +10,7 @@ class Kelas extends Model
     protected $table = 'kelas';
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

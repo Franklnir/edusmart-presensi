@@ -1474,4 +1474,17 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `PATCH` | `/api/v2/classes/{class}` | Mengupdate kelas (partial) |
 | `DELETE` | `/api/v2/classes/{class}` | Menghapus kelas |
 | `POST` | `/api/v2/frontend-logs` | Sink frontend errors |
+| `GET` | `/api/v2/frontend-logs` | Lihat frontend errors |
+| `GET` | `/api/v2/students` | Mendapatkan daftar siswa |
+| `GET` | `/api/v2/students/{student}` | Mendapatkan detail siswa |
+| `POST` | `/api/v2/students` | Membuat siswa baru |
+| `PUT` | `/api/v2/students/{student}` | Mengupdate siswa (full) |
+| `PATCH` | `/api/v2/students/{student}` | Mengupdate siswa (partial) |
+| `DELETE` | `/api/v2/students/{student}` | Menghapus siswa |
+| `GET` | `/api/v2/teachers` | Mendapatkan daftar guru |
+| `GET` | `/api/v2/teachers/{teacher}` | Mendapatkan detail guru |
+| `POST` | `/api/v2/teachers` | Membuat guru baru |
+| `PUT` | `/api/v2/teachers/{teacher}` | Mengupdate guru (full) |
+| `PATCH` | `/api/v2/teachers/{teacher}` | Mengupdate guru (partial) |
+| `DELETE` | `/api/v2/teachers/{teacher}` | Menghapus guru |
 

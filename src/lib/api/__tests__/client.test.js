@@ -111,4 +111,26 @@ describe('API Client Regression Tests', () => {
       expect(err.message).toBe('Server crash')
     }
   })
+
+  it('AbortController membatalkan request saat unmount', async () => {
+    useAuthStore.getState.mockReturnValue({ authState: 'authenticated' })
+    mockFetch.mockImplementation(async (url, { signal }) => {
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => resolve({ ok: true, json: async () => ({}) }), 500)
+        signal.addEventListener('abort', () => {
+          clearTimeout(timeout)
+          const error = new Error('The operation was aborted.')
+          error.name = 'AbortError'
+          reject(error)
+        })
+      })
+    })
+
+    const controller = new AbortController()
+    const p = apiClient('/api/test', { signal: controller.signal })
+
+    controller.abort()
+
+    await expect(p).rejects.toThrow('Request dibatalkan')
+  })
 })

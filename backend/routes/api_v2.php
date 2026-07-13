@@ -1,8 +1,10 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\V2\ClassController;
 use App\Http\Controllers\Api\V2\FrontendLogController;
+use App\Http\Controllers\Api\V2\StudentController;
+use App\Http\Controllers\Api\V2\TeacherController;
+use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
@@ -15,6 +17,12 @@ use App\Http\Controllers\Api\V2\FrontendLogController;
 |
 */
 
-Route::post('/frontend-logs', [FrontendLogController::class, 'store']);
+Route::post('/frontend-logs', [FrontendLogController::class, 'store'])
+    ->middleware('throttle:frontend-logs')
+    ->withoutMiddleware(['auth:sanctum']);
+
+Route::get('/frontend-logs', [FrontendLogController::class, 'index']);
 
 Route::apiResource('classes', ClassController::class);
+Route::apiResource('students', StudentController::class);
+Route::apiResource('teachers', TeacherController::class);

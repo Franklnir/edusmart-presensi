@@ -27,6 +27,7 @@ import {
 import { isEmailFormat } from '../../utils/accountSetup'
 import { getProfileSourceMeta } from '../../utils/profileSource'
 import { religionSelectOptions } from '../../constants/religionOptions'
+import { teacherService } from '../../services/teacherService'
 
 const STRONG_PASSWORD_MESSAGE = 'Password minimal 12 karakter dan wajib ada huruf besar, huruf kecil, angka, serta simbol'
 const isStrongPassword = (value = '') =>
@@ -666,30 +667,28 @@ export default function AGuru() {
       const teachersRes = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.teachers(teacherParams),
         queryFn: async () => {
-          const { data, error } = await supabase.admin.teachers(teacherParams)
-          if (error?.code === 'REQUEST_ABORTED') {
+          const res = await teacherService.getTeachers(teacherParams)
+          if (res.error?.code === 'REQUEST_ABORTED') {
             const aborted = new Error('Request aborted')
             aborted.code = 'REQUEST_ABORTED'
             throw aborted
           }
-          if (error) throw error
-          return data
+          if (res.error) throw res.error
+          return res
         },
         staleTime: 10 * 1000,
       })
 
       startTransition(() => {
-        setGuruRaw(teachersRes?.rows || [])
+        setGuruRaw(teachersRes?.data || [])
         setJadwalAll({})
         setStrukturKelasAll({})
         setStrukturSekolah({})
-        setGuruMeta(teachersRes?.meta || {
-          page: 1,
-          per_page: 25,
-          total: teachersRes?.rows?.length || 0,
-          page_count: 1,
-          from: teachersRes?.rows?.length ? 1 : 0,
-          to: teachersRes?.rows?.length || 0
+        setGuruMeta({
+          page: teachersRes?.meta?.current_page || 1,
+          per_page: teachersRes?.meta?.per_page || teacherParams.per_page,
+          total: teachersRes?.meta?.total || 0,
+          total_pages: teachersRes?.meta?.last_page || 1
         })
         setGuruServerStats(teachersRes?.stats || null)
         setGuruFilterOptions(teachersRes?.filter_options || { mapel: [], jabatan: [] })
@@ -1274,20 +1273,19 @@ export default function AGuru() {
       if (row.telp) provisionPayload.telp = row.telp
       if (payload.status) provisionPayload.status = payload.status
 
-      const { error } = await supabase.admin.provisionUser(provisionPayload)
+      const res = await teacherService.updateTeacher(existing.id, provisionPayload)
 
-      if (error) throw error
+      if (res.error) throw res.error
       return {
         status: 'updated',
         profileId: existing.id
       }
     }
 
-    const { data: provisionData, error: provisionError } = await supabase.admin.provisionUser({
+    const res = await teacherService.createTeacher({
       nama,
       email: emailForAuth,
       password,
-      role: 'guru',
       nis,
       jk: row.jk || '',
       tanggal_lahir: row.tanggal_lahir || '',
@@ -1299,8 +1297,8 @@ export default function AGuru() {
       created_via: 'import'
     })
 
-    if (provisionError) throw provisionError
-    const userId = provisionData?.user?.id || provisionData?.profile?.id
+    if (res.error) throw res.error
+    const userId = res.data?.user?.id || res.data?.profile?.id
     if (!userId) throw new Error('User gagal dibuat')
 
     return {
@@ -1487,14 +1485,14 @@ export default function AGuru() {
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.teachers(params),
         queryFn: async () => {
-          const { data, error } = await supabase.admin.teachers(params)
-          if (error) throw error
-          return data
+          const res = await teacherService.getTeachers(params)
+          if (res.error) throw res.error
+          return res
         },
         staleTime: 30 * 1000,
       })
 
-      const exportRows = data?.rows || guru
+      const exportRows = data?.data || []
       const rows = exportRows.map((item, idx) => ({
         No: idx + 1,
         NIS: item.nis || '',
@@ -1590,7 +1588,7 @@ export default function AGuru() {
     }
 
     try {
-      const { error } = await supabase.admin.provisionUser({
+      const res = await teacherService.createTeacher({
         email: form.email.trim().toLowerCase(),
         nama: form.nama.trim(),
         telp: form.telp.trim(),
@@ -1601,7 +1599,7 @@ export default function AGuru() {
         created_via: 'admin_created'
       })
 
-      if (error) throw error
+      if (res.error) throw res.error
 
       pushToast('success', 'Guru berhasil ditambahkan. Data akun dan profil sudah sinkron.')
       setForm({
@@ -1643,21 +1641,15 @@ export default function AGuru() {
       async () => {
         try {
           const reason = alasanNonaktif.trim()
-          const { data, error } = await supabase.admin.updateUserStatus(disableUID, {
-            role: 'guru',
+          const res = await teacherService.updateTeacher(disableUID, {
             status: 'nonaktif',
-            reason
+            alasan_nonaktif: reason
           })
-          if (error) throw error
+          if (res.error) throw res.error
+          const profileData = res.data || res.profile;
 
           pushToast('success', 'Guru berhasil dinonaktifkan')
-          setSelectedGuru(prev => prev?.id === disableUID ? ({
-            ...prev,
-            ...(data?.profile || {}),
-            status: 'nonaktif',
-            alasan_nonaktif: reason,
-            disabled_at: data?.profile?.disabled_at || new Date().toISOString()
-          }) : prev)
+          setSelectedGuru(prev => prev?.id === disableUID ? { ...prev, status: 'nonaktif', alasan_nonaktif: profileData?.alasan_nonaktif || reason, disabled_at: profileData?.disabled_at || new Date().toISOString() } : prev)
           setDisableUID(null)
           setAlasanNonaktif('')
           loadGuruRaw()
@@ -1679,16 +1671,15 @@ export default function AGuru() {
       'Konfirmasi Aktifkan Guru',
       async () => {
         try {
-          const { data, error } = await supabase.admin.updateUserStatus(u.id, {
-            role: 'guru',
-            status: 'active'
+          const res = await teacherService.updateTeacher(u.id, {
+            status: 'active',
+            alasan_nonaktif: null
           })
-          if (error) throw error
+          if (res.error) throw res.error
 
           pushToast('success', 'Guru berhasil diaktifkan')
           setSelectedGuru(prev => prev?.id === u.id ? ({
             ...prev,
-            ...(data?.profile || {}),
             status: 'active',
             alasan_nonaktif: null,
             disabled_at: null
@@ -1733,20 +1724,15 @@ export default function AGuru() {
         try {
           setMutatingGuru(true)
           const reason = `Mutasi/Pindah sekolah. ${alasanMutasiGuru.trim()}`
-          const { data, error } = await supabase.admin.updateUserStatus(guruToMutasi.id, {
-            role: 'guru',
-            status: 'mutasi',
-            reason
-          })
-          if (error) throw error
-
-          pushToast('success', 'Guru berhasil dimutasi. Data tetap tersimpan dan relasi aktif sudah disinkronkan.')
-          setSelectedGuru(prev => prev?.id === guruToMutasi.id ? ({
-            ...prev,
-            ...(data?.profile || {}),
+          const res = await teacherService.updateTeacher(guruToMutasi.id, {
             status: 'mutasi',
             alasan_nonaktif: reason
-          }) : prev)
+          })
+          if (res.error) throw res.error
+          const profileData = res.data || res.profile;
+
+          pushToast('success', 'Guru berhasil dimutasi. Data tetap tersimpan dan relasi aktif sudah disinkronkan.')
+          setSelectedGuru(prev => prev?.id === guruToMutasi.id ? { ...prev, status: 'mutasi', alasan_nonaktif: profileData?.alasan_nonaktif || reason } : prev)
           closeMutasiGuru()
           await loadGuruRaw()
         } catch (error) {
@@ -1895,10 +1881,11 @@ export default function AGuru() {
         setSavingTeacherName(true)
 
         try {
-          const { data, error } = await supabase.admin.updateTeacherName(target.id, target.nama)
-          if (error) throw error
+          const res = await teacherService.updateTeacher(target.id, { nama: target.nama })
+          if (res.error) throw res.error
 
-          applyTeacherNameUpdate(target.id, data?.profile, target.nama)
+          const profileData = res.data || res.profile;
+          applyTeacherNameUpdate(target.id, profileData, target.nama)
           closeEditNameModal()
           pushToast('success', 'Nama guru berhasil diperbarui')
 
@@ -1944,10 +1931,11 @@ export default function AGuru() {
         setSavingTeacherProfile(true)
 
         try {
-          const { data, error } = await supabase.admin.updateTeacherProfile(teacherProfileEdit.id, payload)
-          if (error) throw error
+          const res = await teacherService.updateTeacher(teacherProfileEdit.id, payload)
+          if (res.error) throw res.error
 
-          applyTeacherProfileUpdate(teacherProfileEdit.id, data?.profile)
+          const profileData = res.data || res.profile;
+          applyTeacherProfileUpdate(teacherProfileEdit.id, profileData)
           closeEditProfileModal()
           pushToast('success', 'Profil guru berhasil diperbarui')
 

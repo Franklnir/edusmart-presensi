@@ -66,6 +66,7 @@ export const menuConfig = {
       items: [
         { id: 'admin-storage', to: '/admin/storage', label: 'Storage', icon: 'storage' },
         { id: 'admin-backup', to: '/admin/backup', label: 'Backup', icon: 'backup' },
+        { id: 'admin-monitor-log', to: '/admin/monitor-log', label: 'Monitor Log', icon: 'terminal' },
         { id: 'admin-permission-admin', to: '/admin/permission-admin', label: 'Permission Admin', icon: 'shield' },
       ],
     },

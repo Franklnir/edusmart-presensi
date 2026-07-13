@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { studentService } from '../services/studentService'
 
 const buildEmptyStudentForm = () => ({
   email: '',
@@ -73,7 +74,7 @@ export function useStudentAccountActions({
     try {
       setAddingSiswa(true)
 
-      const { error } = await supabase.admin.provisionUser({
+      const res = await studentService.createStudent({
         email: form.email.trim().toLowerCase(),
         nama: form.nama.trim(),
         kelas: form.kelas || '',
@@ -81,15 +82,11 @@ export function useStudentAccountActions({
         jk: form.jk || '',
         agama: form.agama || null,
         password: form.password,
-        role: 'siswa',
         status: 'active',
-        no_hp_siswa: null,
-        no_hp_wali: null,
-        must_change_password: true,
         created_via: 'admin_created',
       })
 
-      if (error) throw error
+      if (res.error) throw res.error
 
       pushToast('success', 'Siswa berhasil ditambahkan. Data akun dan profil sudah sinkron.')
       resetForm()

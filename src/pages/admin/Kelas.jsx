@@ -726,6 +726,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
   useEffect(() => {
     if (!isAuthorized) return
     
+    const abortController = new AbortController()
+    const signal = abortController.signal
+
     const loadData = async () => {
       setLoading(true)
       try {
@@ -748,7 +751,16 @@ export default function AKelas({ initialTab = 'kelas' }) {
         })
 
         const nextPeriod = resolveAcademicPeriod(data?.settings || {})
-        const kelasRows = mapClassRows(data?.kelas || [])
+        let kelasRows = []
+        const USE_V2 = import.meta.env.VITE_USE_CLASSES_API_V2 === 'true'
+        
+        if (USE_V2) {
+          const v2Res = await ClassesApi.getAll({ per_page: 100 }, { signal })
+          kelasRows = mapClassRows(v2Res.data || [])
+        } else {
+          kelasRows = mapClassRows(data?.kelas || [])
+        }
+
         const selectedClassId = data?.selected_class_id || initialRouteClassId || kelasRows[0]?.id || ''
         const scheduleRows = mapScheduleRows(data?.schedule || [], nextPeriod)
 
@@ -773,15 +785,17 @@ export default function AKelas({ initialTab = 'kelas' }) {
           }
         })
       } catch (error) {
-        console.error('Error loading initial data:', error)
-        pushToast('error', error?.message || 'Gagal memuat data akademik')
+        if (error.name === 'AbortError' || error.code === 'REQUEST_ABORTED') return
+        console.error('Error load data:', error)
+        pushToast('error', error.message || 'Gagal memuat data kelas')
       } finally {
         setLoading(false)
       }
     }
     
     loadData()
-  }, [initialRouteClassId, isAuthorized, isSchedulePage, pushToast])
+    return () => abortController.abort()
+  }, [initialRouteClassId, isAuthorized, isSchedulePage, pushToast, queryClient])
 
   useEffect(() => {
     if (!isAuthorized || promotionQueryHandled || typeof window === 'undefined') return
@@ -933,17 +947,12 @@ export default function AKelas({ initialTab = 'kelas' }) {
     }
   }, [pushToast])
 
-  const loadKelas = useCallback(async () => {
+  const loadKelas = useCallback(async (signal) => {
     try {
-      const { data, error } = await supabase
-        .from('kelas')
-        .select('*')
-        .order('grade')
-        .order('suffix')
+      const response = await ClassesApi.getAll({ per_page: 100 }, { signal })
+      const rawData = response.data || []
 
-      if (error) throw error
-
-      const rows = data.map(k => ({
+      const rows = rawData.map(k => ({
         id: k.id,
         nama: k.nama || k.id,
         grade: k.grade || parseGrade(k.id),

@@ -6,6 +6,7 @@ import {
   normalizePhoneID,
   validatePhoneNumber,
 } from '../utils/studentFormatters'
+import { studentService } from '../services/studentService'
 
 const buildPhoneForm = (student = null) => ({
   no_hp_siswa: student?.no_hp_siswa || '',
@@ -173,10 +174,10 @@ export function useStudentDetailActions({
         alamat: String(editAdditionalInfoForm.alamat || '').trim() || null,
       }
 
-      const { data, error } = await supabase.students.updateAdditionalInfo(detailUser.id, payload)
-      if (error) throw error
+      const res = await studentService.updateStudent(detailUser.id, payload)
+      if (res.error) throw res.error
 
-      const updatedProfile = data?.profile || null
+      const updatedProfile = res.data || null
       if (!updatedProfile) {
         throw new Error('Data siswa terbaru tidak ditemukan.')
       }

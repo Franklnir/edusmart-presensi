@@ -970,7 +970,7 @@ const compressImageToTarget = async (file, maxBytes) => {
   }
 
   return new File([bestBlob], toJpegFileName(file.name), {
-    type: 'image/jpeg',
+  type: 'image/jpeg',
     lastModified: Date.now()
   })
 }
@@ -978,6 +978,13 @@ const compressImageToTarget = async (file, maxBytes) => {
 const runApiFetch = async (path, options = {}) => {
   const method = (options.method || 'GET').toUpperCase()
   const body = options.body
+
+  if (method === 'POST' && path === '/api/db') {
+    if (!body?.table || !body?.action) {
+      throw new Error('Missing table or action in /api/db payload')
+    }
+  }
+
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData
   const signal = options.signal
   const guardedByApiRecovery = options.apiRecoveryGuard !== false

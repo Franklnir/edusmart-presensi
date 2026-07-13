@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { studentService } from '../services/studentService'
 
 export function useStudentDetailData({
   pushToast,
@@ -30,10 +31,10 @@ export function useStudentDetailData({
     setDetailOpen(true)
 
     try {
-      const { data, error } = await supabase.admin.studentDetail(student.id)
-      if (error) throw error
+      const res = await studentService.getStudent(student.id)
+      if (res.error) throw res.error
 
-      const detailProfile = data?.profile || null
+      const detailProfile = res.data || null
       if (detailProfile) {
         setDetailUser((prev) => ({
           ...(prev || {}),
@@ -44,8 +45,8 @@ export function useStudentDetailData({
         syncRfidFromStudent?.(detailProfile)
       }
 
-      setOrgMember(Array.isArray(data?.org_member) ? data.org_member : [])
-      setOsisRow(data?.osis || null)
+      setOrgMember(Array.isArray(res.org_member) ? res.org_member : [])
+      setOsisRow(res.osis || null)
     } catch (error) {
       console.error('Error loading detail:', error)
       pushToast('error', 'Gagal memuat detail siswa')

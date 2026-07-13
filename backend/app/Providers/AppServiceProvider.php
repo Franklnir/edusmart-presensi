@@ -139,6 +139,12 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute($perMinute)->by('webhook|'.$request->ip());
         });
 
+        RateLimiter::for('frontend-logs', function (Request $request) use ($clampInt) {
+            $perMinute = $clampInt('FRONTEND_LOGS_RATE_LIMIT_PER_MINUTE', 60, 10, 300);
+
+            return Limit::perMinute($perMinute)->by('frontend-logs|'.$request->ip());
+        });
+
         RateLimiter::for('public-directory', function (Request $request) use ($clampInt) {
             $perMinute = $clampInt('PUBLIC_DIRECTORY_RATE_LIMIT_PER_MINUTE', 60, 10, 300);
 

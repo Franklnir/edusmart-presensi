@@ -4,9 +4,14 @@ export const ClassesApi = {
   /**
    * Fetch all classes.
    */
-  getAll: async () => {
-    return apiClient('/api/v2/classes', {
-      method: 'GET'
+  getAll: async (params = {}, options = {}) => {
+    const searchParams = new URLSearchParams(params)
+    const qs = searchParams.toString()
+    const endpoint = qs ? `/api/v2/classes?${qs}` : '/api/v2/classes'
+    
+    return apiClient(endpoint, {
+      method: 'GET',
+      ...options
     })
   },
 

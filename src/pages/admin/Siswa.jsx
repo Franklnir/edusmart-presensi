@@ -21,6 +21,7 @@ import { useStudentDetailActions } from '../../features/students/hooks/useStuden
 import { useStudentRfidActions } from '../../features/students/hooks/useStudentRfidActions'
 import { useStudentClassActions } from '../../features/students/hooks/useStudentClassActions'
 import { useStudentAccountActions } from '../../features/students/hooks/useStudentAccountActions'
+import { studentService } from '../../features/students/services/studentService'
 import StudentPageHeader from '../../features/students/sections/StudentPageHeader'
 import StudentStatsGrid from '../../features/students/sections/StudentStatsGrid'
 import StudentCreateForm from '../../features/students/sections/StudentCreateForm'
@@ -169,14 +170,14 @@ export default function ASiswa() {
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.students(params),
         queryFn: async () => {
-          const { data, error } = await supabase.admin.students(params)
-          if (error?.code === 'REQUEST_ABORTED') {
+          const res = await studentService.getStudents(params)
+          if (res.error?.code === 'REQUEST_ABORTED') {
             const aborted = new Error('Request aborted')
             aborted.code = 'REQUEST_ABORTED'
             throw aborted
           }
-          if (error) throw error
-          return data
+          if (res.error) throw res.error
+          return res.data
         },
         staleTime: 10 * 1000,
       })
@@ -444,9 +445,9 @@ export default function ASiswa() {
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.students(params),
         queryFn: async () => {
-          const { data, error } = await supabase.admin.students(params)
-          if (error) throw error
-          return data
+          const res = await studentService.getStudents(params)
+          if (res.error) throw res.error
+          return res.data
         },
         staleTime: 30 * 1000,
       })

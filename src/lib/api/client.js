@@ -8,6 +8,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 export const DEFAULT_TIMEOUT_MS = 15000
 
 export const logFrontendError = (level, message, context = {}) => {
+  if (context?.url && context.url.includes('/frontend-logs')) return
   try {
     const API_URL = import.meta.env.VITE_API_URL || ''
     const url = new URL('/api/v2/frontend-logs', API_URL).toString()
@@ -80,12 +81,21 @@ export const apiClient = async (path, options = {}) => {
 
   // Assuming API URL from Vite env
   const API_URL = import.meta.env.VITE_API_URL || ''
-  let url = ''
+  let urlObj = null
   try {
-    url = new URL(path, API_URL).toString()
+    urlObj = new URL(path, API_URL)
   } catch {
-    url = path
+    urlObj = new URL(path, window.location.origin)
   }
+
+  if (options.params) {
+    Object.entries(options.params).forEach(([key, val]) => {
+      if (val !== undefined && val !== null && val !== '') {
+        urlObj.searchParams.append(key, val)
+      }
+    })
+  }
+  let url = urlObj.toString()
 
   // For Sanctum, ensure withCredentials is true
   fetchOptions.credentials = 'include'
