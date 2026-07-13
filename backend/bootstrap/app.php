@@ -6,6 +6,8 @@ use App\Http\Middleware\DenyRootDomainAuthAccess;
 use App\Http\Middleware\EnsureSuperAdminAccess;
 use App\Http\Middleware\EnsureSuperAdminDomain;
 use App\Http\Middleware\EnsureTenantMatchesProfile;
+use App\Http\Middleware\RequestTelemetry;
+use App\Http\Middleware\RequireTrustedEdgeProxy;
 use App\Http\Middleware\ResolveTenant;
 use App\Http\Middleware\SecureHeaders;
 use Illuminate\Foundation\Application;
@@ -65,10 +67,12 @@ return Application::configure(basePath: dirname(__DIR__))
                 | Request::HEADER_X_FORWARDED_PROTO
         );
         $middleware->append(HandleCors::class);
+        $middleware->append(RequestTelemetry::class);
         $middleware->append(SecureHeaders::class);
         $middleware->append(BlockSuspiciousRequests::class);
         $middleware->api(append: [
             EnsureFrontendRequestsAreStateful::class,
+            RequireTrustedEdgeProxy::class,
             ResolveTenant::class,
             EnsureTenantMatchesProfile::class,
         ]);

@@ -208,6 +208,7 @@ jobs:
             -e CADDY_APP_HOSTS=sismu.biz.id \
             -e CADDY_ROOT_DOMAIN=sismu.biz.id \
             -e CADDY_HTTPS_PORT_SUFFIX= \
+            -e TENANT_EDGE_PROXY_SECRET=ci-edge-secret-validation-only \
             -v "$PWD/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
             "$CADDY_IMAGE" \
             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

@@ -59,6 +59,22 @@
 	}
 }
 
+(trusted_edge_proxy) {
+	@trusted_edge header X-Sismu-Edge-Secret {$TENANT_EDGE_PROXY_SECRET}
+
+	handle @trusted_edge {
+		import security_headers
+		encode zstd gzip
+		import edusmart_proxy
+	}
+
+	handle {
+		header Cache-Control "no-store"
+		header X-Robots-Tag "noindex, nofollow"
+		respond "Not Found" 404
+	}
+}
+
 (evolution_proxy) {
 	handle /manager* {
 		respond "Not Found" 404
@@ -118,9 +134,7 @@ wa.localhost {
 		on_demand
 	}
 
-	import security_headers
-	encode zstd gzip
-	import edusmart_proxy
+	import trusted_edge_proxy
 }
 
 *.{$CADDY_ROOT_DOMAIN} {
@@ -128,9 +142,7 @@ wa.localhost {
 		on_demand
 	}
 
-	import security_headers
-	encode zstd gzip
-	import edusmart_proxy
+	import trusted_edge_proxy
 }
 
 :443 {

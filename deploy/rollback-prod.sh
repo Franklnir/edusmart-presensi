@@ -316,7 +316,9 @@ echo "[6/7] Refresh cache aplikasi..."
 compose exec -T backend php artisan optimize:clear >/dev/null
 
 echo "[7/7] Verifikasi health API..."
-curl -fsS "http://127.0.0.1:${HEALTH_PORT}/api/health" >/dev/null
+curl -fsS \
+  -H "X-Sismu-Edge-Secret: $(read_env_var TENANT_EDGE_PROXY_SECRET "$ENV_FILE")" \
+  "http://127.0.0.1:${HEALTH_PORT}/api/health" >/dev/null
 
 echo "Rollback selesai."
 echo "Current ref : $(git rev-parse --short HEAD)"
