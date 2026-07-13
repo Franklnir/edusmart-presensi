@@ -17,7 +17,7 @@ class BackupSpreadsheetServiceTest extends TestCase
             $this->markTestSkipped('ext-zip diperlukan oleh OpenSpout XLSX writer (tersedia di Docker produksi).');
         }
 
-        $this->service = new BackupSpreadsheetService();
+        $this->service = new BackupSpreadsheetService;
     }
 
     private function samplePayload(): array

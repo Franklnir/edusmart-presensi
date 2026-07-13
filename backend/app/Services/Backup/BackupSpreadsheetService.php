@@ -32,7 +32,7 @@ class BackupSpreadsheetService
             throw new \RuntimeException('File sementara Excel tidak dapat dibuat.');
         }
 
-        $writer = new Writer();
+        $writer = new Writer;
 
         try {
             $writer->openToFile($tempPath);
