@@ -430,7 +430,11 @@ class SettingsController extends ApiController
             $query->where('tahun_ajaran', $year);
         }
 
-        if ($semester !== '' && Schema::hasColumn($table, 'semester')) {
+        if (
+            $semester !== ''
+            && ! in_array($table, ['struktur_sekolah', 'kelas_struktur', 'organisasi', 'organisasi_anggota'], true)
+            && Schema::hasColumn($table, 'semester')
+        ) {
             $query->where('semester', $semester);
         }
     }

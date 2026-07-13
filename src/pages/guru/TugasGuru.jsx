@@ -511,16 +511,18 @@ export default function TugasGuru() {
     setAcademicYear,
     setSemester,
     resetToActivePeriod,
-    applyPeriodFilters,
-    activeAcademicPeriodPayload,
+    applyAcademicYearFilter,
+    applyAcademicSemesterFilter,
+    academicYearCacheKey,
+    academicSemesterCacheKey,
     isViewingArchivePeriod
   } = useActiveAcademicPeriod({
     storageKey: 'edusmart.guru.tugas.periodFilter'
   })
 
   /* ---------- State ---------- */
-  const [jadwalAll, setJadwalAll] = useLocalCache('guru_tugas_jadwalAll', [])
-  const [kelasList, setKelasList] = useLocalCache('guru_tugas_kelasList', [])
+  const [jadwalAll, setJadwalAll] = useLocalCache(`guru_tugas_jadwalAll:${academicYearCacheKey}`, [])
+  const [kelasList, setKelasList] = useLocalCache(`guru_tugas_kelasList:${academicYearCacheKey}`, [])
 
   // Create form
   const [isCreatePanelOpen, setIsCreatePanelOpen] = useState(false)
@@ -626,7 +628,7 @@ export default function TugasGuru() {
 
   // Detail
   const [selectedTugas, setSelectedTugas] = useState(null)
-  const [listTugas, setListTugas, hasListTugas] = useLocalCache('guru_tugas_list', [])
+  const [listTugas, setListTugas, hasListTugas] = useLocalCache(`guru_tugas_list:${academicSemesterCacheKey}`, [])
   const [isLoadingList, setIsLoadingList] = useState(!hasListTugas)
   const [siswaDiKelas, setSiswaDiKelas] = useState([])
   const [jawabanTugas, setJawabanTugas] = useState([])
@@ -726,7 +728,7 @@ export default function TugasGuru() {
       if (!user?.id) return
       try {
         let jadwalQuery = supabase.from('jadwal').select(JADWAL_GURU_COLUMNS).eq('guru_id', user.id)
-        jadwalQuery = applyPeriodFilters(jadwalQuery)
+        jadwalQuery = applyAcademicYearFilter(jadwalQuery)
 
         const { data, error } = await supabase.batch([
           {
@@ -753,7 +755,7 @@ export default function TugasGuru() {
       }
     }
     loadInitialData()
-  }, [applyPeriodFilters, periodFilter.semester, user?.id, pushToast])
+  }, [applyAcademicYearFilter, periodFilter.semester, user?.id, pushToast])
 
   /* =========================
      2) Mapel list untuk form create
@@ -806,7 +808,7 @@ export default function TugasGuru() {
       const normalizedSearch = debouncedHistorySearchTerm.trim().toLowerCase()
 
       let query = supabase.from('tugas').select(TUGAS_GURU_COLUMNS).eq('created_by', user.id)
-      query = applyPeriodFilters(query)
+      query = applyAcademicSemesterFilter(query)
 
       if (selectedKelasFilter) query = query.eq('kelas', selectedKelasFilter)
       if (selectedSubject) query = query.eq('mapel', selectedSubject)
@@ -1014,7 +1016,7 @@ export default function TugasGuru() {
       setLoading(false)
     }
   }, [
-    applyPeriodFilters,
+    applyAcademicSemesterFilter,
     user?.id,
     selectedKelasFilter,
     selectedSubject,
@@ -1047,7 +1049,7 @@ export default function TugasGuru() {
         .from('tugas')
         .select(TUGAS_GURU_COLUMNS)
         .eq('created_by', user.id)
-      tugasQuery = applyPeriodFilters(tugasQuery)
+      tugasQuery = applyAcademicSemesterFilter(tugasQuery)
       const { data: tugasData, error: tugasError } = await tugasQuery
 
       if (tugasError) throw tugasError
@@ -1094,7 +1096,7 @@ export default function TugasGuru() {
     } finally {
       setIsLoadingTugasPerluDinilai(false)
     }
-  }, [applyPeriodFilters, user?.id])
+  }, [applyAcademicSemesterFilter, user?.id])
 
   useEffect(() => {
     if (user?.id) loadTugasPerluDinilai()
@@ -1598,12 +1600,10 @@ export default function TugasGuru() {
         link: safeLink || null,
         mulai: new Date(form.mulai).toISOString(),
         deadline: new Date(form.deadline).toISOString(),
-        file_url: form.file_url, // simpan PATH (bukan URL)
-        created_by: user.id,
-        ...activeAcademicPeriodPayload
+        file_url: form.file_url
       }
 
-      const { error } = await supabase.from('tugas').insert(payload)
+      const { error } = await supabase.assignments.createTask(payload)
       if (error) throw error
 
       pushToast('success', 'Tugas berhasil ditambahkan')
@@ -1699,11 +1699,7 @@ export default function TugasGuru() {
       if (mulaiChanged) payload.mulai = new Date(editForm.mulai).toISOString()
       if (deadlineChanged) payload.deadline = new Date(editForm.deadline).toISOString()
 
-      const { error } = await supabase
-        .from('tugas')
-        .update(payload)
-        .eq('id', editForm.id)
-        .eq('created_by', user.id)
+      const { error } = await supabase.assignments.updateTask(editForm.id, payload)
 
       if (error) throw error
 
@@ -1771,7 +1767,7 @@ export default function TugasGuru() {
         }
       }
 
-      const { error } = await supabase.from('tugas').delete().eq('id', tugasId).eq('created_by', user.id)
+      const { error } = await supabase.assignments.deleteTask(tugasId)
       if (error) throw error
 
       pushToast('success', 'Tugas berhasil dihapus')
@@ -2271,7 +2267,7 @@ export default function TugasGuru() {
                               e.stopPropagation()
                               simpanNilai(siswa.id)
                             }}
-                            disabled={loading}
+                            disabled={isViewingArchivePeriod || loading}
                             type="button"
                           >
                             <CheckCircle2 className="h-3.5 w-3.5" />
@@ -2391,6 +2387,7 @@ export default function TugasGuru() {
             </div>
             <button
               type="button"
+              disabled={isViewingArchivePeriod}
               onClick={() => {
                 if (!isCreatePanelOpen) {
                   const mulai = clampDateTimeLocal(form.mulai || getNowDateTimeLocal(), createPeriodBounds.min, createPeriodBounds.endsAt)
@@ -2403,7 +2400,7 @@ export default function TugasGuru() {
                 isCreatePanelOpen
                   ? 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                   : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-700 hover:to-blue-800'
-              }`}
+              } disabled:cursor-not-allowed disabled:opacity-50`}
             >
               {isCreatePanelOpen ? 'Tutup Form' : 'Buat Tugas Baru'}
             </button>
@@ -2633,7 +2630,7 @@ export default function TugasGuru() {
             <button
               className="flex flex-1 items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 text-base font-bold text-white shadow-lg transition-all hover:from-blue-700 hover:to-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={tambahTugas}
-              disabled={loading || isUploadingFile || !kelas || !selectedMapel || !form.judul || !form.mulai || !form.deadline}
+              disabled={isViewingArchivePeriod || loading || isUploadingFile || !kelas || !selectedMapel || !form.judul || !form.mulai || !form.deadline}
               type="button"
             >
               <span>{loading ? 'Menyimpan...' : 'Simpan Tugas Baru'}</span>
@@ -3122,7 +3119,7 @@ export default function TugasGuru() {
                           <button
                             type="button"
                             onClick={openEditTugas}
-                            disabled={loading || isUploadingFile}
+                            disabled={isViewingArchivePeriod || loading || isUploadingFile}
                             className="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                           >
                             Edit
@@ -3130,7 +3127,7 @@ export default function TugasGuru() {
                           <button
                             type="button"
                             onClick={() => hapusTugas(selectedTugas.id, selectedTugas.file_url)}
-                            disabled={selectedHasGradedSubmission || loading || isUploadingFile}
+                            disabled={isViewingArchivePeriod || selectedHasGradedSubmission || loading || isUploadingFile}
                             className="w-full rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                           >
                             {selectedHasGradedSubmission ? 'Tidak Bisa Hapus' : 'Hapus'}
@@ -3141,7 +3138,7 @@ export default function TugasGuru() {
                           <button
                             type="button"
                             onClick={simpanEditTugas}
-                            disabled={loading || isUploadingFile}
+                            disabled={isViewingArchivePeriod || loading || isUploadingFile}
                             className="w-full rounded-xl bg-green-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                           >
                             {loading ? 'Menyimpan...' : 'Simpan'}

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Support\AcademicPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -149,6 +150,66 @@ class DelegatedAdminAuthorizationTest extends TestCase
                 'scan_always_active' => false,
             ])
             ->assertForbidden();
+    }
+
+    public function test_homeroom_scan_access_uses_active_academic_year_without_semester_lock(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        $teacher = $this->createUserWithProfile($tenantId, 'guru');
+
+        DB::table('settings')->where('tenant_id', $tenantId)->delete();
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Aman',
+            'tahun_ajaran' => '2026/2027',
+            'semester_aktif' => AcademicPeriod::SEMESTER_GENAP,
+            'scan_manual_enabled' => false,
+            'scan_always_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('kelas')->updateOrInsert(
+            ['id' => 'X-1'],
+            [
+                'nama' => 'X-1',
+                'grade' => 'X',
+                'suffix' => '1',
+                'tenant_id' => $tenantId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
+
+        DB::table('kelas_struktur')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'kelas_id' => 'X-1',
+            'wali_guru_id' => $teacher->id,
+            'wali_guru_nama' => 'Guru Tahun Lalu',
+            'tahun_ajaran' => '2025/2026',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($teacher)
+            ->getJson('/api/admin/scan-settings')
+            ->assertForbidden();
+
+        DB::table('kelas_struktur')
+            ->where('tenant_id', $tenantId)
+            ->where('kelas_id', 'X-1')
+            ->update([
+                'wali_guru_nama' => 'Guru Tahun Ini',
+                'tahun_ajaran' => '2026/2027',
+                'semester' => AcademicPeriod::SEMESTER_GANJIL,
+                'updated_at' => now(),
+            ]);
+
+        $this->actingAs($teacher)
+            ->getJson('/api/admin/scan-settings')
+            ->assertOk();
     }
 
     private function defaultTenantId(): string

@@ -89,7 +89,12 @@ const isEskulRegistrationClosed = (deadlineAt, period) => (
   Date.now() > getEffectiveRegistrationDeadlineTime(deadlineAt, period)
 )
 
-const applySemesterPeriodFilters = (query, period) => {
+const applyAcademicYearFilter = (query, period) => {
+  if (period?.tahunAjaran) return query.eq('tahun_ajaran', period.tahunAjaran)
+  return query
+}
+
+const applyAcademicSemesterFilter = (query, period) => {
   let next = query
   if (period?.tahunAjaran) next = next.eq('tahun_ajaran', period.tahunAjaran)
   if (period?.semester) next = next.eq('semester', period.semester)
@@ -781,7 +786,7 @@ export default function SHome() {
         .select('*')
         .order('jabatan')
 
-      query = applySemesterPeriodFilters(query, period)
+      query = applyAcademicYearFilter(query, period)
       let { data, error } = await query
       if (error && isLegacyAcademicColumnError(error)) {
         ; ({ data, error } = await supabase
@@ -850,7 +855,13 @@ export default function SHome() {
 
     try {
       const period = await loadActiveAcademicPeriod()
-      const kelas = await fetchStudentPeriodClass({ userId, profile, tahunAjaran: period.tahunAjaran })
+      const kelas = await fetchStudentPeriodClass({
+        userId,
+        profile,
+        tahunAjaran: period.tahunAjaran,
+        semester: period.semester,
+        activeTahunAjaran: period.tahunAjaran
+      })
       if (!kelas) return
       setDashboardClass(kelas)
       const { data, error } = await supabase
@@ -892,7 +903,13 @@ export default function SHome() {
     try {
       setIsTugasLoading(true)
       const period = await loadActiveAcademicPeriod()
-      const kelas = await fetchStudentPeriodClass({ userId, profile, tahunAjaran: period.tahunAjaran })
+      const kelas = await fetchStudentPeriodClass({
+        userId,
+        profile,
+        tahunAjaran: period.tahunAjaran,
+        semester: period.semester,
+        activeTahunAjaran: period.tahunAjaran
+      })
       if (!kelas) {
         setTugas([])
         setTugasMeta({ pending: 0, overdue: 0 })
@@ -1017,7 +1034,7 @@ export default function SHome() {
         .from('ekskul')
         .select(EKSKUL_SELECT_COLUMNS)
         .order('nama')
-      eskulQuery = applySemesterPeriodFilters(eskulQuery, period)
+      eskulQuery = applyAcademicSemesterFilter(eskulQuery, period)
 
       let { data: eskulData, error: eskulError } = await eskulQuery
       if (eskulError && shouldRetryLegacyEskulSelect(eskulError)) {
@@ -1031,7 +1048,7 @@ export default function SHome() {
         .from('ekskul_anggota')
         .select('id, ekskul_id, user_id')
         .eq('user_id', userId)
-      anggotaQuery = applySemesterPeriodFilters(anggotaQuery, period)
+      anggotaQuery = applyAcademicSemesterFilter(anggotaQuery, period)
 
       let { data: anggotaData, error: anggotaError } = await anggotaQuery
       if (anggotaError && isLegacyAcademicColumnError(anggotaError)) {
@@ -1106,7 +1123,7 @@ export default function SHome() {
         .select('*')
         .order('nama')
 
-      organisasiQuery = applySemesterPeriodFilters(organisasiQuery, period)
+      organisasiQuery = applyAcademicYearFilter(organisasiQuery, period)
       let { data: organisasiData, error: organisasiError } = await organisasiQuery
       if (organisasiError && isLegacyAcademicColumnError(organisasiError)) {
         ; ({ data: organisasiData, error: organisasiError } = await supabase
@@ -1129,7 +1146,7 @@ export default function SHome() {
         .in('organisasi_id', organisasiIds)
         .order('jabatan', { ascending: false })
 
-      anggotaQuery = applySemesterPeriodFilters(anggotaQuery, period)
+      anggotaQuery = applyAcademicYearFilter(anggotaQuery, period)
       let { data: anggotaData, error: anggotaError } = await anggotaQuery
       if (anggotaError && isLegacyAcademicColumnError(anggotaError)) {
         ; ({ data: anggotaData, error: anggotaError } = await supabase
@@ -1188,7 +1205,7 @@ export default function SHome() {
           .delete()
           .eq('ekskul_id', item.id)
           .eq('user_id', userId)
-        deleteQuery = applySemesterPeriodFilters(deleteQuery, period)
+        deleteQuery = applyAcademicSemesterFilter(deleteQuery, period)
 
         let { error } = await deleteQuery
         if (error && isLegacyAcademicColumnError(error)) {

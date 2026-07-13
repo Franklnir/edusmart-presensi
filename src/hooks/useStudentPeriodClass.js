@@ -7,14 +7,20 @@ const getFallbackClass = (profile) => (
   String(profile?.kelas || profile?.kelas_id || '').trim()
 )
 
-export async function fetchStudentPeriodClass({ userId, profile, tahunAjaran }) {
+export async function fetchStudentPeriodClass({
+  userId,
+  profile,
+  tahunAjaran,
+  semester = '',
+  activeTahunAjaran = ''
+}) {
   const fallbackClass = getFallbackClass(profile)
   const studentId = String(userId || profile?.id || '').trim()
   const year = String(tahunAjaran || '').trim()
 
   if (!studentId || !year) return fallbackClass
 
-  let { data, error } = await supabase
+  let query = supabase
     .from('student_class_histories')
     .select('class_id')
     .eq('student_id', studentId)
@@ -22,25 +28,38 @@ export async function fetchStudentPeriodClass({ userId, profile, tahunAjaran }) 
     .in('status', ACTIVE_HISTORY_STATUSES)
     .order('valid_from', { ascending: false })
     .limit(1)
+  if (semester) query = query.eq('semester', semester)
+  let { data, error } = await query
 
   if (error && /status|valid_from/i.test(error.message || '')) {
-    ;({ data, error } = await supabase
+    let fallbackQuery = supabase
       .from('student_class_histories')
       .select('class_id')
       .eq('student_id', studentId)
       .eq('tahun_ajaran', year)
-      .limit(1))
+      .limit(1)
+    if (semester) fallbackQuery = fallbackQuery.eq('semester', semester)
+    ;({ data, error } = await fallbackQuery)
   }
 
   if (error) {
     console.warn('Gagal memuat kelas siswa sesuai periode:', error)
-    return fallbackClass
+    return year === String(activeTahunAjaran || '').trim() ? fallbackClass : ''
   }
 
-  return String(data?.[0]?.class_id || fallbackClass || '').trim()
+  const resolved = String(data?.[0]?.class_id || '').trim()
+  if (resolved) return resolved
+
+  return year === String(activeTahunAjaran || '').trim() ? fallbackClass : ''
 }
 
-export default function useStudentPeriodClass({ userId, profile, tahunAjaran }) {
+export default function useStudentPeriodClass({
+  userId,
+  profile,
+  tahunAjaran,
+  semester = '',
+  activeTahunAjaran = ''
+}) {
   const fallbackClass = useMemo(() => getFallbackClass(profile), [profile])
   const [periodClass, setPeriodClass] = useState(fallbackClass)
 
@@ -57,13 +76,19 @@ export default function useStudentPeriodClass({ userId, profile, tahunAjaran }) 
       }
 
       try {
-        const resolvedClass = await fetchStudentPeriodClass({ userId: studentId, profile, tahunAjaran: year })
+        const resolvedClass = await fetchStudentPeriodClass({
+          userId: studentId,
+          profile,
+          tahunAjaran: year,
+          semester,
+          activeTahunAjaran
+        })
         if (cancelled) return
         setPeriodClass(resolvedClass)
       } catch (error) {
         if (!cancelled) {
           console.warn('Gagal memuat kelas siswa sesuai periode:', error)
-          setPeriodClass(fallbackClass)
+          setPeriodClass(year === String(activeTahunAjaran || '').trim() ? fallbackClass : '')
         }
       }
     }
@@ -73,7 +98,7 @@ export default function useStudentPeriodClass({ userId, profile, tahunAjaran }) 
     return () => {
       cancelled = true
     }
-  }, [fallbackClass, profile?.id, tahunAjaran, userId])
+  }, [activeTahunAjaran, fallbackClass, profile, semester, tahunAjaran, userId])
 
-  return periodClass || fallbackClass
+  return periodClass
 }

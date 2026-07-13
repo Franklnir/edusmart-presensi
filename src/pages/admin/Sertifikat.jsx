@@ -30,7 +30,7 @@ const loadCurrentAcademicPeriod = async () => {
   return resolveAcademicPeriod(data || {})
 }
 
-const applySemesterPeriodFilters = (query, period) => {
+const applyAcademicSemesterFilter = (query, period) => {
   let next = query
   if (period?.tahunAjaran) next = next.eq('tahun_ajaran', period.tahunAjaran)
   if (period?.semester) next = next.eq('semester', period.semester)
@@ -846,7 +846,7 @@ const GeneratorSection = ({ templateVersion }) => {
       try {
         const period = await loadCurrentAcademicPeriod()
         let ekskulQuery = supabase.from('ekskul').select('id, nama, tahun_ajaran, semester').order('nama')
-        ekskulQuery = applySemesterPeriodFilters(ekskulQuery, period)
+        ekskulQuery = applyAcademicSemesterFilter(ekskulQuery, period)
 
         const [tplRes, klsRes, eksRes] = await Promise.all([
           supabase
@@ -961,7 +961,7 @@ const GeneratorSection = ({ templateVersion }) => {
           .from('ekskul_anggota')
           .select('user_id')
           .eq('ekskul_id', ekskulFilter)
-        memberQuery = applySemesterPeriodFilters(memberQuery, period)
+        memberQuery = applyAcademicSemesterFilter(memberQuery, period)
 
         let { data: memberRows, error: memberErr } = await memberQuery
         if (memberErr && /tahun_ajaran|semester/i.test(memberErr.message || '')) {

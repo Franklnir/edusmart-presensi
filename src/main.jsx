@@ -6,6 +6,7 @@ import App from './App'
 import './index.css'
 import Toast from './components/Toast'
 import { queryClient } from './lib/queryClient'
+import { AcademicContextProvider } from './context/AcademicContext'
 
 // Register PWA Service Worker
 import { registerSW } from 'virtual:pwa-register'
@@ -23,8 +24,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <App />
-        <Toast />
+        <AcademicContextProvider>
+          <App />
+          <Toast />
+        </AcademicContextProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>

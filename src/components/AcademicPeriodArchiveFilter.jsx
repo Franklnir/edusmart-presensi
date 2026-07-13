@@ -13,18 +13,24 @@ export default function AcademicPeriodArchiveFilter({
   activeAcademicPeriod,
   periodFilter,
   academicYearOptions = [],
+  semesterOptions = [],
   setAcademicYear,
+  setSemester,
   title = 'Periode Data',
   className = '',
   compact = false,
   disabled = false
 }) {
   const selectedYear = periodFilter?.tahunAjaran || activeAcademicPeriod?.tahunAjaran || ''
+  const selectedSemester = periodFilter?.semester || activeAcademicPeriod?.semester || ''
+  const isSemesterScoped = semesterOptions.length > 0
   const generatedId = useId().replace(/:/g, '')
   const periodButtonId = `academic-period-button-${generatedId}`
   const dialogTitleId = `academic-period-filter-title-${generatedId}`
   const academicYearSelectId = `academic-period-year-${generatedId}`
-  const isArchive = selectedYear !== (activeAcademicPeriod?.tahunAjaran || '')
+  const isArchive = selectedYear !== (activeAcademicPeriod?.tahunAjaran || '') || (
+    isSemesterScoped && selectedSemester !== (activeAcademicPeriod?.semester || '')
+  )
   const periodHint = isArchive ? 'Arsip dipilih' : 'Periode aktif'
   const normalizedYearOptions = useMemo(
     () => normalizeYearOptions(academicYearOptions),
@@ -32,16 +38,20 @@ export default function AcademicPeriodArchiveFilter({
   )
   const [isOpen, setIsOpen] = useState(false)
   const [draft, setDraft] = useState({
-    tahunAjaran: selectedYear
+    tahunAjaran: selectedYear,
+    semester: selectedSemester
   })
-  const draftIsArchive = draft.tahunAjaran !== (activeAcademicPeriod?.tahunAjaran || '')
+  const draftIsArchive = draft.tahunAjaran !== (activeAcademicPeriod?.tahunAjaran || '') || (
+    isSemesterScoped && draft.semester !== (activeAcademicPeriod?.semester || '')
+  )
 
   useEffect(() => {
     if (!isOpen) return
     setDraft({
-      tahunAjaran: selectedYear
+      tahunAjaran: selectedYear,
+      semester: selectedSemester
     })
-  }, [isOpen, selectedYear])
+  }, [isOpen, selectedSemester, selectedYear])
 
   useEffect(() => {
     if (!isOpen) return undefined
@@ -57,19 +67,22 @@ export default function AcademicPeriodArchiveFilter({
   const handleOpen = () => {
     if (disabled) return
     setDraft({
-      tahunAjaran: selectedYear
+      tahunAjaran: selectedYear,
+      semester: selectedSemester
     })
     setIsOpen(true)
   }
 
   const handleUseActivePeriod = () => {
     setDraft({
-      tahunAjaran: activeAcademicPeriod?.tahunAjaran || selectedYear
+      tahunAjaran: activeAcademicPeriod?.tahunAjaran || selectedYear,
+      semester: activeAcademicPeriod?.semester || selectedSemester
     })
   }
 
   const handleApply = () => {
     if (draft.tahunAjaran !== selectedYear) setAcademicYear?.(draft.tahunAjaran)
+    if (isSemesterScoped && draft.semester !== selectedSemester) setSemester?.(draft.semester)
     setIsOpen(false)
   }
 
@@ -92,7 +105,7 @@ export default function AcademicPeriodArchiveFilter({
           <div className="flex min-h-0 items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold leading-5 text-slate-900">
-                {selectedYear || '-'}
+                {selectedYear || '-'}{isSemesterScoped && selectedSemester ? ` • ${selectedSemester}` : ''}
               </div>
               <div className="truncate text-[11px] font-medium leading-4 text-slate-500">
                 {periodHint}
@@ -134,7 +147,7 @@ export default function AcademicPeriodArchiveFilter({
                     {title}
                   </h3>
                   <p className="mt-1 text-xs leading-5 text-slate-500">
-                    Pilihan ini hanya berlaku untuk halaman ini. Tahun ajaran menampilkan seluruh rentang Ganjil dan Genap dalam satu periode.
+                    Pilihan ini hanya berlaku untuk halaman ini dan tidak mengubah periode operasional sekolah.
                   </p>
                 </div>
               </div>
@@ -191,6 +204,29 @@ export default function AcademicPeriodArchiveFilter({
                       ))}
                     </select>
                   </div>
+                  {isSemesterScoped && (
+                    <div>
+                      <label htmlFor={`${academicYearSelectId}-semester`} className="mb-1.5 block text-xs font-medium uppercase tracking-normal text-slate-500">
+                        Semester
+                      </label>
+                      <select
+                        id={`${academicYearSelectId}-semester`}
+                        name="semester"
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-900 shadow-sm outline-none transition-all focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+                        value={draft.semester}
+                        onChange={(event) => setDraft((current) => ({
+                          ...current,
+                          semester: event.target.value
+                        }))}
+                      >
+                        {semesterOptions.map((option) => (
+                          <option key={option.value || option} value={option.value || option}>
+                            {option.label || option}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 <button

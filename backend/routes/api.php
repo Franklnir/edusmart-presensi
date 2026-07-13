@@ -213,9 +213,15 @@ Route::get('/storage/object', [StorageController::class, 'object'])->middleware(
 
 Route::prefix('tugas')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/jawaban/submit', [TugasController::class, 'submitJawaban']);
+    Route::get('/', [TugasController::class, 'index']);
+    Route::post('/', [TugasController::class, 'store']);
+    Route::get('/{id}', [TugasController::class, 'show']);
+    Route::patch('/{id}', [TugasController::class, 'update']);
+    Route::delete('/{id}', [TugasController::class, 'destroy']);
 });
 
 Route::prefix('reports')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
+    Route::get('/homeroom-options', [ReportController::class, 'homeroomOptions']);
     Route::get('/teacher-summary', [ReportController::class, 'teacherSummary']);
     Route::get('/attendance-summary', [ReportController::class, 'attendanceSummary']);
     Route::get('/task-summary', [ReportController::class, 'taskSummary']);
@@ -235,7 +241,11 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'throttle:api'])->group(func
     Route::get('/students/{id}', [AdminController::class, 'studentDetail']);
     Route::post('/students/import', [AdminController::class, 'importStudents']);
     Route::get('/academic-summary', [AdminController::class, 'academicSummary']);
+    Route::get('/academic-periods', [AdminController::class, 'academicPeriods']);
+    Route::post('/academic-period/preview', [AdminController::class, 'previewAcademicPeriod']);
     Route::post('/academic-period/apply', [AdminController::class, 'applyAcademicPeriod']);
+    Route::post('/academic-periods/correction-sessions', [AdminController::class, 'createAcademicCorrectionSession']);
+    Route::delete('/academic-periods/correction-sessions/{sessionId}', [AdminController::class, 'closeAcademicCorrectionSession']);
     Route::get('/academic-period/schedule-decision', [AdminController::class, 'schedulePeriodDecisionStatus']);
     Route::post('/academic-period/schedule-decision', [AdminController::class, 'resolveSchedulePeriodDecision']);
     Route::post('/academic-period/restore-roster', [AdminController::class, 'restoreAcademicPeriodRoster']);

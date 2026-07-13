@@ -2,15 +2,21 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Requests\Academic\ApplyAcademicPeriodRequest;
+use App\Http\Requests\Academic\CreateCorrectionSessionRequest;
 use App\Jobs\RefreshAdminPageCacheJob;
 use App\Mail\SertifikatMail;
 use App\Models\Profile;
 use App\Models\User;
+use App\Services\Academic\AcademicPeriodLifecycleService;
+use App\Services\Academic\AcademicRolloverService;
+use App\Services\Academic\CorrectionSessionService;
 use App\Services\Academic\ExtracurricularPeriodService;
 use App\Services\Admin\AdminPageCacheService;
 use App\Services\Rfid\RfidDeviceService;
 use App\Services\Rfid\RfidIngressService;
 use App\Support\AcademicPeriod;
+use App\Support\AcademicScopeRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -36,6 +42,12 @@ class AdminController extends ApiController
         'scan-kehadiran',
         'scan-kehadiran-live',
     ];
+
+    public function __construct(
+        private readonly AcademicPeriodLifecycleService $academicPeriodLifecycle,
+        private readonly CorrectionSessionService $academicCorrectionService,
+        private readonly AcademicRolloverService $academicRolloverService
+    ) {}
 
     public function rfidDevices(Request $request)
     {
@@ -1456,6 +1468,7 @@ class AdminController extends ApiController
         }
 
         if ($includeContext) {
+            $activeYear = $this->activeAcademicYearForTenant($tenantId);
             $payload['kelas'] = $this->tenantQuery('kelas', $tenantId)
                 ->select($this->existingColumns('kelas', ['id', 'nama', 'tingkat', 'jurusan', 'wali_kelas', 'angkatan', 'created_at', 'updated_at']))
                 ->when($teacherClassIds !== null, fn ($builder) => $builder->whereIn('id', $teacherClassIds))
@@ -1467,6 +1480,7 @@ class AdminController extends ApiController
             $payload['struktur'] = $this->tenantQuery('kelas_struktur', $tenantId)
                 ->select($this->existingColumns('kelas_struktur', ['kelas_id', 'wali_guru_id', 'wali_guru_nama', 'ketua_siswa_id', 'ketua_siswa_nama', 'created_at', 'updated_at']))
                 ->when($teacherClassIds !== null, fn ($builder) => $builder->whereIn('kelas_id', $teacherClassIds))
+                ->when($activeYear !== '' && Schema::hasColumn('kelas_struktur', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
                 ->get()
                 ->map(fn ($row) => (array) $row)
                 ->values();
@@ -1881,7 +1895,141 @@ class AdminController extends ApiController
         ]);
     }
 
-    public function applyAcademicPeriod(Request $request)
+    public function academicPeriods(Request $request)
+    {
+        if ($this->isAdmin($request) === false) {
+            return $this->deny();
+        }
+
+        $tenantId = (string) ($this->tenantId($request) ?? '');
+        if ($tenantId === '') {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $data = $this->academicPeriodLifecycle->listForTenant($tenantId);
+        $data['active_correction_sessions'] = $this->academicCorrectionService->activeForActor(
+            $tenantId,
+            (string) ($request->user()?->id ?? '')
+        );
+        $data['correction_scopes'] = [
+            'academic_year' => AcademicScopeRegistry::tablesFor(AcademicScopeRegistry::YEAR),
+            'academic_term' => AcademicScopeRegistry::tablesFor(AcademicScopeRegistry::TERM),
+        ];
+
+        return response()->json(['data' => $data]);
+    }
+
+    public function previewAcademicPeriod(ApplyAcademicPeriodRequest $request)
+    {
+        if ($this->isAdmin($request) === false) {
+            return $this->deny();
+        }
+
+        $tenantId = (string) ($this->tenantId($request) ?? '');
+        if ($tenantId === '') {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $preview = $this->academicPeriodLifecycle->impactPreview($tenantId, $request->all());
+        if (! ($preview['valid'] ?? false)) {
+            $error = $preview['error'] ?? [];
+
+            return response()->json([
+                'error' => $error['message'] ?? 'Periode akademik belum valid.',
+                'code' => $error['code'] ?? 'academic_period_invalid',
+            ], (int) ($error['status'] ?? 422));
+        }
+
+        $currentYear = AcademicPeriod::normalizeAcademicYear($preview['current']['tahun_ajaran'] ?? null);
+        $targetYear = AcademicPeriod::normalizeAcademicYear($preview['target']['tahun_ajaran'] ?? null);
+        if ($currentYear && $targetYear && (int) substr($targetYear, 0, 4) === (int) substr($currentYear, 0, 4) + 1) {
+            $preview['rollover'] = $this->previewAcademicYearRollover(
+                $tenantId,
+                $currentYear,
+                $targetYear
+            );
+        }
+
+        return response()->json(['data' => $preview]);
+    }
+
+    public function createAcademicCorrectionSession(CreateCorrectionSessionRequest $request)
+    {
+        if ($this->isAdmin($request) === false) {
+            return $this->deny();
+        }
+
+        $tenantId = (string) ($this->tenantId($request) ?? '');
+        if ($tenantId === '') {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $validated = $request->validated();
+
+        try {
+            $session = $this->academicCorrectionService->create(
+                $tenantId,
+                (string) ($request->user()?->id ?? ''),
+                (string) $validated['academic_term_id'],
+                (string) $validated['reason'],
+                (array) $validated['allowed_scopes'],
+                (int) ($validated['duration_minutes'] ?? 30)
+            );
+        } catch (\DomainException|\InvalidArgumentException $e) {
+            return $this->deny($e->getMessage(), 422);
+        }
+
+        if ($session === null) {
+            return $this->deny('Periode arsip tidak ditemukan.', 404);
+        }
+
+        $this->logAudit(
+            $request,
+            'academic_correction_sessions',
+            (string) $session['id'],
+            'CREATE',
+            null,
+            $session,
+            $tenantId
+        );
+
+        return response()->json(['data' => $session], 201);
+    }
+
+    public function closeAcademicCorrectionSession(Request $request, string $sessionId)
+    {
+        if ($this->isAdmin($request) === false) {
+            return $this->deny();
+        }
+
+        $tenantId = (string) ($this->tenantId($request) ?? '');
+        if ($tenantId === '') {
+            return $this->deny('Tenant tidak valid', 400);
+        }
+
+        $closed = $this->academicCorrectionService->close(
+            $tenantId,
+            (string) ($request->user()?->id ?? ''),
+            $sessionId
+        );
+        if (! $closed) {
+            return $this->deny('Sesi koreksi aktif tidak ditemukan.', 404);
+        }
+
+        $this->logAudit(
+            $request,
+            'academic_correction_sessions',
+            $sessionId,
+            'CLOSE',
+            null,
+            ['status' => 'closed'],
+            $tenantId
+        );
+
+        return response()->json(['data' => ['id' => $sessionId, 'status' => 'closed']]);
+    }
+
+    public function applyAcademicPeriod(ApplyAcademicPeriodRequest $request)
     {
         if ($this->isAdmin($request) === false) {
             return $this->deny();
@@ -1962,6 +2110,31 @@ class AdminController extends ApiController
             'jadwal_periode_berlaku' => $jadwalPeriodeBerlaku,
         ];
 
+        $lifecycleValidation = $this->academicPeriodLifecycle->validateActivation($tenantId, $settingsPayload);
+        if ($lifecycleValidation !== null) {
+            return response()->json([
+                'error' => $lifecycleValidation['message'],
+                'code' => $lifecycleValidation['code'],
+            ], (int) $lifecycleValidation['status']);
+        }
+
+        $impactPreview = $this->academicPeriodLifecycle->impactPreview($tenantId, $settingsPayload);
+        $impactConfirmed = filter_var(
+            $payload['impact_confirmed'] ?? $payload['calendar_confirmed'] ?? false,
+            FILTER_VALIDATE_BOOLEAN
+        );
+        if (
+            ($impactPreview['valid'] ?? false)
+            && ($impactPreview['changes']['dates'] ?? false)
+            && $impactConfirmed === false
+        ) {
+            return response()->json([
+                'error' => 'Pratinjau dampak wajib dikonfirmasi sebelum tanggal periode diubah.',
+                'code' => 'academic_period_impact_confirmation_required',
+                'data' => $impactPreview,
+            ], 409);
+        }
+
         $existing = $this->firstTenantRow('settings', $tenantId);
         $previousYear = AcademicPeriod::normalizeAcademicYear($existing->tahun_ajaran ?? null)
             ?: AcademicPeriod::current()['tahun_ajaran'];
@@ -1989,6 +2162,9 @@ class AdminController extends ApiController
             && $restoreFromClassSnapshot === false
             && $isCalendarCorrection === false
             && $movingForwardOneYear;
+        $rolloverPreview = $requiresRollover
+            ? $this->previewAcademicYearRollover($tenantId, $previousYear, $tahunAjaran)
+            : null;
         $targetMatchesServerCalendar = $tahunAjaran === $calendarPeriod['tahun_ajaran']
             && $semester === $calendarPeriod['semester'];
 
@@ -2034,6 +2210,9 @@ class AdminController extends ApiController
             return $this->deny('Perubahan tahun ajaran harus dijalankan melalui rollover otomatis dari Pengaturan Akademik.', 409);
         }
 
+        $actorId = (string) ($request->user()?->id ?? '');
+        $lifecycleBefore = $this->academicPeriodLifecycle->currentContext($tenantId);
+
         try {
             $result = DB::transaction(function () use (
                 $tenantId,
@@ -2050,7 +2229,10 @@ class AdminController extends ApiController
                 $isCalendarCorrection,
                 $calendarPeriod,
                 $serverNow,
-                $carryEskulMembers
+                $carryEskulMembers,
+                $actorId,
+                $lifecycleBefore,
+                $rolloverPreview
             ) {
                 $rollover = null;
                 $classesSynced = 0;
@@ -2059,6 +2241,9 @@ class AdminController extends ApiController
                 $studentProfileRestores = 0;
                 $studentProfilesOutsidePeriod = 0;
                 $eskulCatalogCopied = 0;
+                $rolloverRunId = null;
+
+                $this->academicRolloverService->lockTenant($tenantId);
 
                 if ($yearChanged) {
                     $previousClassHistorySnapshots = $this->snapshotStudentClassHistoriesForPeriod(
@@ -2072,6 +2257,12 @@ class AdminController extends ApiController
                 }
 
                 $settings = $this->saveAcademicPeriodSettings($tenantId, $existing, $settingsPayload);
+                $lifecycle = $this->academicPeriodLifecycle->activate(
+                    $tenantId,
+                    $settingsPayload,
+                    $actorId,
+                    $settings
+                );
 
                 if ($semesterOnlyChange) {
                     $catalogCopy = app(ExtracurricularPeriodService::class)->copyCatalog(
@@ -2089,13 +2280,24 @@ class AdminController extends ApiController
                     $studentProfileRestores = (int) ($restoreResult['restored'] ?? 0);
                     $studentProfilesOutsidePeriod = (int) ($restoreResult['outside_period'] ?? 0);
                 } elseif ($requiresRollover) {
-                    $rollover = $this->rolloverAcademicYearData(
+                    $execution = $this->academicRolloverService->execute(
                         $tenantId,
-                        $activePeriod,
+                        $lifecycleBefore['academic_year_id'] ?? null,
+                        $lifecycle['academic_year_id'] ?? null,
                         $previousYear,
-                        $previousSemester,
-                        $carryEskulMembers
+                        (string) $activePeriod['tahun_ajaran'],
+                        $actorId,
+                        fn () => $this->rolloverAcademicYearData(
+                            $tenantId,
+                            $activePeriod,
+                            $previousYear,
+                            $previousSemester,
+                            $carryEskulMembers
+                        )
                     );
+                    $rolloverRunId = $execution['run_id'] ?? null;
+                    $rollover = $execution['result'] ?? [];
+                    $this->assertRolloverMatchesPreview($rolloverPreview, $rollover);
                     $classesSynced = (int) ($rollover['classes_synced'] ?? 0);
                 } elseif ($yearChanged || $isCalendarCorrection) {
                     $classesSynced = $this->syncClassPeriodMetadata($tenantId, $activePeriod);
@@ -2113,6 +2315,7 @@ class AdminController extends ApiController
 
                 return [
                     'settings' => $settings ? (array) $settings : null,
+                    'lifecycle' => $lifecycle,
                     'period' => [
                         'tahun_ajaran' => $academicYearPeriod['tahun_ajaran'],
                         'semester' => $academicYearPeriod['semester'],
@@ -2139,8 +2342,20 @@ class AdminController extends ApiController
                         ? (int) ($rollover['eskul_catalog_copied'] ?? 0)
                         : $eskulCatalogCopied,
                     'rollover' => $rollover,
+                    'rollover_preview' => $rolloverPreview,
+                    'rollover_run_id' => $rolloverRunId,
                 ];
             });
+        } catch (\DomainException $e) {
+            $error = json_decode($e->getMessage(), true);
+            if (is_array($error)) {
+                return response()->json([
+                    'error' => $error['message'] ?? 'Periode akademik ditolak.',
+                    'code' => $error['code'] ?? 'academic_period_invalid',
+                ], (int) ($error['status'] ?? 409));
+            }
+
+            return $this->deny($e->getMessage(), 409);
         } catch (\RuntimeException $e) {
             return $this->deny($e->getMessage(), 422);
         }
@@ -2411,23 +2626,27 @@ class AdminController extends ApiController
             ->map(fn ($row) => (array) $row);
 
         $teacherIds = $baseTeachers->pluck('id')->filter()->values()->all();
+        $activeYear = $this->activeAcademicYearForTenant($tenantId);
         $jadwalRows = empty($teacherIds)
             ? collect()
             : $this->tenantQuery('jadwal', $tenantId)
                 ->select($this->existingColumns('jadwal', ['id', 'kelas_id', 'hari', 'mapel', 'guru_id', 'guru_nama', 'jam_mulai', 'jam_selesai', 'created_at', 'updated_at']))
                 ->whereIn('guru_id', $teacherIds)
+                ->when($activeYear !== '' && Schema::hasColumn('jadwal', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
                 ->get();
         $waliRows = empty($teacherIds)
             ? collect()
             : $this->tenantQuery('kelas_struktur', $tenantId)
                 ->select($this->existingColumns('kelas_struktur', ['kelas_id', 'wali_guru_id', 'wali_guru_nama']))
                 ->whereIn('wali_guru_id', $teacherIds)
+                ->when($activeYear !== '' && Schema::hasColumn('kelas_struktur', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
                 ->get();
         $strukturRows = empty($teacherIds)
             ? collect()
             : $this->tenantQuery('struktur_sekolah', $tenantId)
                 ->select($this->existingColumns('struktur_sekolah', ['id', 'jabatan', 'guru_id', 'guru_nama']))
                 ->whereIn('guru_id', $teacherIds)
+                ->when($activeYear !== '' && Schema::hasColumn('struktur_sekolah', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
                 ->get();
 
         $jadwalByTeacher = $jadwalRows->groupBy('guru_id');
@@ -3378,7 +3597,7 @@ class AdminController extends ApiController
     private function clearStudentActiveAssignments(string $tenantId, string $studentId, Carbon $now): array
     {
         return [
-            'kelas_struktur' => $this->updateTenantSnapshotTable(
+            'kelas_struktur' => $this->updateTenantActiveAcademicTable(
                 'kelas_struktur',
                 ['ketua_siswa_id' => $studentId],
                 [
@@ -3394,7 +3613,7 @@ class AdminController extends ApiController
     private function clearTeacherActiveAssignments(string $tenantId, string $teacherId, Carbon $now): array
     {
         return [
-            'jadwal' => $this->updateTenantSnapshotTable(
+            'jadwal' => $this->updateTenantActiveAcademicTable(
                 'jadwal',
                 ['guru_id' => $teacherId],
                 [
@@ -3404,7 +3623,7 @@ class AdminController extends ApiController
                 ],
                 $tenantId
             ),
-            'kelas_struktur' => $this->updateTenantSnapshotTable(
+            'kelas_struktur' => $this->updateTenantActiveAcademicTable(
                 'kelas_struktur',
                 ['wali_guru_id' => $teacherId],
                 [
@@ -3414,7 +3633,7 @@ class AdminController extends ApiController
                 ],
                 $tenantId
             ),
-            'struktur_sekolah' => $this->updateTenantSnapshotTable(
+            'struktur_sekolah' => $this->updateTenantActiveAcademicTable(
                 'struktur_sekolah',
                 ['guru_id' => $teacherId],
                 [
@@ -3424,7 +3643,7 @@ class AdminController extends ApiController
                 ],
                 $tenantId
             ),
-            'organisasi' => $this->updateTenantSnapshotTable(
+            'organisasi' => $this->updateTenantActiveAcademicTable(
                 'organisasi',
                 ['pembina_guru_id' => $teacherId],
                 [
@@ -3434,7 +3653,7 @@ class AdminController extends ApiController
                 ],
                 $tenantId
             ),
-            'ekskul' => $this->updateTenantSnapshotTable(
+            'ekskul' => $this->updateTenantActiveAcademicTable(
                 'ekskul',
                 ['pembina_guru_id' => $teacherId],
                 [
@@ -3444,6 +3663,53 @@ class AdminController extends ApiController
                 $tenantId
             ),
         ];
+    }
+
+    private function updateTenantActiveAcademicTable(
+        string $table,
+        array $matches,
+        array $values,
+        string $tenantId
+    ): int {
+        try {
+            if (! Schema::hasTable($table)) {
+                return 0;
+            }
+
+            $query = DB::table($table);
+            if (Schema::hasColumn($table, 'tenant_id')) {
+                $query->where('tenant_id', $tenantId);
+            }
+
+            $period = $this->academicPeriodLifecycle->currentContext($tenantId);
+            $yearColumn = AcademicScopeRegistry::academicYearColumn($table);
+            if (
+                AcademicScopeRegistry::isYearScoped($table)
+                && Schema::hasColumn($table, $yearColumn)
+            ) {
+                $query->where($yearColumn, $period['tahun_ajaran'] ?? '');
+            } elseif (AcademicScopeRegistry::isTermScoped($table)) {
+                if (Schema::hasColumn($table, $yearColumn)) {
+                    $query->where($yearColumn, $period['tahun_ajaran'] ?? '');
+                }
+                if (Schema::hasColumn($table, 'semester')) {
+                    $query->where('semester', $period['semester'] ?? '');
+                }
+            }
+
+            foreach ($matches as $column => $value) {
+                if (! Schema::hasColumn($table, $column)) {
+                    return 0;
+                }
+                $query->where($column, $value);
+            }
+
+            $payload = $this->filterExistingPayload($table, $values);
+
+            return $payload === [] ? 0 : $query->update($payload);
+        } catch (\Throwable) {
+            return 0;
+        }
     }
 
     private function cleanupBeforeHardDelete(string $userId, string $role): void
@@ -3806,6 +4072,94 @@ class AdminController extends ApiController
         return $select->first();
     }
 
+    private function previewAcademicYearRollover(
+        string $tenantId,
+        string $sourceYear,
+        string $targetYear
+    ): array {
+        if (! Schema::hasTable('kelas') || ! Schema::hasTable('profiles')) {
+            return [
+                'promoted_students' => 0,
+                'alumni_students' => 0,
+                'retained_students' => 0,
+                'skipped_students' => 0,
+            ];
+        }
+
+        $classInfoById = [];
+        $classRows = $this->tenantQuery('kelas', $tenantId)
+            ->select($this->existingColumns('kelas', [
+                'id', 'nama', 'grade', 'suffix', 'angkatan', 'tahun_ajaran', 'semester', 'is_active',
+            ]))
+            ->get();
+        foreach ($classRows as $row) {
+            if (! $this->isActiveClassRow($row)) {
+                continue;
+            }
+            $grade = $this->classGradeFromRow($row);
+            $suffix = $this->classSuffixFromRow($row, $grade);
+            $id = trim((string) ($row->id ?? ''));
+            if ($id !== '' && $grade !== '' && $suffix !== '') {
+                $classInfoById[$id] = ['grade' => $grade, 'suffix' => $suffix];
+            }
+        }
+
+        $retainedIds = $this->rolloverExceptionStudentIds($tenantId, $sourceYear, $targetYear);
+        $preview = [
+            'promoted_students' => 0,
+            'alumni_students' => 0,
+            'retained_students' => 0,
+            'skipped_students' => 0,
+        ];
+        DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('role', 'siswa')
+            ->whereRaw('lower(coalesce(status, \'active\')) = ?', ['active'])
+            ->select($this->existingColumns('profiles', ['id', 'kelas']))
+            ->orderBy('id')
+            ->get()
+            ->each(function ($student) use (&$preview, $classInfoById, $retainedIds) {
+                $studentId = trim((string) ($student->id ?? ''));
+                $classId = trim((string) ($student->kelas ?? ''));
+                if ($studentId === '' || $classId === '' || ! isset($classInfoById[$classId])) {
+                    $preview['skipped_students']++;
+
+                    return;
+                }
+                if (isset($retainedIds[$studentId])) {
+                    $preview['retained_students']++;
+
+                    return;
+                }
+
+                $nextGrade = $this->nextAcademicGrade($classInfoById[$classId]['grade']);
+                if ($nextGrade === null) {
+                    $preview['skipped_students']++;
+                } elseif ($nextGrade === 'ALUMNI') {
+                    $preview['alumni_students']++;
+                } else {
+                    $preview['promoted_students']++;
+                }
+            });
+
+        return $preview;
+    }
+
+    private function assertRolloverMatchesPreview(?array $preview, array $result): void
+    {
+        if ($preview === null) {
+            return;
+        }
+
+        foreach (['promoted_students', 'alumni_students', 'retained_students', 'skipped_students'] as $key) {
+            if ((int) ($preview[$key] ?? 0) !== (int) ($result[$key] ?? 0)) {
+                throw new \RuntimeException(
+                    'Rollover dibatalkan karena hasil eksekusi berubah dari pratinjau. Muat ulang halaman lalu konfirmasi kembali.'
+                );
+            }
+        }
+    }
+
     private function rolloverAcademicYearData(
         string $tenantId,
         array $period,
@@ -4013,6 +4367,9 @@ class AdminController extends ApiController
                 $query = DB::table('kelas_struktur')->whereIn('kelas_id', $affectedIds);
                 if (Schema::hasColumn('kelas_struktur', 'tenant_id')) {
                     $query->where('tenant_id', $tenantId);
+                }
+                if (Schema::hasColumn('kelas_struktur', 'tahun_ajaran')) {
+                    $query->where('tahun_ajaran', $period['tahun_ajaran']);
                 }
                 $query->update($structurePayload);
             }
@@ -5245,6 +5602,11 @@ class AdminController extends ApiController
             ->where('tahun_ajaran', $year)
             ->whereNotNull('student_id');
 
+        $semester = AcademicPeriod::normalizeSemester($period['semester'] ?? null);
+        if ($semester && Schema::hasColumn('student_class_histories', 'semester')) {
+            $query->where('semester', $semester);
+        }
+
         if (Schema::hasColumn('student_class_histories', 'source')) {
             $query->whereIn('source', $this->authoritativeClassSnapshotSources());
         }
@@ -5396,6 +5758,9 @@ class AdminController extends ApiController
         ]);
         $query = $this->tenantQuery('student_class_histories', $tenantId)
             ->where('tahun_ajaran', $year);
+        if ($semester && Schema::hasColumn('student_class_histories', 'semester')) {
+            $query->where('semester', $semester);
+        }
         if (Schema::hasColumn('student_class_histories', 'source')) {
             $query->whereIn(
                 'source',
@@ -5417,18 +5782,14 @@ class AdminController extends ApiController
                 continue;
             }
 
-            $rowSemester = AcademicPeriod::normalizeSemester($row->semester ?? null);
-            $score = $semester && $rowSemester === $semester ? 2 : ($rowSemester ? 1 : 0);
             $timestamp = (string) ($row->valid_from ?? $row->created_at ?? '');
             $previous = $snapshots[$studentId] ?? null;
             if (
                 $previous === null
-                || $score > $previous['score']
-                || ($score === $previous['score'] && strcmp($timestamp, $previous['timestamp']) > 0)
+                || strcmp($timestamp, $previous['timestamp']) > 0
             ) {
                 $snapshots[$studentId] = [
                     'row' => $row,
-                    'score' => $score,
                     'timestamp' => $timestamp,
                 ];
             }
@@ -5803,6 +6164,14 @@ class AdminController extends ApiController
         return $query;
     }
 
+    private function activeAcademicYearForTenant(string $tenantId): string
+    {
+        $settings = $this->firstTenantRow('settings', $tenantId);
+
+        return AcademicPeriod::normalizeAcademicYear($settings?->tahun_ajaran ?? null)
+            ?: AcademicPeriod::current()['tahun_ajaran'];
+    }
+
     private function canAccessScanFeature(Request $request, array $featureKeys = self::SCAN_FEATURE_KEYS): bool
     {
         return $this->isAdmin($request)
@@ -5920,8 +6289,11 @@ class AdminController extends ApiController
             return [];
         }
 
+        $activeYear = $this->activeAcademicYearForTenant($tenantId);
+
         return $this->tenantQuery('kelas_struktur', $tenantId)
             ->where('wali_guru_id', $teacherId)
+            ->when($activeYear !== '' && Schema::hasColumn('kelas_struktur', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
             ->pluck('kelas_id')
             ->filter()
             ->map(fn ($value) => (string) $value)
@@ -6081,8 +6453,10 @@ class AdminController extends ApiController
 
         $total = (int) $statusCounts->sum();
         $active = (int) ($statusCounts['active'] ?? 0);
+        $activeYear = $this->activeAcademicYearForTenant($tenantId);
         $struktur = $this->tenantQuery('kelas_struktur', $tenantId)
             ->when($classIds !== null, fn ($builder) => $builder->whereIn('kelas_id', $classIds))
+            ->when($activeYear !== '' && Schema::hasColumn('kelas_struktur', 'tahun_ajaran'), fn ($builder) => $builder->where('tahun_ajaran', $activeYear))
             ->whereNotNull('ketua_siswa_id')
             ->where('ketua_siswa_id', '<>', '');
 

@@ -82,7 +82,9 @@ export default function SAbsensi() {
   const periodClass = useStudentPeriodClass({
     userId,
     profile,
-    tahunAjaran: periodFilter.tahunAjaran
+    tahunAjaran: periodFilter.tahunAjaran,
+    semester: periodFilter.semester,
+    activeTahunAjaran: activeAcademicPeriod.tahunAjaran
   })
 
   const attendanceProfile = useMemo(() => (

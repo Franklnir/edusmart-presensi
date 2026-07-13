@@ -699,11 +699,16 @@ class MobileController extends ApiController
             }
         }
 
-        return Schema::hasTable('kelas_struktur')
-            && $this->tenantQuery('kelas_struktur', $tenantId)
-                ->where('wali_guru_id', $teacherId)
-                ->where('kelas_id', $classId)
-                ->exists();
+        if (! Schema::hasTable('kelas_struktur')) {
+            return false;
+        }
+
+        $homeroomQuery = $this->tenantQuery('kelas_struktur', $tenantId)
+            ->where('wali_guru_id', $teacherId)
+            ->where('kelas_id', $classId);
+        $this->applyActiveAcademicYearScope($homeroomQuery, 'kelas_struktur', $tenantId);
+
+        return $homeroomQuery->exists();
     }
 
     private function activeTaskCount(string $tenantId, string $kelas): int

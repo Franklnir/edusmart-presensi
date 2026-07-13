@@ -516,6 +516,19 @@ class DbSecurityTest extends TestCase
         [$siswaWali] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
         [$siswaMapel] = $this->createUserWithProfile($tenantId, 'siswa', 'X-2');
         $period = AcademicPeriod::current();
+        $otherSemester = $period['semester'] === AcademicPeriod::SEMESTER_GANJIL
+            ? AcademicPeriod::SEMESTER_GENAP
+            : AcademicPeriod::SEMESTER_GANJIL;
+
+        DB::table('settings')->where('tenant_id', $tenantId)->delete();
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Test',
+            'tahun_ajaran' => $period['tahun_ajaran'],
+            'semester_aktif' => $otherSemester,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
         DB::table('kelas')->updateOrInsert(
             ['id' => 'X-1'],
@@ -542,8 +555,11 @@ class DbSecurityTest extends TestCase
         DB::table('kelas_struktur')->updateOrInsert(
             ['kelas_id' => 'X-1'],
             [
+                'id' => (string) Str::uuid(),
                 'wali_guru_id' => $guru->id,
                 'wali_guru_nama' => 'Guru Wali',
+                'tahun_ajaran' => $period['tahun_ajaran'],
+                'semester' => $period['semester'],
                 'created_at' => now(),
                 'updated_at' => now(),
                 'tenant_id' => $tenantId,
@@ -559,7 +575,7 @@ class DbSecurityTest extends TestCase
                 'jam_mulai' => '07:00:00',
                 'jam_selesai' => '08:00:00',
                 'tahun_ajaran' => $period['tahun_ajaran'],
-                'semester' => $period['semester'],
+                'semester' => $otherSemester,
                 'created_at' => now(),
                 'updated_at' => now(),
                 'tenant_id' => $tenantId,
@@ -607,6 +623,118 @@ class DbSecurityTest extends TestCase
         $this->assertArrayNotHasKey('no_hp_wali', $mapelRow);
         $this->assertArrayNotHasKey('alamat', $mapelRow);
         $this->assertArrayNotHasKey('tanggal_lahir', $mapelRow);
+    }
+
+    public function test_previous_period_homeroom_does_not_grant_current_sensitive_student_access(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
+        [$siswa] = $this->createUserWithProfile($tenantId, 'siswa', 'X-1');
+
+        DB::table('settings')->where('tenant_id', $tenantId)->delete();
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Test',
+            'tahun_ajaran' => '2026/2027',
+            'semester_aktif' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('kelas')->updateOrInsert(
+            ['id' => 'X-1'],
+            [
+                'nama' => 'X-1',
+                'grade' => 'X',
+                'suffix' => '1',
+                'created_at' => now(),
+                'updated_at' => now(),
+                'tenant_id' => $tenantId,
+            ]
+        );
+        DB::table('kelas_struktur')->insert([
+            'id' => (string) Str::uuid(),
+            'kelas_id' => 'X-1',
+            'wali_guru_id' => $guru->id,
+            'wali_guru_nama' => 'Guru Wali Tahun Lalu',
+            'tahun_ajaran' => '2025/2026',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+            'tenant_id' => $tenantId,
+        ]);
+
+        DB::table('profiles')->where('id', $siswa->id)->update([
+            'no_hp_siswa' => '081111111111',
+            'no_hp_wali' => '082222222222',
+            'alamat' => 'Alamat Lama',
+            'tanggal_lahir' => '2009-05-06',
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($guru)->postJson('/api/db', [
+            'table' => 'profiles',
+            'action' => 'select',
+            'columns' => '*',
+        ]);
+
+        $response->assertOk();
+        $rows = collect($response->json('data') ?? []);
+        $this->assertNull($rows->firstWhere('id', $siswa->id));
+    }
+
+    public function test_admin_can_clear_new_period_homeroom_without_existing_structure_row(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$admin] = $this->createUserWithProfile($tenantId, 'admin', 'X-1');
+
+        DB::table('settings')->where('tenant_id', $tenantId)->delete();
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Test',
+            'tahun_ajaran' => '2026/2027',
+            'semester_aktif' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('kelas')->insert([
+            'id' => 'X-empty',
+            'tenant_id' => $tenantId,
+            'nama' => 'X Empty',
+            'grade' => 'X',
+            'suffix' => 'Empty',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($admin)->postJson('/api/db', [
+            'table' => 'kelas_struktur',
+            'action' => 'upsert',
+            'onConflict' => 'tenant_id,kelas_id,tahun_ajaran',
+            'payload' => [
+                'kelas_id' => 'X-empty',
+                'wali_guru_id' => null,
+                'wali_guru_nama' => '',
+                'tahun_ajaran' => '2026/2027',
+                'semester' => AcademicPeriod::SEMESTER_GANJIL,
+                'updated_at' => now()->toISOString(),
+            ],
+        ]);
+
+        $response->assertOk();
+        $row = DB::table('kelas_struktur')
+            ->where('tenant_id', $tenantId)
+            ->where('kelas_id', 'X-empty')
+            ->where('tahun_ajaran', '2026/2027')
+            ->first();
+
+        $this->assertNotNull($row);
+        $this->assertNotEmpty($row->id ?? null);
+        $this->assertNull($row->wali_guru_id);
+        $this->assertSame('', (string) ($row->wali_guru_nama ?? ''));
     }
 
     public function test_siswa_cannot_insert_tugas_jawaban_before_mulai(): void
@@ -1259,8 +1387,8 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $archiveAttempt->assertStatus(422);
-        $archiveAttempt->assertJsonPath('error', 'Anggota ekstrakurikuler hanya dapat ditambahkan pada periode aktif');
+        $archiveAttempt->assertStatus(409);
+        $archiveAttempt->assertJsonPath('code', 'academic_period_locked');
     }
 
     private function defaultTenantId(): string

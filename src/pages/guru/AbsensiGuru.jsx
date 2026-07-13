@@ -6,6 +6,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
+import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { sortStudentsByAttendanceOrder } from '../../utils/studentOrdering'
 import {
   filterSchedulesForSemester,
@@ -14,8 +15,7 @@ import {
 } from '../../utils/schedulePeriodScope'
 import {
   SEMESTER_GANJIL,
-  SEMESTER_GENAP,
-  resolveAcademicPeriod
+  SEMESTER_GENAP
 } from '../../utils/academicPeriod'
 import {
   ABSENSI_SETTINGS_COLUMNS,
@@ -37,8 +37,6 @@ import {
   isSameClockMinute,
   getMsUntilNextMinute,
   formatDateDisplay,
-  getAcademicYearOptions,
-  normalizePeriodFilter,
   dateToMonthState,
   monthLabel,
   shiftMonth,
@@ -48,11 +46,6 @@ import {
   initials,
 } from './absensi/absensiGuruUtils'
 
-
-const SEMESTER_OPTIONS = [
-  { value: SEMESTER_GANJIL, label: 'Semester 1 (Ganjil)' },
-  { value: SEMESTER_GENAP, label: 'Semester 2 (Genap)' }
-]
 
 const PERIOD_FILTER_STORAGE_KEY = 'edusmart.guru.absensi.periodFilter'
 
@@ -114,35 +107,6 @@ const getSemesterForAttendanceDate = (dateKey, activePeriod = {}, fallbackSemest
   }
 
   return fallbackSemester || activePeriod?.semester || SEMESTER_GENAP
-}
-
-const readStoredPeriodFilter = (fallback) => {
-  if (typeof window === 'undefined') return fallback
-
-  try {
-    const raw = window.localStorage.getItem(PERIOD_FILTER_STORAGE_KEY)
-    return raw ? normalizePeriodFilter(JSON.parse(raw)) : fallback
-  } catch (error) {
-    return fallback
-  }
-}
-
-const writeStoredPeriodFilter = (periodFilter, activeAcademicPeriod) => {
-  if (typeof window === 'undefined') return
-
-  try {
-    const followsActive =
-      periodFilter?.tahunAjaran === activeAcademicPeriod?.tahunAjaran &&
-      periodFilter?.semester === activeAcademicPeriod?.semester
-
-    if (followsActive) {
-      window.localStorage.removeItem(PERIOD_FILTER_STORAGE_KEY)
-    } else {
-      window.localStorage.setItem(PERIOD_FILTER_STORAGE_KEY, JSON.stringify(periodFilter))
-    }
-  } catch (error) {
-    // Ignore storage errors so the filter still works in memory.
-  }
 }
 
 /* ===== Error Boundary Component ===== */
@@ -815,34 +779,16 @@ function AbsensiGuru() {
     }
   })
 
-  const initialAcademicPeriod = useMemo(() => resolveAcademicPeriod(), [])
-  const initialPeriodFilter = {
-    tahunAjaran: initialAcademicPeriod.tahunAjaran,
-    semester: initialAcademicPeriod.semester
-  }
-  const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(initialAcademicPeriod)
-  const activeAcademicPeriodRef = useRef(initialAcademicPeriod)
-  const [periodFilter, setPeriodFilter] = useState(() => readStoredPeriodFilter(initialPeriodFilter))
-  const academicYearOptions = useMemo(() => getAcademicYearOptions(activeAcademicPeriod), [activeAcademicPeriod])
-  const isViewingArchivePeriod =
-    periodFilter.tahunAjaran !== activeAcademicPeriod.tahunAjaran ||
-    periodFilter.semester !== activeAcademicPeriod.semester
-  const setAcademicYear = (tahunAjaran) => {
-    setPeriodFilter((prev) => normalizePeriodFilter({ ...prev, tahunAjaran }))
-  }
-  const setSemester = (semester) => {
-    setPeriodFilter((prev) => normalizePeriodFilter({ ...prev, semester }))
-  }
-  const resetToActivePeriod = () => {
-    setPeriodFilter({
-      tahunAjaran: activeAcademicPeriod.tahunAjaran,
-      semester: activeAcademicPeriod.semester
-    })
-  }
-
-  useEffect(() => {
-    activeAcademicPeriodRef.current = activeAcademicPeriod
-  }, [activeAcademicPeriod])
+  const {
+    activeAcademicPeriod,
+    periodFilter,
+    academicYearOptions,
+    semesterOptions,
+    setAcademicYear,
+    setSemester,
+    resetToActivePeriod,
+    isViewingArchivePeriod
+  } = useActiveAcademicPeriod({ storageKey: PERIOD_FILTER_STORAGE_KEY })
 
   // Data states
   const [jadwalAll, setJadwalAll] = useState([])
@@ -1218,70 +1164,6 @@ function AbsensiGuru() {
 
     checkModeSwitch()
   }, [currentDateTime, currentSchedule, tgl, view, absenMode])
-
-  useEffect(() => {
-    let cancelled = false
-
-    const applyResolvedPeriod = (resolved) => {
-      setActiveAcademicPeriod(resolved)
-      setPeriodFilter((prev) => {
-        const normalized = normalizePeriodFilter(prev)
-        const previousActive = activeAcademicPeriodRef.current
-        const followsInitial =
-          normalized.tahunAjaran === initialAcademicPeriod.tahunAjaran &&
-          normalized.semester === initialAcademicPeriod.semester
-        const followsPreviousActive =
-          normalized.tahunAjaran === previousActive.tahunAjaran &&
-          normalized.semester === previousActive.semester
-        if (!followsInitial && !followsPreviousActive) return normalized
-
-        return {
-          tahunAjaran: resolved.tahunAjaran,
-          semester: resolved.semester
-        }
-      })
-    }
-
-    const loadAcademicPeriod = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('settings')
-          .select('tahun_ajaran,semester_aktif,periode_mulai,periode_selesai,periode_ganjil_mulai,periode_ganjil_selesai,periode_genap_mulai,periode_genap_selesai')
-          .limit(1)
-          .maybeSingle()
-
-        if (error && error.code !== 'PGRST116') {
-          console.warn('Gagal memuat periode akademik aktif:', error)
-          return
-        }
-
-        if (cancelled) return
-        const resolved = resolveAcademicPeriod(data || {})
-        applyResolvedPeriod(resolved)
-      } catch (error) {
-        if (!cancelled) console.warn('Gagal memuat periode akademik aktif:', error)
-      }
-    }
-
-    loadAcademicPeriod()
-    const channel = supabase
-      .channel('guru_absensi_academic_period_settings')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, (payload) => {
-        if (cancelled) return
-        const resolved = resolveAcademicPeriod(payload.new || {})
-        applyResolvedPeriod(resolved)
-      })
-      .subscribe()
-
-    return () => {
-      cancelled = true
-      supabase.removeChannel(channel)
-    }
-  }, [initialAcademicPeriod])
-
-  useEffect(() => {
-    writeStoredPeriodFilter(periodFilter, activeAcademicPeriod)
-  }, [activeAcademicPeriod, periodFilter])
 
   /* ===== Load Data Jadwal & Guru ===== */
   useEffect(() => {
@@ -2864,7 +2746,7 @@ function AbsensiGuru() {
                 activeAcademicPeriod={activeAcademicPeriod}
                 periodFilter={periodFilter}
                 academicYearOptions={academicYearOptions}
-                semesterOptions={SEMESTER_OPTIONS}
+                semesterOptions={semesterOptions}
                 setAcademicYear={setAcademicYear}
                 setSemester={setSemester}
                 resetToActivePeriod={resetToActivePeriod}

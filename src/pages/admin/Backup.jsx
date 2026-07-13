@@ -3,6 +3,7 @@ import { AlertTriangle, Building2, CalendarClock, Cloud, Database, ExternalLink,
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import { useAcademicContext } from '../../context/AcademicContext'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import { buildRestoreStatusToast } from '../../utils/restoreStatus'
 import {
@@ -14,8 +15,7 @@ import {
 import {
   SEMESTER_GANJIL,
   SEMESTER_GENAP,
-  generateAcademicYearOptions,
-  resolveAcademicPeriod
+  generateAcademicYearOptions
 } from '../../utils/academicPeriod'
 
 const MODE_OPTIONS = [
@@ -499,7 +499,7 @@ const createHtmlContent = (payload) => {
 export default function BackupAdmin() {
   const { isSuperAdmin, superAdminChecked } = useAuthStore()
   const { pushToast } = useUIStore()
-  const activePeriod = useMemo(() => resolveAcademicPeriod(), [])
+  const { activeAcademicPeriod: activePeriod } = useAcademicContext()
   const academicYearOptions = useMemo(() => generateAcademicYearOptions({ back: 6 }), [])
 
   const [superTenants, setSuperTenants] = useState([])

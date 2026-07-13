@@ -1,4 +1,5 @@
 // src/lib/supabase.js
+import { readAcademicCorrectionSession } from '../utils/academicCorrectionSession'
 /* ===================== API BASE ===================== */
 const getRuntimeHostname = () => {
   if (typeof window === 'undefined') return 'localhost'
@@ -1019,6 +1020,26 @@ const runApiFetch = async (path, options = {}) => {
     : ''
   if (delegatedFeatureKey) {
     headers['X-Admin-Feature'] = delegatedFeatureKey
+  }
+
+  const correctionSession = readAcademicCorrectionSession()
+  const academicYearFromRequest = body?.filters?.eq?.tahun_ajaran
+    || body?.payload?.tahun_ajaran
+    || (Array.isArray(body?.payload) ? body.payload[0]?.tahun_ajaran : '')
+  const semesterFromRequest = body?.filters?.eq?.semester
+    || body?.payload?.semester
+    || (Array.isArray(body?.payload) ? body.payload[0]?.semester : '')
+  const correctionContextMatches =
+    String(academicYearFromRequest || '') === String(correctionSession?.tahun_ajaran || '') &&
+    (!semesterFromRequest || String(semesterFromRequest) === String(correctionSession?.semester || ''))
+  if (
+    correctionSession?.id &&
+    correctionContextMatches &&
+    path === '/api/db' &&
+    method !== 'GET' &&
+    method !== 'HEAD'
+  ) {
+    headers['X-Academic-Correction-Session'] = correctionSession.id
   }
 
   const xsrf = getCookie('XSRF-TOKEN')
@@ -2960,6 +2981,16 @@ const auth = {
 }
 
 const reports = {
+  async homeroomOptions() {
+    const res = await apiFetch('/api/reports/homeroom-options', {
+      method: 'GET',
+      cacheTtlMs: 60 * 1000,
+      persistCache: true,
+      staleCacheTtlMs: 10 * 60 * 1000,
+      staleKey: 'reports.homeroom-options'
+    })
+    return { data: res.raw?.data ?? res.data, error: res.error }
+  },
   async teacherSummary(params = {}) {
     const res = await apiFetch(`/api/reports/teacher-summary${buildQueryString(params)}`, {
       method: 'GET',
@@ -3689,6 +3720,34 @@ export const supabase = {
     }
   },
   assignments: {
+    async createTask(payload = {}) {
+      const res = await apiFetch('/api/tugas', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async updateTask(taskId, payload = {}) {
+      const id = encodeURIComponent(String(taskId || ''))
+      const res = await apiFetch(`/api/tugas/${id}`, {
+        method: 'PATCH',
+        body: payload,
+        cacheTtlMs: 0
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async deleteTask(taskId) {
+      const id = encodeURIComponent(String(taskId || ''))
+      const res = await apiFetch(`/api/tugas/${id}`, {
+        method: 'DELETE',
+        cacheTtlMs: 0
+      })
+      if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
     async submitAnswer(payload = {}) {
       const res = await apiFetch('/api/tugas/jawaban/submit', {
         method: 'POST',

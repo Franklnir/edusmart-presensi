@@ -11,12 +11,15 @@ export default function OrganisasiPage() {
   const { pushToast } = useUIStore()
   const {
     activeAcademicPeriod,
-    activeSemesterPeriod: academicPeriod,
+    period: academicPeriod,
     periodFilter,
     academicYearOptions,
     setAcademicYear,
     isViewingArchivePeriod
-  } = useActiveAcademicPeriod({ storageKey: 'edusmart.admin.organisasi.periodFilter' })
+  } = useActiveAcademicPeriod({
+    storageKey: 'edusmart.admin.organisasi.periodFilter',
+    scope: 'year'
+  })
   const {
     data: guruList = [],
     error: guruError,
