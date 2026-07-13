@@ -43,4 +43,15 @@ class TrustedEdgeProxyTest extends TestCase
 
         $this->getJson('/api/health')->assertNotFound();
     }
+
+    public function test_internal_tls_authorization_uses_its_dedicated_secret(): void
+    {
+        config()->set('tenancy.require_edge_proxy', true);
+        config()->set('tenancy.edge_proxy_secret', 'test-edge-secret');
+        config()->set('services.caddy.ask_secret', 'test-ask-secret');
+
+        $this->getJson('/api/internal/tls/authorize?secret=wrong&domain=school.example.test')
+            ->assertForbidden()
+            ->assertJsonPath('error', 'Permintaan TLS tidak valid.');
+    }
 }
