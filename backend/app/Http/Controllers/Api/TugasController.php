@@ -14,6 +14,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 class TugasController extends ApiController
 {
@@ -563,8 +564,8 @@ class TugasController extends ApiController
                 'message' => $result['message'],
                 'error' => $result['message'],
                 'code' => $result['code'] ?? 'assignment_submission_rejected',
-                'errors' => (object)[],
-                'request_id' => request()->header('X-Request-ID') ?? (string) \Illuminate\Support\Str::uuid(),
+                'errors' => (object) [],
+                'request_id' => request()->header('X-Request-ID') ?? (string) Str::uuid(),
             ], (int) ($result['status'] ?? 422));
         }
 

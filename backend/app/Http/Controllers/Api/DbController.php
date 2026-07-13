@@ -131,11 +131,11 @@ class DbController extends ApiController
         $table = $request->input('table');
         $action = $request->input('action', 'select');
 
-        if (!is_string($table) || trim($table) === '') {
+        if (! is_string($table) || trim($table) === '') {
             return $this->deny('Parameter table wajib diisi dan harus berupa string.', 400, 'DB_INVALID_TABLE');
         }
 
-        if (!is_string($action) || trim($action) === '') {
+        if (! is_string($action) || trim($action) === '') {
             return $this->deny('Parameter action wajib diisi dan harus berupa string.', 400, 'DB_INVALID_ACTION');
         }
 

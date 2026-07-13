@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 class ApiController extends Controller
 {
@@ -148,7 +149,7 @@ class ApiController extends Controller
 
     protected function deny(string $message = 'Akses ditolak', int $status = 403, ?string $errorCode = null)
     {
-        $defaultCode = match($status) {
+        $defaultCode = match ($status) {
             400 => 'BAD_REQUEST',
             401 => 'UNAUTHENTICATED',
             403 => 'FORBIDDEN',
@@ -164,8 +165,8 @@ class ApiController extends Controller
             'code' => $errorCode ?? $defaultCode,
             'message' => $message,
             'message' => $message, // Backward compatibility for legacy consumers
-            'errors' => (object)[],
-            'request_id' => request()->header('X-Request-ID') ?? (string) \Illuminate\Support\Str::uuid(),
+            'errors' => (object) [],
+            'request_id' => request()->header('X-Request-ID') ?? (string) Str::uuid(),
         ], $status);
     }
 
