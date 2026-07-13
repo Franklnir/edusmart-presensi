@@ -233,7 +233,7 @@ class BackupSpreadsheetService
 
     private function uniqueSheetName(string $candidate, array &$usedNames): string
     {
-        $candidate = preg_replace('/[\\\/?*:\[\]]+/', '-', trim($candidate)) ?: 'Tabel';
+        $candidate = preg_replace('~[\\\\/?*:\[\]]+~', '-', trim($candidate)) ?: 'Tabel';
         $candidate = mb_substr($candidate, 0, 31);
         $base = $candidate;
         $suffix = 1;
