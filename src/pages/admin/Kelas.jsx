@@ -4,6 +4,7 @@ import { startTransition } from 'react'
 import { supabase, apiFetch } from '../../lib/supabase'
 import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useUIStore } from '../../store/useUIStore'
+import { ClassesApi } from '../../lib/api/v2/classes'
 import PasswordInput from '../../components/PasswordInput'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import { CalendarClock, Copy, Loader2, PlusCircle, Trash2 } from 'lucide-react'
@@ -1693,23 +1694,18 @@ export default function AKelas({ initialTab = 'kelas' }) {
         return
       }
 
-      const { data, error } = await supabase
-        .from('kelas')
-        .insert({
-          id,
-          nama,
-          grade,
-          suffix,
-          angkatan,
-          tahun_ajaran: academicPeriod.tahunAjaran,
-          semester: academicPeriod.semester,
-          is_active: true,
-          created_at: new Date().toISOString()
-        })
+      const response = await ClassesApi.create({
+        id,
+        nama,
+        grade,
+        suffix,
+        angkatan,
+        tahun_ajaran: academicPeriod.tahunAjaran,
+        semester: academicPeriod.semester,
+        is_active: true
+      })
 
-      if (error) throw error
-
-      const insertedRow = Array.isArray(data) ? data[0] : data
+      const insertedRow = response.data || response;
       const savedId = insertedRow?.id || id
 
       pushToast('success', `Kelas ${nama} berhasil ditambahkan`)
@@ -1760,8 +1756,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
     try {
       setLoading(true)
 
-      const res = await apiFetch(`/api/admin/classes/${encodeURIComponent(id)}`, { method: 'DELETE' })
-      if (res.error) throw res.error
+      await ClassesApi.delete(id)
 
       pushToast('success', 'Kelas berhasil dihapus dan tersimpan di riwayat pemulihan')
       if (kelasSelected === id) setKelasSelected('')

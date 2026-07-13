@@ -1458,3 +1458,20 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 - Tambahkan contoh response aktual dari test fixture, bukan dari data production.
 - Tambahkan changelog API per release agar mobile app dan frontend bisa melacak
   breaking change.
+
+### API V2 Pilot (Manajemen Kelas & Frontend Log)
+
+
+
+### API V2 Pilot (Manajemen Kelas & Frontend Log)
+
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| `GET` | `/api/v2/classes` | Mendapatkan daftar kelas |
+| `GET` | `/api/v2/classes/{class}` | Mendapatkan detail kelas |
+| `POST` | `/api/v2/classes` | Membuat kelas baru |
+| `PUT` | `/api/v2/classes/{class}` | Mengupdate kelas (full) |
+| `PATCH` | `/api/v2/classes/{class}` | Mengupdate kelas (partial) |
+| `DELETE` | `/api/v2/classes/{class}` | Menghapus kelas |
+| `POST` | `/api/v2/frontend-logs` | Sink frontend errors |
+

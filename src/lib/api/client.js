@@ -7,6 +7,30 @@ import { useAuthStore } from '../../store/useAuthStore'
 
 export const DEFAULT_TIMEOUT_MS = 15000
 
+export const logFrontendError = (level, message, context = {}) => {
+  try {
+    const API_URL = import.meta.env.VITE_API_URL || ''
+    const url = new URL('/api/v2/frontend-logs', API_URL).toString()
+    
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      credentials: 'omit', 
+      body: JSON.stringify({
+        level,
+        message,
+        context,
+        url: window.location.href
+      })
+    }).catch(() => {}) // fire and forget
+  } catch (e) {
+    // silently fail
+  }
+}
+
 // In-flight request deduplication map
 const pendingRequests = new Map()
 
@@ -128,6 +152,14 @@ export const apiClient = async (path, options = {}) => {
     } catch (error) {
       clearTimeout(timeoutId)
       console.error(`[API Error] ${method} ${url} - ${error.status} - ID: ${requestId}`)
+      if (error.status >= 500 || error.status === 0 || error.code === 'REQUEST_ABORTED') {
+          logFrontendError('error', `API Call Failed: ${method} ${path}`, {
+            status: error.status,
+            code: error.code,
+            requestId,
+            errorMessage: error.message
+          });
+      }
       throw error
     } finally {
       if (cacheKey) {
