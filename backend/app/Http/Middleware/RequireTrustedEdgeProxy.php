@@ -10,6 +10,12 @@ class RequireTrustedEdgeProxy
 {
     public function handle(Request $request, Closure $next): Response
     {
+        // Caddy calls this over the private Docker network before serving an
+        // on-demand certificate. The endpoint has its own CADDY_ASK_SECRET.
+        if ($request->is('api/internal/tls/authorize')) {
+            return $next($request);
+        }
+
         if (! (bool) config('tenancy.require_edge_proxy', false)) {
             return $next($request);
         }
