@@ -12,10 +12,10 @@ class BackupIntegrityServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
+        config(['app.key' => 'base64:'.base64_encode(str_repeat('k', 32))]);
         config(['backup.signing_key' => '']);
         config(['backup.signing_key_id' => 'test']);
-        $this->service = new BackupIntegrityService();
+        $this->service = new BackupIntegrityService;
     }
 
     private function samplePayload(): array
