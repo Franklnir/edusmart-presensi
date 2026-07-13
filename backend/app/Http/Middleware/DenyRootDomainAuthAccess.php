@@ -17,7 +17,7 @@ class DenyRootDomainAuthAccess
     {
         if ($this->isRootMarketingHost($this->tenantDomainService->trustedRequestHost($request))) {
             return response()->json([
-                'error' => 'Login hanya bisa diakses dari subdomain sekolah atau subdomain admin resmi.',
+                'message' => 'Login hanya bisa diakses dari subdomain sekolah atau subdomain admin resmi.',
                 'code' => 'ROOT_DOMAIN_AUTH_DISABLED',
             ], 403);
         }

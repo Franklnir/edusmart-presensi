@@ -52,7 +52,7 @@ class QuizAutomationTest extends TestCase
         ]);
 
         $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Quiz belum dimulai');
+        $response->assertJsonPath('message', 'Quiz belum dimulai');
     }
 
     public function test_siswa_cannot_start_quiz_when_schedule_is_not_set(): void
@@ -83,7 +83,7 @@ class QuizAutomationTest extends TestCase
         ]);
 
         $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Quiz belum dijadwalkan oleh guru');
+        $response->assertJsonPath('message', 'Quiz belum dijadwalkan oleh guru');
     }
 
     public function test_submit_quiz_calculates_score_from_question_points(): void
@@ -418,7 +418,7 @@ class QuizAutomationTest extends TestCase
             ],
         ]);
         $invalidMapelResponse->assertStatus(422);
-        $invalidMapelResponse->assertJsonPath('error', 'Kelas dan mapel quiz harus sesuai yang diampu guru');
+        $invalidMapelResponse->assertJsonPath('message', 'Kelas dan mapel quiz harus sesuai yang diampu guru');
 
         $pastStartResponse = $this->actingAs($guru)->postJson('/api/db', [
             'table' => 'quizzes',
@@ -435,7 +435,7 @@ class QuizAutomationTest extends TestCase
             ],
         ]);
         $pastStartResponse->assertStatus(422);
-        $pastStartResponse->assertJsonPath('error', 'Tanggal mulai quiz tidak boleh di masa lalu');
+        $pastStartResponse->assertJsonPath('message', 'Tanggal mulai quiz tidak boleh di masa lalu');
     }
 
     public function test_guru_can_clone_quiz_as_draft_without_student_attempt_data(): void
@@ -638,7 +638,7 @@ class QuizAutomationTest extends TestCase
             'payload' => ['soal' => 'Soal berubah'],
         ]);
         $questionUpdate->assertStatus(409);
-        $questionUpdate->assertJsonPath('error', 'Soal quiz tidak bisa diubah saat masih ada siswa yang mengerjakan quiz.');
+        $questionUpdate->assertJsonPath('message', 'Soal quiz tidak bisa diubah saat masih ada siswa yang mengerjakan quiz.');
 
         $quizUpdate = $this->actingAs($guru)->postJson('/api/db', [
             'table' => 'quizzes',
@@ -647,14 +647,14 @@ class QuizAutomationTest extends TestCase
             'payload' => ['nama' => 'Nama berubah'],
         ]);
         $quizUpdate->assertStatus(422);
-        $quizUpdate->assertJsonPath('error', 'Quiz sedang dikerjakan siswa. Hanya deadline yang boleh diubah.');
+        $quizUpdate->assertJsonPath('message', 'Quiz sedang dikerjakan siswa. Hanya deadline yang boleh diubah.');
 
         $securityUpdate = $this->actingAs($guru)->postJson('/api/quiz/publish', [
             'quiz_id' => $quizId,
             'shuffle_questions' => true,
         ]);
         $securityUpdate->assertStatus(409);
-        $securityUpdate->assertJsonPath('error', 'Quiz sedang dikerjakan siswa. Keamanan dan pengaturan non-waktu tidak bisa diubah.');
+        $securityUpdate->assertJsonPath('message', 'Quiz sedang dikerjakan siswa. Keamanan dan pengaturan non-waktu tidak bisa diubah.');
 
         $newDeadline = now()->addHours(2)->startOfMinute();
         $deadlineUpdate = $this->actingAs($guru)->postJson('/api/db', [
@@ -710,7 +710,7 @@ class QuizAutomationTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $this->assertStringContainsString('tahun periode', (string) $response->json('error'));
+        $this->assertStringContainsString('tahun periode', (string) $response->json('message'));
     }
 
     public function test_guru_can_update_draft_quiz_name_and_mode(): void
@@ -1140,7 +1140,7 @@ class QuizAutomationTest extends TestCase
             'option_id' => $wrongQuestionOption,
         ]);
         $invalid->assertStatus(422);
-        $invalid->assertJsonPath('error', 'Pilihan jawaban tidak valid');
+        $invalid->assertJsonPath('message', 'Pilihan jawaban tidak valid');
 
         $valid = $this->actingAs($siswa)->postJson('/api/quiz/answer', [
             'quiz_id' => $quizId,

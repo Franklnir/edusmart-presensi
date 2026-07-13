@@ -112,7 +112,7 @@ class MonthlyGoogleDriveBackupCommand extends Command
                 Log::warning('Monthly Google Drive backup failed', [
                     'tenant_id' => $tenantId,
                     'month' => $monthOption ?: 'catch-up',
-                    'error' => $message,
+                    'message' => $message,
                 ]);
             }
         }

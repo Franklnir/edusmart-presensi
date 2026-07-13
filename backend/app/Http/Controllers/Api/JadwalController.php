@@ -173,7 +173,7 @@ class JadwalController extends ApiController
             });
 
             if (! ($result['ok'] ?? false)) {
-                return response()->json(['error' => $result['message']], $result['status'] ?? 422);
+                return response()->json(['message' => $result['message']], $result['status'] ?? 422);
             }
 
             return response()->json(['data' => $result['data'] ?? null]);

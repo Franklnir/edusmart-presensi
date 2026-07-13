@@ -21,7 +21,7 @@ class WhatsAppWebhookController extends Controller
 
         $integration = $this->whatsAppIntegrationService->handleWebhook($secret, $event, $payload);
         if (! $integration) {
-            return response()->json(['error' => 'Webhook secret tidak valid'], 404);
+            return response()->json(['message' => 'Webhook secret tidak valid'], 404);
         }
 
         return response()->json(['data' => 'ok']);

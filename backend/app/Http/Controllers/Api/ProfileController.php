@@ -48,7 +48,7 @@ class ProfileController extends ApiController
             'photo_path' => ['nullable', 'string', 'max:2048'],
         ]);
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $data = [];
@@ -184,7 +184,7 @@ class ProfileController extends ApiController
             'role' => 'required|in:siswa,guru,admin',
         ]);
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $payload['created_at'] = now();

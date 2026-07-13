@@ -180,7 +180,7 @@ const formatDnsRecords = (records = []) => {
 const toNumber = (value) => Number(value || 0)
 
 const escapeCppString = (value = '') =>
-  String(value ?? '')
+  String(value || '')
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
 

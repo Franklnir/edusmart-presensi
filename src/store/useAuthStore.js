@@ -210,6 +210,7 @@ export const useAuthStore = create((set, get) => ({
   superAdminChecked: false,
   initialized: false,
   isLoading: false,
+  authState: 'loading',
   error: null,
 
   markGoogleLinked: () => {
@@ -273,6 +274,7 @@ export const useAuthStore = create((set, get) => ({
               isSuperAdmin: false,
               superAdminChecked: true,
               initialized: true,
+              authState: 'guest',
               error: profileError?.message || 'Gagal memuat data profil'
             })
             return { user: null, profile: null, settings }
@@ -288,6 +290,7 @@ export const useAuthStore = create((set, get) => ({
               isSuperAdmin: false,
               superAdminChecked: true,
               initialized: true,
+              authState: 'guest',
               error: 'Role pengguna tidak valid. Hubungi administrator.'
             })
             return { user: null, profile: null, settings }
@@ -306,6 +309,7 @@ export const useAuthStore = create((set, get) => ({
             isSuperAdmin: false,
             superAdminChecked: true,
             initialized: true,
+            authState: 'guest',
             error: 'Role pengguna tidak valid. Hubungi administrator.'
           })
           return { user: null, profile: null, settings }
@@ -340,6 +344,7 @@ export const useAuthStore = create((set, get) => ({
               isSuperAdmin: false,
               superAdminChecked: true,
               initialized: true,
+              authState: 'guest',
               error: errorMessage
             })
 
@@ -363,7 +368,8 @@ export const useAuthStore = create((set, get) => ({
           settings,
           isSuperAdmin: hasSuperAdminBootstrap ? bootstrapIsSuperAdmin : false,
           superAdminChecked: hasSuperAdminBootstrap || !user || profile?.role !== 'admin',
-          initialized: true
+          initialized: true,
+          authState: user ? 'authenticated' : 'guest'
         })
 
         if (user && !hasSuperAdminBootstrap) {
@@ -385,6 +391,7 @@ export const useAuthStore = create((set, get) => ({
           isSuperAdmin: false,
           superAdminChecked: true,
           initialized: true,
+          authState: 'guest',
           error: err?.message || 'Gagal inisialisasi auth'
         })
         return { user: null, profile: null, settings: null }

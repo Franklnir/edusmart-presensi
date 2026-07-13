@@ -397,7 +397,7 @@ const resolveTemplateBackgroundDataUrl = async (templateOrFile) => {
   }
 
   const type = templateOrFile.__bgType || getTemplateBackgroundType(templateOrFile.background_url || templateOrFile.__bgUrl)
-  const bgUrl = templateOrFile.__bgUrl || templateOrFile.background_url || ''
+  const bgUrl = templateOrFile.__bgUrl || (templateOrFile.background_url || '')
   if (!bgUrl) return null
 
   if (type === 'pdf') return renderPdfFirstPageToDataUrl(bgUrl)
@@ -494,7 +494,7 @@ const getCertificateFieldText = (key, data) => {
   if (key === 'nama') return data.nama || ''
   if (key === 'event') return data.event || ''
   if (key === 'tanggal') return data.dateDisplay || ''
-  if (key === 'nomor') return data.nomor || data.certificate_number || ''
+  if (key === 'nomor') return data.nomor || (data.certificate_number || '')
   return ''
 }
 
@@ -925,7 +925,7 @@ const GeneratorSection = ({ templateVersion }) => {
 
       try {
         const rendered = selectedTemplate.__previewUrl || await resolveTemplateBackgroundDataUrl(selectedTemplate)
-        if (alive) setSelectedTemplatePreviewUrl(rendered || selectedTemplate.__bgUrl || '')
+        if (alive) setSelectedTemplatePreviewUrl(rendered || (selectedTemplate.__bgUrl || ''))
       } catch {
         if (alive) setSelectedTemplatePreviewUrl(selectedTemplate.__bgType === 'image' ? selectedTemplate.__bgUrl || '' : '')
       }

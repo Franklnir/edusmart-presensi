@@ -175,7 +175,7 @@ class AcademicPeriodLifecycleService
     {
         $validation = $this->validateActivation($tenantId, $period);
         if ($validation !== null) {
-            return ['valid' => false, 'error' => $validation];
+            return ['valid' => false, 'message' => $validation];
         }
 
         $year = (string) AcademicPeriod::normalizeAcademicYear($period['tahun_ajaran'] ?? null);

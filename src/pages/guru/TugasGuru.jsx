@@ -1134,7 +1134,7 @@ export default function TugasGuru() {
           // roster for the year the tugas was created in.  This prevents
           // promoted students from showing up (or disappearing) in the
           // grading panel when the teacher views a historical assignment.
-          const tugasYear = (tugas.tahun_ajaran || period.tahunAjaran || '').trim()
+          const tugasYear = (tugas.tahun_ajaran || (period.tahunAjaran || '')).trim()
           if (isViewingArchivePeriod && tugasYear && tugas.kelas) {
             const { data: histRows } = await supabase
               .from('student_class_histories')
@@ -1207,7 +1207,7 @@ export default function TugasGuru() {
         const normalizedSiswa =
           siswaData?.map((s) => ({
             ...s,
-            photo_url: s.photo_path || s.photo_url || ''
+            photo_url: s.photo_path || (s.photo_url || '')
           })) || []
 
         setSiswaDiKelas(normalizedSiswa)
@@ -2251,7 +2251,7 @@ export default function TugasGuru() {
                             inputMode="numeric"
                             className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                             placeholder="0-100"
-                            value={nilaiInput[siswa.id] ?? ''}
+                            value={nilaiInput[siswa.id] || ''}
                             onChange={(e) => {
                               const val = e.target.value
                               if (val === '') return setNilaiInput((prev) => ({ ...prev, [siswa.id]: '' }))

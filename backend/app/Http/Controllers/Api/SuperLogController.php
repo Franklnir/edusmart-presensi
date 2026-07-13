@@ -81,7 +81,7 @@ class SuperLogController extends ApiController
             }
         }
 
-        return response()->json(['error' => 'Log tidak ditemukan atau sudah ter-rotate.'], 404);
+        return response()->json(['message' => 'Log tidak ditemukan atau sudah ter-rotate.'], 404);
     }
 
     private function normalizeFilters(Request $request): array

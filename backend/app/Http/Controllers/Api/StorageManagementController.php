@@ -73,7 +73,7 @@ class StorageManagementController extends ApiController
 
         $tenantId = (string) ($this->tenantId($request) ?? '');
         if ($tenantId === '' || ! $this->storageManagementService->restoreFile($tenantId, $fileId)) {
-            return response()->json(['error' => 'File trash tidak ditemukan'], 404);
+            return response()->json(['message' => 'File trash tidak ditemukan'], 404);
         }
 
         return $this->ok(['restored' => true]);
@@ -96,7 +96,7 @@ class StorageManagementController extends ApiController
 
         $tenant = $this->tenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         return $this->ok([
@@ -113,7 +113,7 @@ class StorageManagementController extends ApiController
 
         $tenant = $this->tenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $validator = Validator::make($request->all(), [
@@ -123,7 +123,7 @@ class StorageManagementController extends ApiController
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         try {
@@ -133,7 +133,7 @@ class StorageManagementController extends ApiController
                 (string) ($request->user()?->id ?? '')
             ));
         } catch (\InvalidArgumentException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['message' => $e->getMessage()], 422);
         }
     }
 
@@ -145,7 +145,7 @@ class StorageManagementController extends ApiController
 
         $tenant = $this->tenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         return $this->ok($this->storageManagementService->cleanupPreview((string) $tenant->id, $this->cleanupFilters($request)));
@@ -159,7 +159,7 @@ class StorageManagementController extends ApiController
 
         $tenant = $this->tenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $result = $this->storageManagementService->executeCleanup(
@@ -171,7 +171,7 @@ class StorageManagementController extends ApiController
 
         return ($result['ok'] ?? false)
             ? $this->ok($result)
-            : response()->json(['error' => $result['message'] ?? 'Cleanup gagal', 'data' => $result], 422);
+            : response()->json(['message' => $result['message'] ?? 'Cleanup gagal', 'data' => $result], 422);
     }
 
     public function superObjectStorageSync(Request $request)
@@ -194,7 +194,7 @@ class StorageManagementController extends ApiController
 
         $tenant = $this->tenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         return $this->ok($this->storageManagementService->syncObjectStorageInventory((string) $tenant->id, [
@@ -211,11 +211,11 @@ class StorageManagementController extends ApiController
 
         $tenant = $this->tenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         if (! $this->storageManagementService->restoreFile((string) $tenant->id, $fileId)) {
-            return response()->json(['error' => 'File trash tidak ditemukan'], 404);
+            return response()->json(['message' => 'File trash tidak ditemukan'], 404);
         }
 
         return $this->ok(['restored' => true]);
@@ -229,7 +229,7 @@ class StorageManagementController extends ApiController
 
         $tenant = $this->tenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         return $this->ok($this->googleDriveService->statusForTenant(
@@ -247,7 +247,7 @@ class StorageManagementController extends ApiController
 
         $tenant = $this->tenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         return $this->ok($this->googleDriveService->statusForTenant(
@@ -265,7 +265,7 @@ class StorageManagementController extends ApiController
 
         $tenant = $this->tenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         return $this->ok($this->googleDriveService->filesForTenant(
@@ -282,12 +282,12 @@ class StorageManagementController extends ApiController
 
         $tenant = $this->tenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $result = $this->storageManagementService->deleteTrashFile((string) $tenant->id, $fileId);
         if (! ($result['ok'] ?? false)) {
-            return response()->json(['error' => $result['message'] ?? 'Gagal menghapus file trash'], 422);
+            return response()->json(['message' => $result['message'] ?? 'Gagal menghapus file trash'], 422);
         }
 
         return $this->ok($result);
@@ -301,12 +301,12 @@ class StorageManagementController extends ApiController
 
         $tenant = $this->tenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $result = $this->storageManagementService->purgeAllTenantTrash((string) $tenant->id);
         if (! ($result['ok'] ?? false)) {
-            return response()->json(['error' => $result['message'] ?? 'Gagal menghapus semua trash'], 422);
+            return response()->json(['message' => $result['message'] ?? 'Gagal menghapus semua trash'], 422);
         }
 
         return $this->ok($result);

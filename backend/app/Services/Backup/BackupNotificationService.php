@@ -133,7 +133,7 @@ class BackupNotificationService
             Log::warning('backup_email_notification_failed', [
                 'tenant_id' => $tenantId,
                 'subject' => $subject,
-                'error' => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
         }
     }

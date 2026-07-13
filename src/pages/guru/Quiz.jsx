@@ -2225,7 +2225,7 @@ export default function GuruQuiz() {
       return
     }
 
-    const rawValue = String(essayScoreDraft[row.questionId] ?? '').trim()
+    const rawValue = String(essayScoreDraft[row.questionId] || '').trim()
     if (rawValue === '') {
       pushToast('error', 'Nilai esai wajib diisi')
       return
@@ -3223,7 +3223,7 @@ export default function GuruQuiz() {
                               >
                                 <div className="flex items-start gap-3">
                                   <ProfileAvatar
-                                    src={p.photo_path || p.photo_url || ''}
+                                    src={p.photo_path || (p.photo_url || '')}
                                     name={p.nama || 'Siswa'}
                                     size={38}
                                     className="shrink-0"
@@ -3364,7 +3364,7 @@ export default function GuruQuiz() {
                               >
                                 <div className="flex items-start gap-3">
                                   <ProfileAvatar
-                                    src={s.photo_path || s.photo_url || ''}
+                                    src={s.photo_path || (s.photo_url || '')}
                                     name={s.nama || 'Siswa'}
                                     size={38}
                                     className="shrink-0"
@@ -3472,7 +3472,7 @@ export default function GuruQuiz() {
             <div className="p-5 border-b border-slate-200 bg-gradient-to-r from-gray-50 to-white flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div className="flex items-center gap-3">
                 <ProfileAvatar
-                  src={detailStudent.photo_path || detailStudent.photo_url || ''}
+                  src={detailStudent.photo_path || (detailStudent.photo_url || '')}
                   name={detailStudent.nama || 'Siswa'}
                   size={52}
                 />
@@ -3578,7 +3578,7 @@ export default function GuruQuiz() {
                     const isEssay = row.questionType === 'essay'
                     const answerText = String(row.essayAnswer || '').trim()
                     const isScoring = essaySavingQuestionId === row.questionId
-                    const draftScore = String(essayScoreDraft[row.questionId] ?? '').trim()
+                    const draftScore = String(essayScoreDraft[row.questionId] || '').trim()
                     const hasDraftScore = draftScore !== ''
                     const hasSavedEssayScore = row.essayScore != null
                     const isDraftSyncedWithSaved = hasSavedEssayScore
@@ -3690,7 +3690,7 @@ export default function GuruQuiz() {
                                       ? 'border-emerald-400 bg-emerald-50 text-emerald-900'
                                       : 'border-slate-300'
                                   }`}
-                                  value={essayScoreDraft[row.questionId] ?? ''}
+                                  value={essayScoreDraft[row.questionId] || ''}
                                   onChange={(e) => handleEssayScoreDraftChange(row.questionId, e.target.value)}
                                   disabled={isScoring}
                                 />

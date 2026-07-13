@@ -2464,7 +2464,7 @@ function AbsensiGuru() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <ProfileAvatar
-                        src={s.photo_path || s.photo_url || ''}
+                        src={s.photo_path || (s.photo_url || '')}
                         name={s.nama}
                         size={36}
                         className="mx-auto border-slate-300"

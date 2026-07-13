@@ -94,7 +94,7 @@ class AcademicRolloverExceptionPolicyTest extends TestCase
 
         $response
             ->assertStatus(422)
-            ->assertJsonPath('error', 'Siswa pengecualian harus siswa aktif di sekolah ini');
+            ->assertJsonPath('message', 'Siswa pengecualian harus siswa aktif di sekolah ini');
     }
 
     public function test_non_admin_cannot_read_rollover_exceptions(): void

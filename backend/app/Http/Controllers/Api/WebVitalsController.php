@@ -57,7 +57,7 @@ class WebVitalsController extends ApiController
 
         if ($validator->fails()) {
             return response()->json([
-                'error' => 'Payload Web Vitals tidak valid',
+                'message' => 'Payload Web Vitals tidak valid',
                 'errors' => $validator->errors(),
             ], 422);
         }

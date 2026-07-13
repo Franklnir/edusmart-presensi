@@ -1263,9 +1263,9 @@ export default function LaporanRekap() {
       const nextDrafts = {}
       rows.forEach((row) => {
         nextDrafts[row.id] = {
-          nilai_uts_manual: row.nilaiUtsManual ?? '',
-          nilai_uas_manual: row.nilaiUasManual ?? '',
-          nilai_manual: row.nilaiManual ?? '',
+          nilai_uts_manual: row.nilaiUtsManual || '',
+          nilai_uas_manual: row.nilaiUasManual || '',
+          nilai_manual: row.nilaiManual || '',
           catatan: row.catatan || ''
         }
       })
@@ -1588,12 +1588,12 @@ export default function LaporanRekap() {
         index + 1,
         row.nama,
         row.nis || '-',
-        row.tugasPr ?? '',
-        row.quizReguler ?? '',
-        preview.midtermScore ?? '',
-        preview.finalScore ?? '',
-        preview.manualScore ?? '',
-        preview.nilaiAkhir ?? ''
+        row.tugasPr || '',
+        row.quizReguler || '',
+        preview.midtermScore || '',
+        preview.finalScore || '',
+        preview.manualScore || '',
+        preview.nilaiAkhir || ''
       ])
       excelRow.eachCell((cell, col) => {
         cell.border = borderAll
@@ -3420,7 +3420,7 @@ export default function LaporanRekap() {
 
       tugasData.siswa.forEach((s, i) => {
         const vals = tugasData.tugas
-          .map((t) => s.nilaiTugas[t.id]?.nilai ?? '')
+          .map((t) => s.nilaiTugas[t.id]?.nilai || '')
           .join(sep)
         csv += `${i + 1}${sep}"${s.nama}"${sep}'${s.nis}'${sep}${vals}${sep}${s.rataRata}${sep}"${s.grade}"\n`
       })
@@ -4436,7 +4436,7 @@ export default function LaporanRekap() {
                                 max={rule.max}
                                 step="0.01"
                                 className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                value={mapelWeightForm[rule.key] ?? ''}
+                                value={mapelWeightForm[rule.key] || ''}
                                 onChange={(e) => setMapelWeightForm((prev) => ({ ...prev, [rule.key]: e.target.value }))}
                               />
                             </div>
@@ -4740,7 +4740,7 @@ export default function LaporanRekap() {
                                 max="100"
                                 step="0.01"
                                 disabled={midtermManualDisabled}
-                                value={draft.nilai_uts_manual ?? ''}
+                                value={draft.nilai_uts_manual || ''}
                                 onChange={(event) => setMapelManualDrafts((prev) => ({
                                   ...prev,
                                   [row.id]: { ...(prev[row.id] || {}), nilai_uts_manual: event.target.value }
@@ -4771,7 +4771,7 @@ export default function LaporanRekap() {
                                 max="100"
                                 step="0.01"
                                 disabled={finalManualDisabled}
-                                value={draft.nilai_uas_manual ?? ''}
+                                value={draft.nilai_uas_manual || ''}
                                 onChange={(event) => setMapelManualDrafts((prev) => ({
                                   ...prev,
                                   [row.id]: { ...(prev[row.id] || {}), nilai_uas_manual: event.target.value }
@@ -4801,7 +4801,7 @@ export default function LaporanRekap() {
                               max="100"
                               step="0.01"
                               disabled={manualDisabled}
-                              value={draft.nilai_manual ?? ''}
+                              value={draft.nilai_manual || ''}
                               onChange={(e) => setMapelManualDrafts((prev) => ({
                                 ...prev,
                                 [row.id]: { ...(prev[row.id] || {}), nilai_manual: e.target.value }
@@ -4814,7 +4814,7 @@ export default function LaporanRekap() {
                             <input
                               type="text"
                               disabled={!isActiveReportPeriod}
-                              value={draft.catatan ?? ''}
+                              value={draft.catatan || ''}
                               onChange={(e) => setMapelManualDrafts((prev) => ({
                                 ...prev,
                                 [row.id]: { ...(prev[row.id] || {}), catatan: e.target.value }
@@ -5265,7 +5265,7 @@ export default function LaporanRekap() {
                                   ? 'border-red-500 text-red-700'
                                   : 'border-blue-500'
                                   }`}
-                                defaultValue={nilaiSiswa ?? ''}
+                                defaultValue={nilaiSiswa || ''}
                                 onBlur={(e) =>
                                   updateNilaiTugas(
                                     s.id,
@@ -5435,7 +5435,7 @@ export default function LaporanRekap() {
                                 className={`w-12 text-center border-2 rounded px-1 outline-none ${
                                   isNilaiRendah ? 'border-red-500 text-red-700' : 'border-blue-500'
                                 }`}
-                                defaultValue={nilaiSiswa ?? ''}
+                                defaultValue={nilaiSiswa || ''}
                                 onBlur={(e) => updateNilaiQuiz(s.id, q.id, e.target.value)}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') e.target.blur()

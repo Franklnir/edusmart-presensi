@@ -235,7 +235,7 @@ class WhatsAppIntegrationService
             $created = [];
             $connect = [];
             if (! $remote) {
-                ['response' => $connect, 'error' => $connectError] = $this->attemptQrConnect($integration->instance_name);
+                ['response' => $connect, 'message' => $connectError] = $this->attemptQrConnect($integration->instance_name);
                 if (! $this->hasQrPayload($connect)) {
                     $created = $this->createInstanceForQr($integration);
                 }
@@ -245,7 +245,7 @@ class WhatsAppIntegrationService
 
                 $webhookError = $this->safeSetWebhook($integration);
 
-                ['response' => $connect, 'error' => $connectError] = $this->attemptQrConnect($integration->instance_name);
+                ['response' => $connect, 'message' => $connectError] = $this->attemptQrConnect($integration->instance_name);
                 if (! $this->hasQrPayload($connect) && $this->shouldRecreateRemoteInstance($remote)) {
                     $created = $this->recreateInstanceForQr($integration);
                     $webhookError = $this->safeSetWebhook($integration);
@@ -264,7 +264,7 @@ class WhatsAppIntegrationService
             }
 
             if ($qrCode === '' && $pairingCode === '') {
-                ['response' => $connect, 'error' => $connectError] = $this->attemptQrConnect($integration->instance_name);
+                ['response' => $connect, 'message' => $connectError] = $this->attemptQrConnect($integration->instance_name);
                 $qrCode = $this->extractQrCode($connect);
                 $pairingCode = $this->extractPairingCode($connect);
             }
@@ -982,12 +982,12 @@ class WhatsAppIntegrationService
         try {
             return [
                 'response' => $this->evolutionApiClient->connectInstance($instanceName),
-                'error' => null,
+                'message' => null,
             ];
         } catch (\Throwable $e) {
             return [
                 'response' => [],
-                'error' => 'Evolution gagal membuat QR untuk instance: '
+                'message' => 'Evolution gagal membuat QR untuk instance: '
                     .$this->normalizeProviderErrorMessage($e->getMessage()),
             ];
         }

@@ -18,7 +18,7 @@ class EnsureTenantMatchesProfile
 
         $tenantId = $request->attributes->get('tenant_id');
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         if ($this->isSuperAdminIdentity($user)) {
@@ -27,11 +27,11 @@ class EnsureTenantMatchesProfile
 
         $profile = Profile::query()->where('id', $user->id)->first();
         if (! $profile) {
-            return response()->json(['error' => 'Profil belum tersedia'], 403);
+            return response()->json(['message' => 'Profil belum tersedia'], 403);
         }
 
         if ($profile->tenant_id !== $tenantId) {
-            return response()->json(['error' => 'Akses tenant ditolak'], 403);
+            return response()->json(['message' => 'Akses tenant ditolak'], 403);
         }
 
         return $next($request);

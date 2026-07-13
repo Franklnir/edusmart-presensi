@@ -152,7 +152,7 @@ class SuperAdminController extends ApiController
         $tenant = $this->findTenantByIdOrSlug($id);
 
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $stats = DB::table('profiles')
@@ -274,13 +274,13 @@ class SuperAdminController extends ApiController
 
         $validator = Validator::make($request->all(), $this->domainRules());
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         try {
             $domain = $this->tenantDomainService->createAdminDomain($validator->validated());
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         $this->logAudit($request, 'tenant_domains', (string) ($domain['id'] ?? ''), 'INSERT', null, $domain, null);
@@ -296,18 +296,18 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $validator = Validator::make($request->all(), $this->domainRules());
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         try {
             $domain = $this->tenantDomainService->createTenantDomain((string) $tenant->id, $validator->validated());
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         $this->logAudit(
@@ -331,7 +331,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $validator = Validator::make($request->all(), [
@@ -361,7 +361,7 @@ class SuperAdminController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $payload = $validator->validated();
@@ -377,7 +377,7 @@ class SuperAdminController extends ApiController
                 (string) ($request->user()?->id ?? '')
             );
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['message' => $e->getMessage()], 422);
         }
         $publicSaved = $this->tenantMqttConfigService->publicConfig($saved);
         $syncResult = null;
@@ -385,7 +385,7 @@ class SuperAdminController extends ApiController
             try {
                 $syncResult = $this->tenantMqttConfigService->syncManagedMosquittoFiles();
             } catch (\RuntimeException $e) {
-                return response()->json(['error' => $e->getMessage()], 422);
+                return response()->json(['message' => $e->getMessage()], 422);
             }
         }
 
@@ -416,7 +416,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $validator = Validator::make($request->all(), [
@@ -424,7 +424,7 @@ class SuperAdminController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $oldConfig = $this->tenantMqttConfigService->publicConfig(
@@ -437,7 +437,7 @@ class SuperAdminController extends ApiController
         );
         if (! ($template['success'] ?? false)) {
             return response()->json([
-                'error' => (string) ($template['message'] ?? 'Gagal menyiapkan template RFID tenant'),
+                'message' => (string) ($template['message'] ?? 'Gagal menyiapkan template RFID tenant'),
             ], 422);
         }
 
@@ -449,7 +449,7 @@ class SuperAdminController extends ApiController
                 (bool) ($validator->validated()['rotate_password'] ?? false)
             );
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         $saved = $result['config'] ?? [];
@@ -482,7 +482,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $devices = collect($this->rfidDeviceService->listDevices((string) $tenant->slug));
@@ -510,7 +510,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $validator = Validator::make($request->all(), [
@@ -523,7 +523,7 @@ class SuperAdminController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $data = $validator->validated();
@@ -542,7 +542,7 @@ class SuperAdminController extends ApiController
         );
 
         if (! ($result['success'] ?? false)) {
-            return response()->json(['error' => $result['message'] ?? 'Gagal mendaftarkan device'], 400);
+            return response()->json(['message' => $result['message'] ?? 'Gagal mendaftarkan device'], 400);
         }
 
         return $this->ok([
@@ -560,7 +560,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($tenantId);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $before = DB::table('rfid_devices')
@@ -573,7 +573,7 @@ class SuperAdminController extends ApiController
 
         $result = $this->rfidDeviceService->deleteTenantDevice((string) $tenant->id, $deviceId);
         if (! ($result['success'] ?? false)) {
-            return response()->json(['error' => $result['message'] ?? 'Gagal menghapus device RFID'], 422);
+            return response()->json(['message' => $result['message'] ?? 'Gagal menghapus device RFID'], 422);
         }
 
         $this->logAudit(
@@ -603,7 +603,7 @@ class SuperAdminController extends ApiController
             $before = $this->tenantDomainRow($domainId);
             $domain = $this->tenantDomainService->checkDomain($domainId);
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 404);
+            return response()->json(['message' => $e->getMessage()], 404);
         }
 
         $this->logAudit(
@@ -627,7 +627,7 @@ class SuperAdminController extends ApiController
 
         $row = $this->tenantDomainRow($domainId);
         if (! $row) {
-            return response()->json(['error' => 'Domain tidak ditemukan'], 404);
+            return response()->json(['message' => 'Domain tidak ditemukan'], 404);
         }
 
         $before = [
@@ -662,7 +662,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($id);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $payload = $this->tenantBackupService->buildPayload(
@@ -685,7 +685,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($id);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         return response()->json([
@@ -704,7 +704,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($id);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $payload = $this->tenantBackupService->buildPayload(
@@ -765,7 +765,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($id);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $monthKey = trim((string) $request->input('month'));
@@ -832,7 +832,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($id);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $async = filter_var($request->input('async', true), FILTER_VALIDATE_BOOLEAN);
@@ -885,7 +885,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($id);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         return response()->json([
@@ -901,7 +901,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($id);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $payload = $request->only(['status', 'reason']);
@@ -911,7 +911,7 @@ class SuperAdminController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $nextStatus = strtolower(trim((string) $payload['status']));
@@ -963,7 +963,7 @@ class SuperAdminController extends ApiController
 
         $tenant = $this->findTenantByIdOrSlug($id);
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $backupPayload = $this->normalizeRestoreBackupPayload($request->input('backup'));
@@ -1297,30 +1297,30 @@ class SuperAdminController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $slug = $this->normalizeSlug($payload['slug']);
         if ($slug === '' || ! $this->isValidSlug($slug)) {
-            return response()->json(['error' => 'Subdomain tidak valid'], 422);
+            return response()->json(['message' => 'Subdomain tidak valid'], 422);
         }
 
         if ($this->isReservedSlug($slug)) {
-            return response()->json(['error' => 'Subdomain tidak bisa digunakan'], 422);
+            return response()->json(['message' => 'Subdomain tidak bisa digunakan'], 422);
         }
 
         $defaultSlug = strtolower(trim((string) config('tenancy.default_slug', 'default')));
         if ($defaultSlug !== '' && $slug === $defaultSlug) {
-            return response()->json(['error' => 'Subdomain sudah dipakai'], 409);
+            return response()->json(['message' => 'Subdomain sudah dipakai'], 409);
         }
 
         if (DB::table('tenants')->where('slug', $slug)->exists()) {
-            return response()->json(['error' => 'Subdomain sudah dipakai'], 409);
+            return response()->json(['message' => 'Subdomain sudah dipakai'], 409);
         }
 
         $adminEmail = strtolower(trim($payload['admin_email']));
         if ($this->isReservedSuperAdminEmail($adminEmail)) {
-            return response()->json(['error' => 'Email ini tidak bisa digunakan sebagai admin sekolah'], 403);
+            return response()->json(['message' => 'Email ini tidak bisa digunakan sebagai admin sekolah'], 403);
         }
 
         $tenantId = (string) Str::uuid();
@@ -1448,7 +1448,7 @@ class SuperAdminController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $email = strtolower(trim($payload['email']));
@@ -1461,12 +1461,12 @@ class SuperAdminController extends ApiController
         $slug = $slug !== '' ? $this->normalizeSlug($slug) : strtolower(trim((string) config('tenancy.default_slug', 'default')));
 
         if ($slug === '' || ! $this->isValidSlug($slug)) {
-            return response()->json(['error' => 'Subdomain tidak valid'], 422);
+            return response()->json(['message' => 'Subdomain tidak valid'], 422);
         }
 
         $tenant = DB::table('tenants')->where('slug', $slug)->first();
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $existingProfileInTenant = Profile::query()
@@ -1477,10 +1477,10 @@ class SuperAdminController extends ApiController
             ? User::query()->where('id', $existingProfileInTenant->id)->first()
             : null;
         if (! $existingUser && empty($payload['password'])) {
-            return response()->json(['error' => 'Password wajib diisi untuk user baru'], 422);
+            return response()->json(['message' => 'Password wajib diisi untuk user baru'], 422);
         }
         if ($existingUser && ! empty($payload['password']) && $this->isSuperAdminByIdentity((string) $existingUser->id, $email)) {
-            return response()->json(['error' => 'Password super admin tidak bisa direset lewat endpoint ini'], 403);
+            return response()->json(['message' => 'Password super admin tidak bisa direset lewat endpoint ini'], 403);
         }
 
         $result = null;
@@ -1595,12 +1595,12 @@ class SuperAdminController extends ApiController
             ->first();
 
         if (! $row) {
-            return response()->json(['error' => 'Super admin tidak ditemukan'], 404);
+            return response()->json(['message' => 'Super admin tidak ditemukan'], 404);
         }
 
         $total = DB::table('super_admins')->count();
         if ($total <= 1) {
-            return response()->json(['error' => 'Tidak bisa menghapus super admin terakhir'], 409);
+            return response()->json(['message' => 'Tidak bisa menghapus super admin terakhir'], 409);
         }
 
         $oldData = [
@@ -1638,7 +1638,7 @@ class SuperAdminController extends ApiController
         }
         $tenant = $tenantQuery->first();
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $payload = $request->only(['password']);
@@ -1646,7 +1646,7 @@ class SuperAdminController extends ApiController
             'password' => ['nullable', 'string', PasswordRule::defaults(), 'max:100'],
         ]);
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $profile = Profile::query()
@@ -1656,15 +1656,15 @@ class SuperAdminController extends ApiController
             ->first();
 
         if (! $profile) {
-            return response()->json(['error' => 'Admin tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Admin tenant tidak ditemukan'], 404);
         }
 
         $user = User::query()->where('id', $profile->id)->first();
         if (! $user) {
-            return response()->json(['error' => 'User admin tidak ditemukan'], 404);
+            return response()->json(['message' => 'User admin tidak ditemukan'], 404);
         }
         if ($this->isSuperAdminByIdentity((string) $user->id, (string) ($user->email ?? ''))) {
-            return response()->json(['error' => 'Password super admin tidak bisa direset'], 403);
+            return response()->json(['message' => 'Password super admin tidak bisa direset'], 403);
         }
 
         $newPassword = (string) ($payload['password'] ?? '');
@@ -5124,7 +5124,7 @@ class SuperAdminController extends ApiController
         } catch (\Throwable $e) {
             return [
                 'synced' => false,
-                'error' => $e->getMessage(),
+                'message' => $e->getMessage(),
             ];
         }
     }

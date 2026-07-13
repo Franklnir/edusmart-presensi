@@ -639,7 +639,7 @@ export default function APengaturan() {
   useEffect(() => {
     if (!profile || !isAuthorized) return
 
-    const raw = profile.photo_path || profile.photo_url || profile.avatar || profile.foto || ''
+    const raw = profile.photo_path || profile.photo_url || profile.avatar || (profile.foto || '')
     const extracted = extractObjectKeyFromMaybeUrl(raw, SUPABASE_BUCKET)
     setAvatarPath(extracted)
 
@@ -1249,7 +1249,7 @@ export default function APengaturan() {
       const period = previewResult.data?.period || {}
       const confirmed = await requestConfirmation({
         title: 'Pulihkan roster siswa periode aktif?',
-        message: `Roster siswa akan disamakan dengan snapshot ${period.tahun_ajaran || activeAcademicPeriod.tahunAjaran} ${period.semester || activeAcademicPeriod.semester || ''}.`,
+        message: `Roster siswa akan disamakan dengan snapshot ${period.tahun_ajaran || activeAcademicPeriod.tahunAjaran} ${period.semester || (activeAcademicPeriod.semester || '')}.`,
         confirmText: 'Ya, pulihkan roster',
         cancelText: 'Batal',
         tone: 'warning',

@@ -20,7 +20,7 @@ class GoogleDriveController extends ApiController
 
         $tenantId = $this->resolveOwnedTenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         return $this->ok($this->googleDriveService->statusForTenant(
@@ -38,7 +38,7 @@ class GoogleDriveController extends ApiController
 
         $tenantId = $this->resolveOwnedTenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         return $this->ok($this->googleDriveService->filesForTenant((string) $tenantId, [
@@ -61,7 +61,7 @@ class GoogleDriveController extends ApiController
         $tenantId = $this->resolveOwnedTenantId($request);
         $userId = $request->user()?->id;
         if (! $tenantId || ! $userId) {
-            return response()->json(['error' => 'Tenant atau user tidak valid'], 400);
+            return response()->json(['message' => 'Tenant atau user tidak valid'], 400);
         }
 
         $returnUrl = (string) $request->input('return_url', '');
@@ -74,7 +74,7 @@ class GoogleDriveController extends ApiController
                 $returnUrl
             ));
         } catch (\Throwable $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['message' => $e->getMessage()], 422);
         }
     }
 
@@ -105,7 +105,7 @@ class GoogleDriveController extends ApiController
 
         $tenantId = $this->resolveOwnedTenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         return $this->ok($this->googleDriveService->statusForTenant(
@@ -123,7 +123,7 @@ class GoogleDriveController extends ApiController
 
         $tenantId = $this->resolveOwnedTenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         return $this->ok($this->googleDriveService->recoverTenantConnection((string) $tenantId, 'admin-recover'));
@@ -137,7 +137,7 @@ class GoogleDriveController extends ApiController
 
         $tenantId = $this->resolveOwnedTenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         return $this->ok($this->googleDriveService->disconnectTenant((string) $tenantId));

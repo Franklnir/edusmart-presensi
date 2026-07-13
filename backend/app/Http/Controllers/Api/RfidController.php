@@ -274,7 +274,7 @@ class RfidController extends ApiController
 
         if ($requestedTenantSlug !== '' && Str::lower($requestedTenantSlug) !== Str::lower($currentTenantSlug)) {
             abort(response()->json([
-                'error' => 'Tenant RFID tidak sesuai dengan sesi login',
+                'message' => 'Tenant RFID tidak sesuai dengan sesi login',
             ], 403));
         }
 

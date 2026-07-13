@@ -77,7 +77,7 @@ class AuthController extends ApiController
             && $this->isAllowedSuperAdminLoginHost($this->currentHost($request));
 
         if (! $isSuperAdminForHost && ! $profile && $this->tenantId($request)) {
-            return response()->json(['error' => 'Akses tenant ditolak'], 403);
+            return response()->json(['message' => 'Akses tenant ditolak'], 403);
         }
 
         if ($isSuperAdminForHost && ! $profile) {
@@ -262,11 +262,11 @@ class AuthController extends ApiController
     public function googlePopupContext(Request $request)
     {
         if (! $this->isGoogleAuthEnabled()) {
-            return response()->json(['error' => 'Login Google belum diaktifkan oleh administrator.'], 422);
+            return response()->json(['message' => 'Login Google belum diaktifkan oleh administrator.'], 422);
         }
 
         if ($this->googleClientId() === '') {
-            return response()->json(['error' => 'Konfigurasi Google OAuth belum lengkap.'], 422);
+            return response()->json(['message' => 'Konfigurasi Google OAuth belum lengkap.'], 422);
         }
 
         $validated = $request->validate([
@@ -276,7 +276,7 @@ class AuthController extends ApiController
 
         $origin = $this->sanitizeAllowedFrontendOrigin((string) $validated['origin']);
         if ($origin === null) {
-            return response()->json(['error' => 'Origin login Google tidak diizinkan.'], 422);
+            return response()->json(['message' => 'Origin login Google tidak diizinkan.'], 422);
         }
 
         return response()->json([
@@ -291,12 +291,12 @@ class AuthController extends ApiController
     public function googleCodeLogin(Request $request)
     {
         if (! $this->isGoogleAuthEnabled()) {
-            return response()->json(['error' => 'Login Google belum diaktifkan oleh administrator.'], 422);
+            return response()->json(['message' => 'Login Google belum diaktifkan oleh administrator.'], 422);
         }
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant sekolah tidak valid untuk login Google.'], 400);
+            return response()->json(['message' => 'Tenant sekolah tidak valid untuk login Google.'], 400);
         }
 
         $validated = $request->validate([
@@ -306,7 +306,7 @@ class AuthController extends ApiController
         $googleUser = $this->exchangeGooglePopupCodeForUser((string) $validated['code']);
         if (! ($googleUser['ok'] ?? false)) {
             return response()->json([
-                'error' => $this->safeGoogleErrorMessage((string) ($googleUser['message'] ?? 'Login Google gagal diproses.')),
+                'message' => $this->safeGoogleErrorMessage((string) ($googleUser['message'] ?? 'Login Google gagal diproses.')),
             ], 422);
         }
 
@@ -319,7 +319,7 @@ class AuthController extends ApiController
             $this->reportUnexpectedGoogleDomainException($e);
 
             return response()->json([
-                'error' => $this->safeGoogleErrorMessage($e->getMessage()),
+                'message' => $this->safeGoogleErrorMessage($e->getMessage()),
             ], 422);
         }
 
@@ -334,17 +334,17 @@ class AuthController extends ApiController
     public function googleCredentialLogin(Request $request)
     {
         if (! $this->isGoogleAuthEnabled()) {
-            return response()->json(['error' => 'Login Google belum diaktifkan oleh administrator.'], 422);
+            return response()->json(['message' => 'Login Google belum diaktifkan oleh administrator.'], 422);
         }
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant sekolah tidak valid untuk login Google.'], 400);
+            return response()->json(['message' => 'Tenant sekolah tidak valid untuk login Google.'], 400);
         }
 
         $clientId = $this->googleClientId();
         if ($clientId === '') {
-            return response()->json(['error' => 'Konfigurasi Google OAuth belum lengkap.'], 422);
+            return response()->json(['message' => 'Konfigurasi Google OAuth belum lengkap.'], 422);
         }
 
         $validated = $request->validate([
@@ -357,7 +357,7 @@ class AuthController extends ApiController
         );
         if (! ($googleUser['ok'] ?? false)) {
             return response()->json([
-                'error' => $this->safeGoogleErrorMessage((string) ($googleUser['message'] ?? 'Login Google gagal diproses.')),
+                'message' => $this->safeGoogleErrorMessage((string) ($googleUser['message'] ?? 'Login Google gagal diproses.')),
             ], 422);
         }
 
@@ -370,7 +370,7 @@ class AuthController extends ApiController
             $this->reportUnexpectedGoogleDomainException($e);
 
             return response()->json([
-                'error' => $this->safeGoogleErrorMessage($e->getMessage()),
+                'message' => $this->safeGoogleErrorMessage($e->getMessage()),
             ], 422);
         }
 
@@ -385,7 +385,7 @@ class AuthController extends ApiController
     public function googleMobileExchange(Request $request)
     {
         if (! $this->isGoogleAuthEnabled()) {
-            return response()->json(['error' => 'Login Google belum diaktifkan oleh administrator.'], 422);
+            return response()->json(['message' => 'Login Google belum diaktifkan oleh administrator.'], 422);
         }
 
         $validated = $request->validate([
@@ -394,24 +394,24 @@ class AuthController extends ApiController
 
         $payload = $this->pullGoogleLoginHandoffTicket((string) $validated['ticket']);
         if (! is_array($payload) || ! (bool) ($payload['mobile'] ?? false)) {
-            return response()->json(['error' => 'Sesi login Google tidak valid atau sudah kedaluwarsa.'], 422);
+            return response()->json(['message' => 'Sesi login Google tidak valid atau sudah kedaluwarsa.'], 422);
         }
 
         $createdAt = (int) ($payload['created_at'] ?? 0);
         if ($createdAt <= 0 || (time() - $createdAt) > self::GOOGLE_LOGIN_HANDOFF_TTL_SECONDS) {
-            return response()->json(['error' => 'Sesi login Google sudah kedaluwarsa.'], 422);
+            return response()->json(['message' => 'Sesi login Google sudah kedaluwarsa.'], 422);
         }
 
         $expectedHost = strtolower(trim((string) ($payload['host'] ?? '')));
         $currentHost = $this->currentHost($request);
         if ($expectedHost === '' || $expectedHost !== $currentHost) {
-            return response()->json(['error' => 'Sesi login Google tidak cocok dengan sekolah yang dipilih.'], 422);
+            return response()->json(['message' => 'Sesi login Google tidak cocok dengan sekolah yang dipilih.'], 422);
         }
 
         $userId = trim((string) ($payload['user_id'] ?? ''));
         $user = $userId !== '' ? User::query()->find($userId) : null;
         if (! $user) {
-            return response()->json(['error' => 'Akun pengguna tidak ditemukan.'], 422);
+            return response()->json(['message' => 'Akun pengguna tidak ditemukan.'], 422);
         }
 
         $tenantId = trim((string) ($payload['tenant_id'] ?? ''));
@@ -425,10 +425,10 @@ class AuthController extends ApiController
                 ->where('tenant_id', $tenantId)
                 ->first();
             if (! $profile) {
-                return response()->json(['error' => 'Akun tidak memiliki akses tenant ini.'], 403);
+                return response()->json(['message' => 'Akun tidak memiliki akses tenant ini.'], 403);
             }
             if ($this->isProfileLoginBlocked($profile)) {
-                return response()->json(['error' => $this->blockedLoginMessage($profile)], 403);
+                return response()->json(['message' => $this->blockedLoginMessage($profile)], 403);
             }
         }
 
@@ -445,7 +445,7 @@ class AuthController extends ApiController
             $this->logoutWebSession($request);
 
             return response()->json([
-                'error' => 'Aplikasi mobile hanya tersedia untuk guru dan siswa.',
+                'message' => 'Aplikasi mobile hanya tersedia untuk guru dan siswa.',
             ], 403);
         }
 
@@ -462,22 +462,22 @@ class AuthController extends ApiController
     public function googleCredentialLink(Request $request)
     {
         if (! $this->isGoogleAuthEnabled()) {
-            return response()->json(['error' => 'Login Google belum diaktifkan oleh administrator.'], 422);
+            return response()->json(['message' => 'Login Google belum diaktifkan oleh administrator.'], 422);
         }
 
         $user = $request->user();
         if (! $user?->id) {
-            return response()->json(['error' => 'Unauthenticated'], 401);
+            return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant sekolah tidak valid untuk tautkan Google.'], 400);
+            return response()->json(['message' => 'Tenant sekolah tidak valid untuk tautkan Google.'], 400);
         }
 
         $clientId = $this->googleClientId();
         if ($clientId === '') {
-            return response()->json(['error' => 'Konfigurasi Google OAuth belum lengkap.'], 422);
+            return response()->json(['message' => 'Konfigurasi Google OAuth belum lengkap.'], 422);
         }
 
         $validated = $request->validate([
@@ -490,7 +490,7 @@ class AuthController extends ApiController
         );
         if (! ($googleUser['ok'] ?? false)) {
             return response()->json([
-                'error' => $this->safeGoogleErrorMessage((string) ($googleUser['message'] ?? 'Tautkan Google gagal diproses.')),
+                'message' => $this->safeGoogleErrorMessage((string) ($googleUser['message'] ?? 'Tautkan Google gagal diproses.')),
             ], 422);
         }
 
@@ -503,7 +503,7 @@ class AuthController extends ApiController
             $this->reportUnexpectedGoogleDomainException($e);
 
             return response()->json([
-                'error' => $this->safeGoogleErrorMessage($e->getMessage()),
+                'message' => $this->safeGoogleErrorMessage($e->getMessage()),
             ], 422);
         }
 
@@ -519,7 +519,7 @@ class AuthController extends ApiController
     {
         $user = $request->user();
         if (! $user?->id) {
-            return response()->json(['error' => 'Unauthenticated'], 401);
+            return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
         $tenantId = trim((string) ($this->tenantId($request) ?? ''));
@@ -534,7 +534,7 @@ class AuthController extends ApiController
                 ->first();
             if (! $profile) {
                 return response()->json([
-                    'error' => 'Akun tidak memiliki akses tenant ini.',
+                    'message' => 'Akun tidak memiliki akses tenant ini.',
                 ], 403);
             }
         }
@@ -695,12 +695,12 @@ class AuthController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $identifier = trim((string) $payload['email']);
@@ -719,7 +719,7 @@ class AuthController extends ApiController
             ]);
 
             return response()->json([
-                'error' => "Terlalu banyak percobaan login. Coba lagi dalam {$seconds} detik.",
+                'message' => "Terlalu banyak percobaan login. Coba lagi dalam {$seconds} detik.",
                 'retry_after' => $seconds,
             ], 429);
         }
@@ -730,10 +730,10 @@ class AuthController extends ApiController
             $this->logAuthEvent($request, 'login_failed_resolution', [
                 'identifier' => $identifier,
                 'tenant_id' => $tenantId,
-                'error' => $resolved['error'],
+                'message' => $resolved['error'],
             ]);
 
-            return response()->json(['error' => $resolved['error']], $resolved['code']);
+            return response()->json(['message' => $resolved['error']], $resolved['code']);
         }
         $email = $resolved['email'];
 
@@ -755,7 +755,7 @@ class AuthController extends ApiController
                 'host' => $host,
             ]);
 
-            return response()->json(['error' => $this->superAdminHostMessage()], 403);
+            return response()->json(['message' => $this->superAdminHostMessage()], 403);
         }
 
         if (! $isSuperAdminIdentity && $this->isAdminHost($host)) {
@@ -767,7 +767,7 @@ class AuthController extends ApiController
             ]);
 
             return response()->json([
-                'error' => 'Login admin sekolah/guru/siswa harus lewat subdomain sekolah masing-masing.',
+                'message' => 'Login admin sekolah/guru/siswa harus lewat subdomain sekolah masing-masing.',
             ], 403);
         }
 
@@ -787,7 +787,7 @@ class AuthController extends ApiController
             ]);
 
             return response()->json([
-                'error' => 'Email/NIS atau password salah.',
+                'message' => 'Email/NIS atau password salah.',
             ], 401);
         }
 
@@ -805,7 +805,7 @@ class AuthController extends ApiController
                 ]);
 
                 return response()->json([
-                    'error' => 'Email/NIS atau password salah.',
+                    'message' => 'Email/NIS atau password salah.',
                 ], 401);
             }
         }
@@ -829,7 +829,7 @@ class AuthController extends ApiController
                 'host' => $host,
             ]);
 
-            return response()->json(['error' => 'Email/NIS atau password salah.'], 401);
+            return response()->json(['message' => 'Email/NIS atau password salah.'], 401);
         }
 
         if ($profile && $this->isProfileLoginBlocked($profile)) {
@@ -842,7 +842,7 @@ class AuthController extends ApiController
                 'status' => $profile->status,
             ]);
 
-            return response()->json(['error' => $this->blockedLoginMessage($profile)], 403);
+            return response()->json(['message' => $this->blockedLoginMessage($profile)], 403);
         }
 
         RateLimiter::clear($throttleKey);
@@ -873,7 +873,7 @@ class AuthController extends ApiController
             $this->registerFailedLoginAttempt($throttleKey);
 
             return response()->json([
-                'error' => 'Aplikasi mobile hanya tersedia untuk guru dan siswa. Admin tetap memakai website.',
+                'message' => 'Aplikasi mobile hanya tersedia untuk guru dan siswa. Admin tetap memakai website.',
             ], 403);
         }
 
@@ -891,7 +891,7 @@ class AuthController extends ApiController
     {
         if (str_contains($identifier, '@')) {
             if (! filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
-                return ['error' => 'Format email tidak valid', 'code' => 422];
+                return ['message' => 'Format email tidak valid', 'code' => 422];
             }
 
             $email = strtolower($identifier);
@@ -910,7 +910,7 @@ class AuthController extends ApiController
             ->first();
 
         if (! $profile) {
-            return ['error' => 'NIS belum terdaftar di sekolah ini. Periksa kembali NIS atau hubungi admin sekolah.', 'code' => 404];
+            return ['message' => 'NIS belum terdaftar di sekolah ini. Periksa kembali NIS atau hubungi admin sekolah.', 'code' => 404];
         }
 
         $email = strtolower(trim((string) ($profile->email ?? '')));
@@ -921,19 +921,19 @@ class AuthController extends ApiController
         }
 
         if ($email === '') {
-            return ['error' => 'Akun tidak memiliki email login. Hubungi admin.', 'code' => 403];
+            return ['message' => 'Akun tidak memiliki email login. Hubungi admin.', 'code' => 403];
         }
 
         if (($profile->role ?? null) === 'guru') {
-            return ['error' => 'Akun guru harus login menggunakan email', 'code' => 403];
+            return ['message' => 'Akun guru harus login menggunakan email', 'code' => 403];
         }
 
         if (! $this->isInitialAccountSetupPending($profile, $email)) {
             if (Str::endsWith($email, '@import.local')) {
-                return ['error' => 'Email akun belum aktif. Hubungi admin.', 'code' => 403];
+                return ['message' => 'Email akun belum aktif. Hubungi admin.', 'code' => 403];
             }
 
-            return ['error' => 'Gunakan email untuk login', 'code' => 403];
+            return ['message' => 'Gunakan email untuk login', 'code' => 403];
         }
 
         return ['email' => $email, 'user_id' => (string) $profile->id];
@@ -2140,7 +2140,7 @@ class AuthController extends ApiController
     {
         return $this->googlePopupResponse($statePayload, [
             'type' => 'edusmart-google-error',
-            'error' => $this->safeGoogleErrorMessage($message),
+            'message' => $this->safeGoogleErrorMessage($message),
         ]);
     }
 
@@ -2216,7 +2216,7 @@ class AuthController extends ApiController
     {
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $payload = $request->only(['nama', 'email', 'password', 'role']);
@@ -2233,7 +2233,7 @@ class AuthController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         if (! $allowAdminCreate) {
@@ -2242,7 +2242,7 @@ class AuthController extends ApiController
             if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
                 $seconds = RateLimiter::availableIn($throttleKey);
 
-                return response()->json(['error' => "Terlalu banyak percobaan registrasi. Coba lagi dalam {$seconds} detik."], 429);
+                return response()->json(['message' => "Terlalu banyak percobaan registrasi. Coba lagi dalam {$seconds} detik."], 429);
             }
             RateLimiter::hit($throttleKey, 600); // Decay 10 menit
         }
@@ -2251,18 +2251,18 @@ class AuthController extends ApiController
         $role = $payload['role'];
 
         if ($this->isReservedSuperAdminEmail($email)) {
-            return response()->json(['error' => 'Email ini tidak bisa digunakan untuk registrasi'], 403);
+            return response()->json(['message' => 'Email ini tidak bisa digunakan untuk registrasi'], 403);
         }
 
         if (! $allowAdminCreate) {
             return response()->json([
-                'error' => 'Registrasi publik sudah dinonaktifkan. Akun dibuat oleh Admin Sekolah melalui menu Siswa, Guru, atau Admin.',
+                'message' => 'Registrasi publik sudah dinonaktifkan. Akun dibuat oleh Admin Sekolah melalui menu Siswa, Guru, atau Admin.',
                 'code' => 'PUBLIC_REGISTRATION_DISABLED',
             ], 403);
         }
 
         if ($this->profileForTenantEmail($tenantId, $email)) {
-            return response()->json(['error' => 'Email sudah terdaftar di sekolah ini'], 409);
+            return response()->json(['message' => 'Email sudah terdaftar di sekolah ini'], 409);
         }
 
         $userId = (string) Str::uuid();
@@ -2474,7 +2474,7 @@ class AuthController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         // Security: Rate Limiting untuk mencegah spam email
@@ -2482,7 +2482,7 @@ class AuthController extends ApiController
         if (RateLimiter::tooManyAttempts($throttleKey, 3)) {
             $seconds = RateLimiter::availableIn($throttleKey);
 
-            return response()->json(['error' => "Terlalu banyak permintaan. Coba lagi dalam {$seconds} detik."], 429);
+            return response()->json(['message' => "Terlalu banyak permintaan. Coba lagi dalam {$seconds} detik."], 429);
         }
         RateLimiter::hit($throttleKey, 300); // Decay 5 menit
 
@@ -2517,7 +2517,7 @@ class AuthController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         // Security: Rate Limiting untuk mencegah spam email
@@ -2525,14 +2525,14 @@ class AuthController extends ApiController
         if (RateLimiter::tooManyAttempts($throttleKey, 3)) {
             $seconds = RateLimiter::availableIn($throttleKey);
 
-            return response()->json(['error' => "Terlalu banyak permintaan. Coba lagi dalam {$seconds} detik."], 429);
+            return response()->json(['message' => "Terlalu banyak permintaan. Coba lagi dalam {$seconds} detik."], 429);
         }
         RateLimiter::hit($throttleKey, 300); // Decay 5 menit
 
         $email = strtolower(trim($payload['email']));
         $eligibility = $this->passwordResetEligibility($email, $this->tenantId($request));
         if (! $eligibility['allowed']) {
-            return response()->json(['error' => $this->passwordResetFailureMessage()], 400);
+            return response()->json(['message' => $this->passwordResetFailureMessage()], 400);
         }
 
         $status = Password::reset(
@@ -2552,7 +2552,7 @@ class AuthController extends ApiController
         );
 
         if ($status !== Password::PASSWORD_RESET) {
-            return response()->json(['error' => $this->passwordResetFailureMessage()], 400);
+            return response()->json(['message' => $this->passwordResetFailureMessage()], 400);
         }
 
         return response()->json(['data' => 'Password berhasil diubah']);
@@ -2562,18 +2562,18 @@ class AuthController extends ApiController
     {
         $user = $request->user();
         if (! $user) {
-            return response()->json(['error' => 'Unauthenticated'], 401);
+            return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
         if (! $this->requiresPasswordChangeVerification($request)) {
             return response()->json([
-                'error' => 'Verifikasi kode hanya berlaku untuk akun guru dan siswa.',
+                'message' => 'Verifikasi kode hanya berlaku untuk akun guru dan siswa.',
             ], 403);
         }
 
         if (! Schema::hasTable('password_change_verifications')) {
             return response()->json([
-                'error' => 'Fitur verifikasi password belum aktif. Jalankan migrasi terbaru terlebih dahulu.',
+                'message' => 'Fitur verifikasi password belum aktif. Jalankan migrasi terbaru terlebih dahulu.',
             ], 503);
         }
 
@@ -2582,22 +2582,22 @@ class AuthController extends ApiController
             'email' => 'nullable|email|max:255',
         ]);
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $targetEmail = strtolower(trim((string) ($payload['email'] ?? $user->email)));
         $currentEmail = strtolower(trim((string) ($user->email ?? '')));
         if ($targetEmail === '' || ! filter_var($targetEmail, FILTER_VALIDATE_EMAIL)) {
-            return response()->json(['error' => 'Email tujuan verifikasi tidak valid'], 422);
+            return response()->json(['message' => 'Email tujuan verifikasi tidak valid'], 422);
         }
         if (Str::endsWith($targetEmail, '@import.local')) {
             return response()->json([
-                'error' => 'Email akun belum aktif. Isi email aktif dulu, lalu kirim kode verifikasi.',
+                'message' => 'Email akun belum aktif. Isi email aktif dulu, lalu kirim kode verifikasi.',
             ], 422);
         }
         if ($this->shouldRequireGoogleUnlinkBeforeEmailChange($user, $currentEmail, $targetEmail)) {
             return response()->json([
-                'error' => 'Lepas tautan Google terlebih dahulu sebelum mengganti email akun.',
+                'message' => 'Lepas tautan Google terlebih dahulu sebelum mengganti email akun.',
             ], 422);
         }
 
@@ -2606,7 +2606,7 @@ class AuthController extends ApiController
             $seconds = max(1, RateLimiter::availableIn($throttleKey));
 
             return response()->json([
-                'error' => "Terlalu banyak permintaan kode. Coba lagi dalam {$seconds} detik.",
+                'message' => "Terlalu banyak permintaan kode. Coba lagi dalam {$seconds} detik.",
             ], 429);
         }
         RateLimiter::hit($throttleKey, 600);
@@ -2671,7 +2671,7 @@ class AuthController extends ApiController
                 ]);
 
             return response()->json([
-                'error' => 'Gagal mengirim email verifikasi. Cek konfigurasi SMTP lalu coba lagi.',
+                'message' => 'Gagal mengirim email verifikasi. Cek konfigurasi SMTP lalu coba lagi.',
             ], 503);
         }
 
@@ -2693,15 +2693,15 @@ class AuthController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $user = $request->user();
         if (! $user) {
-            return response()->json(['error' => 'Unauthenticated'], 401);
+            return response()->json(['message' => 'Unauthenticated'], 401);
         }
         if ($this->isSuperAdminByIdentity((string) $user->id, (string) ($user->email ?? ''))) {
-            return response()->json(['error' => 'Reset password untuk akun super admin dinonaktifkan'], 403);
+            return response()->json(['message' => 'Reset password untuk akun super admin dinonaktifkan'], 403);
         }
 
         $otpResponse = $this->consumePasswordChangeVerificationCode(
@@ -2744,19 +2744,19 @@ class AuthController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $user = $request->user();
         if (! $user) {
-            return response()->json(['error' => 'Unauthenticated'], 401);
+            return response()->json(['message' => 'Unauthenticated'], 401);
         }
         if ($this->isSuperAdminByIdentity((string) $user->id, (string) ($user->email ?? ''))) {
-            return response()->json(['error' => 'Reset password untuk akun super admin dinonaktifkan'], 403);
+            return response()->json(['message' => 'Reset password untuk akun super admin dinonaktifkan'], 403);
         }
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $profile = $this->profile($request);
@@ -2767,15 +2767,15 @@ class AuthController extends ApiController
         $emailChanged = $email !== '' && $email !== $currentEmail;
 
         if (! $emailChanged && ! $hasPasswordChange) {
-            return response()->json(['error' => 'Tidak ada perubahan akun yang disimpan'], 422);
+            return response()->json(['message' => 'Tidak ada perubahan akun yang disimpan'], 422);
         }
 
         if ($this->isReservedSuperAdminEmail($email)) {
-            return response()->json(['error' => 'Email ini tidak bisa digunakan'], 403);
+            return response()->json(['message' => 'Email ini tidak bisa digunakan'], 403);
         }
         if ($this->shouldRequireGoogleUnlinkBeforeEmailChange($user, $currentEmail, $email)) {
             return response()->json([
-                'error' => 'Lepas tautan Google terlebih dahulu sebelum mengganti email akun ini.',
+                'message' => 'Lepas tautan Google terlebih dahulu sebelum mengganti email akun ini.',
             ], 422);
         }
 
@@ -2786,7 +2786,7 @@ class AuthController extends ApiController
                 ->where('id', '!=', $user->id)
                 ->exists()
         ) {
-            return response()->json(['error' => 'Email sudah terdaftar di sekolah ini'], 409);
+            return response()->json(['message' => 'Email sudah terdaftar di sekolah ini'], 409);
         }
 
         $requiresVerification = $this->requiresPasswordChangeVerification($request)
@@ -2853,7 +2853,7 @@ class AuthController extends ApiController
     {
         $user = $request->user();
         if (! $user) {
-            return response()->json(['error' => 'Unauthenticated'], 401);
+            return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
         if ($user->hasVerifiedEmail()) {
@@ -2865,7 +2865,7 @@ class AuthController extends ApiController
         if (RateLimiter::tooManyAttempts($throttleKey, 3)) {
             $seconds = RateLimiter::availableIn($throttleKey);
 
-            return response()->json(['error' => "Terlalu banyak permintaan. Coba lagi dalam {$seconds} detik."], 429);
+            return response()->json(['message' => "Terlalu banyak permintaan. Coba lagi dalam {$seconds} detik."], 429);
         }
         RateLimiter::hit($throttleKey, 300);
 
@@ -2875,7 +2875,7 @@ class AuthController extends ApiController
             report($e);
 
             return response()->json([
-                'error' => 'Layanan email sedang bermasalah. Coba lagi beberapa menit.',
+                'message' => 'Layanan email sedang bermasalah. Coba lagi beberapa menit.',
             ], 503);
         }
 
@@ -2952,7 +2952,7 @@ class AuthController extends ApiController
                 'user_id' => (string) $user->id,
             ], (string) $user->id, null);
 
-            return response()->json(['error' => 'Password akun tidak sesuai.'], 422);
+            return response()->json(['message' => 'Password akun tidak sesuai.'], 422);
         }
 
         $request->setUserResolver(fn () => $user);
@@ -3053,14 +3053,14 @@ class AuthController extends ApiController
 
         if (! Schema::hasTable('password_change_verifications')) {
             return response()->json([
-                'error' => 'Fitur verifikasi password belum aktif. Jalankan migrasi terbaru terlebih dahulu.',
+                'message' => 'Fitur verifikasi password belum aktif. Jalankan migrasi terbaru terlebih dahulu.',
             ], 503);
         }
 
         $normalizedCode = trim($code);
         if (! preg_match('/^\d{6}$/', $normalizedCode)) {
             return response()->json([
-                'error' => 'Kode verifikasi 6 digit wajib diisi.',
+                'message' => 'Kode verifikasi 6 digit wajib diisi.',
             ], 422);
         }
 
@@ -3158,7 +3158,7 @@ class AuthController extends ApiController
 
         if (! ($result['ok'] ?? false)) {
             return response()->json([
-                'error' => (string) ($result['message'] ?? 'Verifikasi kode gagal.'),
+                'message' => (string) ($result['message'] ?? 'Verifikasi kode gagal.'),
             ], (int) ($result['status'] ?? 422));
         }
 
@@ -3752,14 +3752,14 @@ class AuthController extends ApiController
     public function sendEmailVerificationCode(Request $request)
     {
         return response()->json([
-            'error' => 'Verifikasi email 6 digit sudah dinonaktifkan. Kode 6 digit sekarang dipakai saat mengganti email atau password akun.',
+            'message' => 'Verifikasi email 6 digit sudah dinonaktifkan. Kode 6 digit sekarang dipakai saat mengganti email atau password akun.',
         ], 410);
     }
 
     public function verifyEmailCode(Request $request)
     {
         return response()->json([
-            'error' => 'Verifikasi email 6 digit sudah dinonaktifkan. Kode 6 digit sekarang dipakai saat mengganti email atau password akun.',
+            'message' => 'Verifikasi email 6 digit sudah dinonaktifkan. Kode 6 digit sekarang dipakai saat mengganti email atau password akun.',
         ], 410);
     }
 }

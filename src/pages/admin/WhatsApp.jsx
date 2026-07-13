@@ -227,7 +227,7 @@ function SuperWhatsAppCenter() {
     : (integration?.qr_code || integration?.pairing_code || currentStatus === 'awaiting_qr')
       ? 'Refresh QR'
       : 'Generate QR'
-  const configuredEvolutionUrl = String(central.provider?.public_url || provider.public_url || '').trim().replace(/\/+$/, '')
+  const configuredEvolutionUrl = String(central.provider?.public_url || (provider.public_url || '')).trim().replace(/\/+$/, '')
   const evolutionManagerHost = getEvolutionManagerHost()
   const evolutionPublicUrl = integration?.instance_name
     ? `${configuredEvolutionUrl || `https://${evolutionManagerHost}`}/manager/instance/${integration.instance_name}`

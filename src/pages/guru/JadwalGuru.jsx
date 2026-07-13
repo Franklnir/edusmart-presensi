@@ -18,7 +18,7 @@ import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 
 const getKelasDisplayName = (kelasObj) => {
   if (!kelasObj) return ''
-  return kelasObj.nama || kelasObj.id || ''
+  return kelasObj.nama || (kelasObj.id || '')
 }
 
 const getNamaKelasFromList = (kelasId, kelasList) => {
@@ -1651,7 +1651,7 @@ export default function JadwalGuru() {
         if (!jadwalErr && jadwalData) {
           const normalizedJadwal = jadwalData.map((item) => ({
             ...item,
-            kelas_id: item.kelas_id || item.kelas || ''
+            kelas_id: item.kelas_id || (item.kelas || '')
           }))
           setJadwal(filterSchedulesForSemester(normalizedJadwal, activeAcademicPeriod.semester))
         }

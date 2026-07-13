@@ -97,7 +97,7 @@ class AcademicPeriodConsistencyTest extends TestCase
         $this->actingAs($admin)
             ->postJson('/api/db', $archiveAttempt)
             ->assertStatus(409)
-            ->assertJsonPath('code', 'academic_period_locked');
+            ->assertJsonPath('code', 'ACADEMIC_PERIOD_LOCKED');
 
         DB::table('settings')
             ->where('tenant_id', $tenantId)
@@ -152,7 +152,7 @@ class AcademicPeriodConsistencyTest extends TestCase
         $this->actingAs($teacher)
             ->postJson('/api/db', $spoofedPayload)
             ->assertStatus(409)
-            ->assertJsonPath('code', 'academic_period_locked');
+            ->assertJsonPath('code', 'ACADEMIC_PERIOD_LOCKED');
 
         $this->actingAs($teacher)->postJson('/api/db', $payload)->assertOk();
 
@@ -262,7 +262,7 @@ class AcademicPeriodConsistencyTest extends TestCase
         $this->actingAs($teacher)
             ->postJson('/api/db', $archivePayload)
             ->assertStatus(409)
-            ->assertJsonPath('code', 'academic_period_locked');
+            ->assertJsonPath('code', 'ACADEMIC_PERIOD_LOCKED');
     }
 
     public function test_promoted_student_reads_previous_year_schedule_tasks_and_quiz_only_for_historical_class(): void
@@ -412,7 +412,7 @@ class AcademicPeriodConsistencyTest extends TestCase
         $this->actingAs($student)
             ->postJson('/api/quiz/start', ['quiz_id' => 'historical-quiz-own'])
             ->assertStatus(403)
-            ->assertJsonPath('error', 'Quiz bukan periode akademik aktif');
+            ->assertJsonPath('message', 'Quiz bukan periode akademik aktif');
     }
 
     public function test_teacher_mutation_preserves_historical_assignments_and_clears_only_active_period(): void
@@ -556,7 +556,7 @@ class AcademicPeriodConsistencyTest extends TestCase
             'filters' => ['eq' => ['id' => $taskId, 'tahun_ajaran' => '2025/2026']],
             'payload' => ['judul' => 'Tidak Boleh Berubah'],
         ]);
-        $locked->assertStatus(409)->assertJsonPath('code', 'academic_period_locked');
+        $locked->assertStatus(409)->assertJsonPath('code', 'ACADEMIC_PERIOD_LOCKED');
 
         $periods = $this->actingAs($admin)->getJson('/api/admin/academic-periods');
         $periods->assertOk();
@@ -618,7 +618,7 @@ class AcademicPeriodConsistencyTest extends TestCase
                 'payload' => ['judul' => 'Tidak Boleh Setelah Kedaluwarsa'],
             ])
             ->assertStatus(409)
-            ->assertJsonPath('code', 'academic_correction_session_invalid');
+            ->assertJsonPath('code', 'ACADEMIC_CORRECTION_SESSION_INVALID');
         $this->assertDatabaseHas('academic_correction_sessions', ['id' => $sessionId, 'status' => 'expired']);
         $this->assertDatabaseHas('tugas', ['id' => $taskId, 'judul' => 'Judul Arsip Terkoreksi']);
 

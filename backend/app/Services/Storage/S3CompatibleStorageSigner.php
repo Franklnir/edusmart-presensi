@@ -92,7 +92,7 @@ class S3CompatibleStorageSigner
                     'size_bytes' => null,
                     'attempts' => $attempt,
                     'retryable' => $attempt < $attempts,
-                    'error' => $e->getMessage(),
+                    'message' => $e->getMessage(),
                 ];
 
                 if ($attempt < $attempts) {

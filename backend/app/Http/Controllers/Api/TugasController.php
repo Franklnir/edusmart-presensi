@@ -177,7 +177,7 @@ class TugasController extends ApiController
         $period = $this->academicPeriodLifecycle->currentContext($tenantId);
         if (! $this->taskMatchesPeriod($tugas, $period)) {
             return response()->json([
-                'error' => 'Tugas periode arsip terkunci.',
+                'message' => 'Tugas periode arsip terkunci.',
                 'code' => 'academic_period_locked',
             ], 409);
         }
@@ -237,7 +237,7 @@ class TugasController extends ApiController
         $period = $this->academicPeriodLifecycle->currentContext($tenantId);
         if (! $this->taskMatchesPeriod($tugas, $period)) {
             return response()->json([
-                'error' => 'Tugas periode arsip terkunci.',
+                'message' => 'Tugas periode arsip terkunci.',
                 'code' => 'academic_period_locked',
             ], 409);
         }
@@ -489,12 +489,12 @@ class TugasController extends ApiController
                 $this->applyTenantColumnFilter($tugasQuery, 'tugas', $tenantId);
                 $tugas = $tugasQuery->first();
                 if (! $tugas) {
-                    return ['error' => 'Tugas tidak diizinkan', 'status' => 422];
+                    return ['message' => 'Tugas tidak diizinkan', 'status' => 422];
                 }
 
                 if (! $this->taskMatchesPeriod($tugas, $activePeriod)) {
                     return [
-                        'error' => 'Tugas periode arsip terkunci dan tidak dapat dikumpulkan.',
+                        'message' => 'Tugas periode arsip terkunci dan tidak dapat dikumpulkan.',
                         'code' => 'academic_period_locked',
                         'status' => 409,
                     ];
@@ -502,7 +502,7 @@ class TugasController extends ApiController
 
                 $availabilityError = $this->tugasAvailabilityError($tugas);
                 if ($availabilityError !== null) {
-                    return ['error' => $availabilityError, 'status' => 422];
+                    return ['message' => $availabilityError, 'status' => 422];
                 }
 
                 $existingQuery = DB::table('tugas_jawaban')
@@ -512,7 +512,7 @@ class TugasController extends ApiController
                 $existing = $existingQuery->lockForUpdate()->first();
 
                 if ($existing && $this->isJawabanDinilai($existing)) {
-                    return ['error' => 'Jawaban yang sudah dinilai tidak boleh diubah', 'status' => 422];
+                    return ['message' => 'Jawaban yang sudah dinilai tidak boleh diubah', 'status' => 422];
                 }
 
                 $payload = $this->buildStudentAnswerPayload(
@@ -557,10 +557,14 @@ class TugasController extends ApiController
             optional($lock)->release();
         }
 
-        if (isset($result['error'])) {
+        if (isset($result['message']) && isset($result['status'])) {
             return response()->json([
-                'error' => $result['error'],
+                'success' => false,
+                'message' => $result['message'],
+                'error' => $result['message'],
                 'code' => $result['code'] ?? 'assignment_submission_rejected',
+                'errors' => (object)[],
+                'request_id' => request()->header('X-Request-ID') ?? (string) \Illuminate\Support\Str::uuid(),
             ], (int) ($result['status'] ?? 422));
         }
 

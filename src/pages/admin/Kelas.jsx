@@ -65,7 +65,7 @@ function RolloverExceptionStudentRow({
   getClassName
 }) {
   const siswa = items[index] || {}
-  const uid = siswa.uid || siswa.id || ''
+  const uid = siswa.uid || (siswa.id || '')
 
   return (
     <div style={style} {...ariaAttributes}>
@@ -1079,7 +1079,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const kelasNameById = React.useMemo(() => {
     const map = {}
     kelas.forEach((item) => {
-      map[item.id] = (item.nama || item.id || '').toUpperCase()
+      map[item.id] = (item.nama || (item.id || '')).toUpperCase()
     })
     return map
   }, [kelas])
@@ -1117,7 +1117,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const kelasOptions = React.useMemo(() => (
     kelas.map((item) => ({
       value: item.id,
-      label: (item.nama || item.id || '').toUpperCase(),
+      label: (item.nama || (item.id || '')).toUpperCase(),
       grade: item.grade || parseGrade(item.id)
     }))
   ), [kelas])
@@ -1143,7 +1143,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
     if (promotionFilterGrade) {
       rows = rows.filter((siswa) => {
         const classRow = findClassByLookup(kelasByAlias, siswa.kelas)
-        const grade = classRow?.grade || parseGrade(classRow?.nama || siswa.kelas || '')
+        const grade = classRow?.grade || parseGrade(classRow?.nama || (siswa.kelas || ''))
         return grade === promotionFilterGrade
       })
     }
@@ -3180,7 +3180,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
                       <div className="mt-4 lg:mt-0 w-full lg:w-auto">
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           <select
-                            value={exportClassId || kelasSelected || ''}
+                            value={exportClassId || (kelasSelected || '')}
                             onChange={(event) => setExportClassId(event.target.value)}
                             className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
                           >

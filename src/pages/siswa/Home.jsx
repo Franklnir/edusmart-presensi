@@ -1097,7 +1097,7 @@ export default function SHome() {
         academic_period: {
           tahunAjaran: period.tahunAjaran,
           semester: period.semester,
-          endsAt: period.endsAt || period.periodeSelesai || ''
+          endsAt: period.endsAt || (period.periodeSelesai || '')
         },
         pembina_nama: pembinaMap[e.pembina_guru_id] || '',
         jumlah_anggota: 0,

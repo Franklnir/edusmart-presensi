@@ -1660,7 +1660,7 @@ export default function TugasSiswa() {
               <label className="sismu-filter-label">Kelas</label>
               <input
                 className="sismu-filter-control"
-                value={selectedKelas || kelasSiswa || ''}
+                value={selectedKelas || (kelasSiswa || '')}
                 readOnly
               />
               <p className="sismu-filter-help">Kelas otomatis dari profil.</p>

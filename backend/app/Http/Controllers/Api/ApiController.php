@@ -146,9 +146,27 @@ class ApiController extends Controller
         return $this->profile($request)?->kelas;
     }
 
-    protected function deny(string $message = 'Akses ditolak', int $code = 403)
+    protected function deny(string $message = 'Akses ditolak', int $status = 403, ?string $errorCode = null)
     {
-        return response()->json(['error' => $message], $code);
+        $defaultCode = match($status) {
+            400 => 'BAD_REQUEST',
+            401 => 'UNAUTHENTICATED',
+            403 => 'FORBIDDEN',
+            404 => 'NOT_FOUND',
+            409 => 'CONFLICT',
+            422 => 'VALIDATION_ERROR',
+            429 => 'RATE_LIMIT',
+            default => 'SERVER_ERROR',
+        };
+
+        return response()->json([
+            'success' => false,
+            'code' => $errorCode ?? $defaultCode,
+            'message' => $message,
+            'message' => $message, // Backward compatibility for legacy consumers
+            'errors' => (object)[],
+            'request_id' => request()->header('X-Request-ID') ?? (string) \Illuminate\Support\Str::uuid(),
+        ], $status);
     }
 
     protected function tenantId(Request $request): ?string

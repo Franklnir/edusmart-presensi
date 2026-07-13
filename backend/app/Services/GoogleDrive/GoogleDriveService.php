@@ -357,7 +357,7 @@ class GoogleDriveService
                 'tenant_id' => $tenantId,
                 'context' => $context,
                 'requires_reconnect' => $requiresReconnect,
-                'error' => $message,
+                'message' => $message,
             ]);
 
             return [
@@ -526,7 +526,7 @@ class GoogleDriveService
                 Log::warning('Failed to protect Google Drive backup file', [
                     'tenant_id' => $tenantId,
                     'drive_file_id' => $fileId,
-                    'error' => $this->shortError($e->getMessage()),
+                    'message' => $this->shortError($e->getMessage()),
                 ]);
             }
         }
@@ -1125,7 +1125,7 @@ class GoogleDriveService
                 $statsError = $this->shortError($e->getMessage());
                 Log::warning('google_drive_usage_stats_failed', [
                     'tenant_id' => $tenantId,
-                    'error' => $statsError,
+                    'message' => $statsError,
                 ]);
             }
         }

@@ -409,7 +409,7 @@ export default function StrukturSekolahTab({
     }
 
     const jabatan = normalizeSpaces(posBaru)
-    const normalizedJabatan = jabatan.toLowerCase()
+    const normalizedJabatan = String(jabatan || '').toLowerCase()
 
     if (!jabatan) {
       pushToast('error', 'Nama jabatan harus diisi')
@@ -421,7 +421,7 @@ export default function StrukturSekolahTab({
       return
     }
 
-    const duplicate = struktur.some((item) => normalizeSpaces(item.jabatan).toLowerCase() === normalizedJabatan)
+    const duplicate = struktur.some((item) => String(normalizeSpaces(item.jabatan) || '').toLowerCase() === normalizedJabatan)
     if (duplicate) {
       pushToast('error', 'Jabatan tersebut sudah ada di struktur sekolah ini')
       return

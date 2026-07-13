@@ -76,13 +76,13 @@ class ReportController extends ApiController
 
         $type = strtolower(trim((string) $request->query('type', '')));
         if (! in_array($type, ['absensi', 'tugas', 'quiz'], true)) {
-            return response()->json(['error' => 'type harus absensi, tugas, atau quiz'], 422);
+            return response()->json(['message' => 'type harus absensi, tugas, atau quiz'], 422);
         }
 
         $kelas = trim((string) $request->query('kelas', ''));
         $mapel = trim((string) $request->query('mapel', ''));
         if ($kelas === '' || $mapel === '') {
-            return response()->json(['error' => 'kelas dan mapel wajib diisi'], 422);
+            return response()->json(['message' => 'kelas dan mapel wajib diisi'], 422);
         }
 
         if (! $this->canAccessClassSubject($request, $tenantId, $kelas, $mapel)) {
@@ -133,7 +133,7 @@ class ReportController extends ApiController
 
         $kelas = trim((string) ($request->query('kelas') ?: $request->query('kelas_id', '')));
         if ($kelas === '') {
-            return response()->json(['error' => 'kelas wajib diisi'], 422);
+            return response()->json(['message' => 'kelas wajib diisi'], 422);
         }
 
         if (! $this->canAccessHomeroom($request, $tenantId, $kelas)) {
