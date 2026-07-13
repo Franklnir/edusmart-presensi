@@ -963,6 +963,52 @@ class AcademicPeriodConsistencyTest extends TestCase
         ]);
     }
 
+    public function test_quiz_report_filters_selected_semester_and_keeps_legacy_rows(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-10 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $this->seedSettings($tenantId, '2026/2027', AcademicPeriod::SEMESTER_GANJIL);
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-quiz-report-term@example.com', 'ADMIN');
+        $teacher = $this->createUserWithProfile($tenantId, 'guru', 'teacher-quiz-report-term@example.com', 'X-A');
+
+        foreach ([
+            ['id' => 'quiz-report-ganjil', 'semester' => AcademicPeriod::SEMESTER_GANJIL],
+            ['id' => 'quiz-report-genap', 'semester' => AcademicPeriod::SEMESTER_GENAP],
+            ['id' => 'quiz-report-legacy', 'semester' => null],
+        ] as $quiz) {
+            DB::table('quizzes')->insert([
+                'id' => $quiz['id'],
+                'tenant_id' => $tenantId,
+                'guru_id' => $teacher->id,
+                'kelas_id' => 'X-A',
+                'mapel' => 'Biologi',
+                'nama' => $quiz['id'],
+                'penilaian' => 'otomatis',
+                'mode' => 'uas',
+                'is_live' => false,
+                'is_active' => false,
+                'tahun_ajaran' => '2026/2027',
+                'semester' => $quiz['semester'],
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $response = $this->actingAs($admin)->getJson(
+            '/api/reports/quiz-summary?kelas=X-A&mapel=Biologi&months=2026-08&tahun_ajaran=2026%2F2027&semester=Ganjil'
+        );
+
+        $response->assertOk();
+        $quizRows = collect($response->json('data.quizzes') ?? []);
+        $this->assertEqualsCanonicalizing(
+            ['quiz-report-ganjil', 'quiz-report-legacy'],
+            $quizRows->pluck('id')->all()
+        );
+        $this->assertSame(AcademicPeriod::SEMESTER_GANJIL, $quizRows->firstWhere('id', 'quiz-report-ganjil')['semester']);
+        $this->assertNull($quizRows->firstWhere('id', 'quiz-report-legacy')['semester']);
+    }
+
     public function test_reference_verifier_detects_drift_and_supports_strict_cutover_gate(): void
     {
         $tenantId = $this->defaultTenantId();

@@ -64,8 +64,8 @@ const normalizeMode = (quiz) => {
   return normalizeAssessmentSlot(quiz?.mode, { isLive: Boolean(quiz?.is_live) })
 }
 
-const getModeLabel = (quiz) => {
-  return getAssessmentSlotLabel(normalizeMode(quiz), quiz?.semester, { formal: true })
+const getModeLabel = (quiz, fallbackSemester = '') => {
+  return getAssessmentSlotLabel(normalizeMode(quiz), quiz?.semester || fallbackSemester, { formal: true })
 }
 
 const normalizeQuestionType = (value) => {
@@ -2957,7 +2957,7 @@ export default function SiswaQuiz() {
                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
                         <span>{selectedQuiz.mapel || '-'}</span>
                         <span className="text-slate-300">/</span>
-                        <span>{getModeLabel(selectedQuiz)}</span>
+                        <span>{getModeLabel(selectedQuiz, termPeriod.semester)}</span>
                         <span className="text-slate-300">/</span>
                         <span>Akses {sessionAccessLabel}</span>
                       </div>
@@ -3058,7 +3058,7 @@ export default function SiswaQuiz() {
                           <div className="text-[11px] text-slate-500">Soal</div>
                         </div>
                         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                          <div className="text-lg font-bold text-slate-950">{getModeLabel(selectedQuiz)}</div>
+                          <div className="text-lg font-bold text-slate-950">{getModeLabel(selectedQuiz, termPeriod.semester)}</div>
                           <div className="text-[11px] text-slate-500">Mode</div>
                         </div>
                         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
@@ -3530,7 +3530,7 @@ export default function SiswaQuiz() {
                       <div className="min-w-0">
                         <div className="truncate font-semibold text-slate-900">{q.nama}</div>
                         <div className="mt-1 text-xs text-slate-500">
-                          {q.mapel || '-'} • {getModeLabel(q)} • Akses {getAccessDeviceLabel(q.access_device)}
+                          {q.mapel || '-'} • {getModeLabel(q, termPeriod.semester)} • Akses {getAccessDeviceLabel(q.access_device)}
                         </div>
                       </div>
                       <span className={`shrink-0 rounded-md border px-2 py-0.5 text-[11px] ${status.tone}`}>
@@ -3588,7 +3588,7 @@ export default function SiswaQuiz() {
                       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-500">
                         <span>{selectedQuiz.mapel}</span>
                         <span>•</span>
-                        <span>Mode {getModeLabel(selectedQuiz)}</span>
+                        <span>Mode {getModeLabel(selectedQuiz, termPeriod.semester)}</span>
                         <span>•</span>
                         <span>Akses {getAccessDeviceLabel(selectedQuiz.access_device)}</span>
                       </div>
