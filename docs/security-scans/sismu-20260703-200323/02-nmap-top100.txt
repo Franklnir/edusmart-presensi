@@ -1,0 +1,11 @@
+# Nmap 7.99 scan initiated Fri Jul  3 20:03:45 2026 as: /usr/lib/nmap/nmap --privileged -Pn -n --top-ports 100 --max-retries 2 --host-timeout 90s --defeat-rst-ratelimit -oN docs/security-scans/sismu-20260703-200323/02-nmap-top100.txt sismu.biz.id
+Nmap scan report for sismu.biz.id (103.191.63.170)
+Host is up (0.012s latency).
+Not shown: 97 filtered tcp ports (no-response)
+Some closed ports may be reported as filtered due to --defeat-rst-ratelimit
+PORT    STATE SERVICE
+22/tcp  open  ssh
+80/tcp  open  http
+443/tcp open  https
+
+# Nmap done at Fri Jul  3 20:03:48 2026 -- 1 IP address (1 host up) scanned in 2.72 seconds

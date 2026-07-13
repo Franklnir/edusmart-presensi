@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'signing_key' => env('BACKUP_SIGNING_KEY', ''),
+    'signing_key_id' => trim((string) env('BACKUP_SIGNING_KEY_ID', 'primary')) ?: 'primary',
     'queue' => trim((string) env('BACKUP_QUEUE', 'backup')) ?: 'backup',
     'job_status_ttl_hours' => max(1, (int) env('BACKUP_JOB_STATUS_TTL_HOURS', 24)),
     'job_timeout_seconds' => max(120, (int) env('BACKUP_JOB_TIMEOUT_SECONDS', 900)),

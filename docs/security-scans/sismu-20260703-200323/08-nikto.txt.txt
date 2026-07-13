@@ -1,0 +1,14 @@
+- Nikto v2.6.0/
++ Target Host: sismu.biz.id
++ Target Port: 443
++ GET /: Retrieved via header: 1.1 Caddy.
++ GET /: An alt-svc header was found which is advertising HTTP/3. The endpoint is: ':443'. Nikto cannot test HTTP/3 over QUIC. See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/alt-svc: 
++ GET /: Server banner changed from 'nginx' to 'Caddy'.
++ SSL Info:           Subject:  /CN=sismu.biz.id
+                      CN:       sismu.biz.id
+                      SAN:      sismu.biz.id
+                      Ciphers:  TLS_AES_128_GCM_SHA256
+                      Issuer:   /C=US/O=Let's Encrypt/CN=E7
++ GET /robots.txt: Entry '/manager/' is returned a non-forbidden or redirect HTTP code (200). See: https://portswigger.net/kb/issues/00600600_robots-txt-file: 
++ GET /robots.txt: Entry '/admin/' is returned a non-forbidden or redirect HTTP code (200). See: https://portswigger.net/kb/issues/00600600_robots-txt-file: 
++ GET /robots.txt: contains 3 entries which should be manually viewed. See: https://developer.mozilla.org/en-US/docs/Glossary/Robots.txt: 

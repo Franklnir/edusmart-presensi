@@ -1,0 +1,5 @@
+[91m[-][0m WAF detected: [92mAmazon Web Services Web Application Firewall (Amazon)[0m [0m
+[91m[-][0m WAF detected: [92mAmazon Web Services Web Application Firewall (Amazon)[0m [0m
+[93m[!][0m Testing parameter: x [0m
+[91m[-][0m No reflection found [0m
+[91m[-][0m No reflection found [0m

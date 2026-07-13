@@ -62,12 +62,22 @@ const superApi = {
     },
     async tenantBackup(id, options = {}) {
       const mode = String(options?.mode || '').trim()
+      const periodType = String(options?.periodType || options?.period_type || '').trim()
+      const tahunAjaran = String(options?.tahunAjaran || options?.tahun_ajaran || '').trim()
+      const semester = String(options?.semester || '').trim()
+      const startDate = String(options?.startDate || options?.start_date || '').trim()
+      const endDate = String(options?.endDate || options?.end_date || '').trim()
       const monthsRaw = options?.months
       const params = new URLSearchParams()
       if (mode) params.set('mode', mode)
+      if (periodType) params.set('period_type', periodType)
       if (Number.isFinite(Number(monthsRaw)) && Number(monthsRaw) > 0) {
         params.set('months', String(Math.trunc(Number(monthsRaw))))
       }
+      if (tahunAjaran) params.set('tahun_ajaran', tahunAjaran)
+      if (semester) params.set('semester', semester)
+      if (startDate) params.set('start_date', startDate)
+      if (endDate) params.set('end_date', endDate)
       const query = params.toString() ? `?${params.toString()}` : ''
       const res = await apiFetch(`/api/super/tenants/${id}/backup${query}`, {
         method: 'GET',

@@ -1,0 +1,16 @@
+
+                 ?              ,.   (   .      )        .      "
+         __        ??          ("     )  )'     ,'        )  . (`     '`
+    (___()'`;   ???          .; )  ' (( (" )    ;(,     ((  (  ;)  "  )")
+    /,___ /`                 _"., ,._'_.,)_(..,( . )_  _' )_') (. _..( ' )
+    \\   \\                 |____|____|____|____|____|____|____|____|____|
+
+                                ~ WAFW00F : v2.4.2 ~
+                    ~ Sniffing Web Application Firewalls since 2009 ~
+
+[*] Checking https://sismu.biz.id
+[+] Generic Detection results:
+[*] The site https://sismu.biz.id seems to be behind a WAF or some sort of security solution
+[~] Reason: The server returns a different response code when an attack string is used.
+Normal response code is "200", while the response code to cross-site scripting attack is "403"
+[~] Number of requests: 5

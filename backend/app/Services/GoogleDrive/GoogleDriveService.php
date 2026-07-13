@@ -4,6 +4,7 @@ namespace App\Services\GoogleDrive;
 
 use App\Models\TenantGoogleDriveConfig;
 use App\Models\TenantGoogleDriveFile;
+use App\Services\Backup\BackupSpreadsheetService;
 use App\Support\AcademicPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -42,6 +43,8 @@ class GoogleDriveService
     ];
 
     private const DRIVE_PROPERTY_BYTE_LIMIT = 124;
+
+    public function __construct(private readonly BackupSpreadsheetService $backupSpreadsheetService) {}
 
     public function providerConfigured(): bool
     {
@@ -437,11 +440,98 @@ class GoogleDriveService
             $userId,
             $backupPayload,
             $fileName,
-            'xls',
-            'application/vnd.ms-excel; charset=utf-8',
-            $this->backupPayloadToExcelHtml($backupPayload),
-            'Backup database EduSmart Presensi dalam format Excel-compatible. File ini berisi data database tenant dan metadata file, bukan isi file storage.'
+            'xlsx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            $this->backupSpreadsheetService->makeContents($backupPayload),
+            'Backup data SISMU dalam workbook Excel asli. Nilai sensitif disamarkan dan file storage hanya dicatat sebagai metadata.'
         );
+    }
+
+    public function protectTenantBackupFiles(string $tenantId, bool $dryRun = false): array
+    {
+        $tenantId = trim($tenantId);
+        if ($tenantId === '' || ! $this->tablesReady()) {
+            throw new RuntimeException('Tenant atau tabel Google Drive tidak valid.');
+        }
+
+        $config = TenantGoogleDriveConfig::query()
+            ->where('tenant_id', $tenantId)
+            ->where('is_enabled', true)
+            ->first();
+        if (! $config || trim((string) ($config->refresh_token ?? '')) === '') {
+            throw new RuntimeException('Google Drive sekolah belum tersambung.');
+        }
+
+        $accessToken = $this->validAccessToken($config);
+        $fileIds = TenantGoogleDriveFile::query()
+            ->where('tenant_id', $tenantId)
+            ->where('bucket', 'backups')
+            ->whereNotNull('drive_file_id')
+            ->pluck('drive_file_id')
+            ->map(fn ($value) => trim((string) $value))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $result = [
+            'tenant_id' => $tenantId,
+            'dry_run' => $dryRun,
+            'files_checked' => 0,
+            'public_permissions_found' => 0,
+            'permissions_revoked' => 0,
+            'errors' => 0,
+        ];
+
+        foreach ($fileIds as $fileId) {
+            $result['files_checked']++;
+
+            try {
+                $response = Http::withToken($accessToken)
+                    ->acceptJson()
+                    ->timeout(20)
+                    ->get('https://www.googleapis.com/drive/v3/files/'.rawurlencode($fileId).'/permissions', [
+                        'fields' => 'permissions(id,type,role)',
+                        'supportsAllDrives' => 'true',
+                    ]);
+                if (! $response->successful()) {
+                    throw new RuntimeException($this->googleErrorMessage($response->json(), 'Gagal membaca izin file backup.'));
+                }
+
+                foreach ((array) data_get($response->json(), 'permissions', []) as $permission) {
+                    $type = strtolower(trim((string) ($permission['type'] ?? '')));
+                    $permissionId = trim((string) ($permission['id'] ?? ''));
+                    if (! in_array($type, ['anyone', 'domain'], true) || $permissionId === '') {
+                        continue;
+                    }
+
+                    $result['public_permissions_found']++;
+                    if ($dryRun) {
+                        continue;
+                    }
+
+                    $deleted = Http::withToken($accessToken)
+                        ->acceptJson()
+                        ->timeout(20)
+                        ->delete(
+                            'https://www.googleapis.com/drive/v3/files/'.rawurlencode($fileId).'/permissions/'.rawurlencode($permissionId),
+                            ['supportsAllDrives' => 'true']
+                        );
+                    if (! $deleted->successful()) {
+                        throw new RuntimeException($this->googleErrorMessage($deleted->json(), 'Gagal mencabut izin publik backup.'));
+                    }
+                    $result['permissions_revoked']++;
+                }
+            } catch (\Throwable $e) {
+                $result['errors']++;
+                Log::warning('Failed to protect Google Drive backup file', [
+                    'tenant_id' => $tenantId,
+                    'drive_file_id' => $fileId,
+                    'error' => $this->shortError($e->getMessage()),
+                ]);
+            }
+        }
+
+        return $result;
     }
 
     private function uploadTenantBackupContents(
@@ -523,6 +613,7 @@ class GoogleDriveService
                 'backup_period' => (string) ($backupPayload['period']['label'] ?? ''),
                 'backup_type' => (string) ($backupPayload['manifest']['backup_type'] ?? 'tenant_database'),
                 'format' => $extension,
+                'access_policy' => 'private',
             ],
         ];
 
@@ -530,15 +621,6 @@ class GoogleDriveService
         $fileId = trim((string) ($created['id'] ?? ''));
         if ($fileId === '') {
             throw new RuntimeException('Google Drive tidak mengembalikan ID file backup.');
-        }
-
-        $shareWarning = null;
-        if ((bool) $this->driveConfig('share_uploaded_files', true)) {
-            try {
-                $this->shareFileWithLink($accessToken, $fileId);
-            } catch (\Throwable $e) {
-                $shareWarning = $this->shortError($e->getMessage());
-            }
         }
 
         $fileInfo = $this->fetchDriveFile($accessToken, $fileId);
@@ -586,14 +668,6 @@ class GoogleDriveService
             // File backup sudah tersimpan; quota bisa disegarkan manual dari UI.
         }
 
-        if ($shareWarning) {
-            $config->fill([
-                'last_checked_at' => now(),
-                'last_error' => $shareWarning,
-            ]);
-            $config->save();
-        }
-
         return [
             'bucket' => 'backups',
             'drive_file_id' => $fileId,
@@ -605,6 +679,7 @@ class GoogleDriveService
             'size_bytes' => $sizeBytes,
             'size_label' => $this->formatBytes($sizeBytes),
             'uploaded_at' => now()->toIso8601String(),
+            'access_policy' => 'private',
             'quota' => $this->statusForTenant($tenantId, true)['quota'] ?? null,
         ];
     }
@@ -1785,86 +1860,6 @@ class GoogleDriveService
         }
 
         return $metadata;
-    }
-
-    private function backupPayloadToExcelHtml(array $payload): string
-    {
-        $escape = static fn ($value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $tables = is_array($payload['tables'] ?? null) ? $payload['tables'] : [];
-        $tenant = is_array($payload['tenant'] ?? null) ? $payload['tenant'] : [];
-        $period = is_array($payload['period'] ?? null) ? $payload['period'] : [];
-        $summary = is_array($payload['summary'] ?? null) ? $payload['summary'] : [];
-
-        $html = '<!doctype html><html><head><meta charset="UTF-8">'
-            .'<style>'
-            .'body{font-family:Arial,sans-serif;font-size:12px;color:#111827}'
-            .'h1{font-size:20px;margin:0 0 10px} h2{font-size:16px;margin:24px 0 8px}'
-            .'table{border-collapse:collapse;width:100%;margin-bottom:18px}'
-            .'th{background:#e2e8f0;font-weight:bold} th,td{border:1px solid #cbd5e1;padding:6px;vertical-align:top}'
-            .'.meta td:first-child{font-weight:bold;width:220px;background:#f8fafc}'
-            .'</style></head><body>';
-
-        $html .= '<h1>Backup Data Sekolah</h1><table class="meta">';
-        $metaRows = [
-            ['Tenant ID', $tenant['id'] ?? '-'],
-            ['Nama Sekolah', $tenant['name'] ?? '-'],
-            ['Mode Backup', $payload['mode_label'] ?? $payload['mode'] ?? '-'],
-            ['Periode', $period['label'] ?? '-'],
-            ['Dibuat Pada', $payload['exported_at'] ?? now()->toIso8601String()],
-            ['Jumlah Tabel', $summary['table_count'] ?? count($tables)],
-            ['Jumlah Baris', $summary['total_rows'] ?? 0],
-        ];
-        foreach ($metaRows as [$label, $value]) {
-            $html .= '<tr><td>'.$escape($label).'</td><td>'.$escape($value).'</td></tr>';
-        }
-        $html .= '</table>';
-
-        foreach ($tables as $table) {
-            if (! is_array($table)) {
-                continue;
-            }
-            $name = (string) ($table['name'] ?? 'Tabel');
-            $rows = is_array($table['rows'] ?? null) ? $table['rows'] : [];
-            $columns = is_array($table['columns'] ?? null) ? $table['columns'] : [];
-            if (empty($columns) && ! empty($rows)) {
-                $keys = [];
-                foreach ($rows as $row) {
-                    if (! is_array($row)) {
-                        continue;
-                    }
-                    foreach (array_keys($row) as $key) {
-                        $keys[$key] = $key;
-                    }
-                }
-                $columns = array_values($keys);
-            }
-
-            $html .= '<h2>'.$escape($name).' ('.$escape($table['row_count'] ?? count($rows)).' baris)</h2>';
-            $html .= '<table><thead><tr>';
-            foreach ($columns as $column) {
-                $html .= '<th>'.$escape($column).'</th>';
-            }
-            $html .= '</tr></thead><tbody>';
-            if (empty($rows)) {
-                $html .= '<tr><td colspan="'.max(1, count($columns)).'">Tidak ada data</td></tr>';
-            } else {
-                foreach ($rows as $row) {
-                    $row = is_array($row) ? $row : [];
-                    $html .= '<tr>';
-                    foreach ($columns as $column) {
-                        $value = $row[$column] ?? '';
-                        if (is_array($value) || is_object($value)) {
-                            $value = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                        }
-                        $html .= '<td>'.$escape($value).'</td>';
-                    }
-                    $html .= '</tr>';
-                }
-            }
-            $html .= '</tbody></table>';
-        }
-
-        return $html.'</body></html>';
     }
 
     private function sanitizeDriveProperties(array $properties): array

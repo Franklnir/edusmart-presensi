@@ -1,0 +1,32 @@
+# DNS
+103.191.63.170
+ns2.nevacloud.net.
+ns1.nevacloud.net.
+
+# HTTP timing
+root http=200 ip=103.191.63.170 ttfb=1.051138 total=1.052350
+health http=200 ip=103.191.63.170 ttfb=1.100867 total=1.101103
+
+# Response headers
+HTTP/2 200 
+accept-ranges: bytes
+alt-svc: h3=":443"; ma=2592000
+cache-control: no-store, no-cache, must-revalidate
+content-security-policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:
+content-type: text/html
+cross-origin-opener-policy: same-origin-allow-popups
+cross-origin-resource-policy: same-site
+date: Fri, 03 Jul 2026 13:03:45 GMT
+etag: "6a47a1d3-46a"
+last-modified: Fri, 03 Jul 2026 11:49:39 GMT
+permissions-policy: geolocation=(), camera=(), microphone=(), payment=(), usb=()
+referrer-policy: strict-origin-when-cross-origin
+server: nginx
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+vary: Accept-Encoding
+via: 1.1 Caddy
+x-content-type-options: nosniff
+x-frame-options: SAMEORIGIN
+x-permitted-cross-domain-policies: none
+content-length: 1130
+
