@@ -870,6 +870,9 @@ echo "[2/9] Checkout release ref: $TARGET_REF"
 git checkout "$TARGET_REF"
 validate_compose_files_present
 
+echo "[2/9] Validasi konfigurasi Docker Compose..."
+compose config --quiet
+
 PREV_BACKEND_IMAGE="$(compose_service_image backend)"
 PREV_NGINX_IMAGE="$(compose_service_image nginx)"
 PREV_CADDY_IMAGE="$(compose_service_image caddy)"
