@@ -4,6 +4,7 @@ import { apiFetch, supabase } from '../../lib/supabase'
 import { useLocalCache } from '../../hooks/useLocalCache'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import { useAcademicContext } from '../../context/AcademicContext'
 import {
   downloadCertificateFile,
   getCertificateDisplayUrl,
@@ -70,10 +71,15 @@ const normalizeDateKey = (value) => {
   return Number.isNaN(date.getTime()) ? '' : toLocalDateKey(date)
 }
 
-const applyAcademicPeriodFilters = (query, period, { semester = true } = {}) => {
+const applyAcademicYearFilter = (query, period) => {
   let next = query
   if (period?.tahunAjaran) next = next.eq('tahun_ajaran', period.tahunAjaran)
-  if (semester && period?.semester) next = next.eq('semester', period.semester)
+  return next
+}
+
+const applyAcademicSemesterFilter = (query, period) => {
+  let next = applyAcademicYearFilter(query, period)
+  if (period?.semester) next = next.eq('semester', period.semester)
   return next
 }
 
@@ -1453,19 +1459,23 @@ const OrganisasiDetailOverlay = ({ organisasi, onClose, siswaMap = {} }) => {
 export default function JadwalGuru() {
   const { profile, user } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
+  const { activeAcademicPeriod, tenantId } = useAcademicContext()
+  const userCacheScope = `${tenantId || 'tenant'}:${user?.id || 'user'}`
+  const yearCacheScope = `${userCacheScope}:${activeAcademicPeriod.tahunAjaran || 'year'}`
+  const termCacheScope = `${yearCacheScope}:${activeAcademicPeriod.semester || 'semester'}`
 
   // --- STATE MANAGEMENT ---
   // State utama (dibungkus SWR agar loading instan)
-  const [jadwal, setJadwal, hasJadwal] = useLocalCache('guru_dashboard_jadwal', [])
-  const [jamKosongHariIni, setJamKosongHariIni] = useLocalCache('guru_dashboard_jamKosongHariIni', [])
-  const [eskulDiampu, setEskulDiampu] = useLocalCache('guru_dashboard_eskulDiampu', [])
-  const [organisasiDiampu, setOrganisasiDiampu] = useLocalCache('guru_dashboard_organisasiDiampu', [])
-  const [strukturJabatan, setStrukturJabatan] = useLocalCache('guru_dashboard_strukturJabatan', [])
-  const [kelasList, setKelasList] = useLocalCache('guru_dashboard_kelasList', [])
-  const [waliKelasSaya, setWaliKelasSaya] = useLocalCache('guru_dashboard_waliKelasSaya', [])
-  const [pengumumanList, setPengumumanList] = useLocalCache('guru_dashboard_pengumumanList', [])
-  const [siswaList, setSiswaList] = useLocalCache('guru_dashboard_siswaList', [])
-  const [strukturSekolah, setStrukturSekolah] = useLocalCache('guru_dashboard_strukturSekolah', [])
+  const [jadwal, setJadwal, hasJadwal] = useLocalCache(`guru_dashboard_jadwal:${yearCacheScope}`, [])
+  const [jamKosongHariIni, setJamKosongHariIni] = useLocalCache(`guru_dashboard_jamKosongHariIni:${userCacheScope}`, [])
+  const [eskulDiampu, setEskulDiampu] = useLocalCache(`guru_dashboard_eskulDiampu:${termCacheScope}`, [])
+  const [organisasiDiampu, setOrganisasiDiampu] = useLocalCache(`guru_dashboard_organisasiDiampu:${yearCacheScope}`, [])
+  const [strukturJabatan, setStrukturJabatan] = useLocalCache(`guru_dashboard_strukturJabatan:${yearCacheScope}`, [])
+  const [kelasList, setKelasList] = useLocalCache(`guru_dashboard_kelasList:${userCacheScope}`, [])
+  const [waliKelasSaya, setWaliKelasSaya] = useLocalCache(`guru_dashboard_waliKelasSaya:${yearCacheScope}`, [])
+  const [pengumumanList, setPengumumanList] = useLocalCache(`guru_dashboard_pengumumanList:${userCacheScope}`, [])
+  const [siswaList, setSiswaList] = useLocalCache(`guru_dashboard_siswaList:${userCacheScope}`, [])
+  const [strukturSekolah, setStrukturSekolah] = useLocalCache(`guru_dashboard_strukturSekolah:${yearCacheScope}`, [])
 
   const [isLoading, setIsLoading] = useState(!hasJadwal)
   const [selectedEskul, setSelectedEskul] = useState(null)
@@ -1474,7 +1484,7 @@ export default function JadwalGuru() {
   const [showOrganisasiOverlay, setShowOrganisasiOverlay] = useState(false)
 
   // State untuk sertifikat
-  const [sertifikatList, setSertifikatList] = useLocalCache('guru_dashboard_sertifikatList', [])
+  const [sertifikatList, setSertifikatList] = useLocalCache(`guru_dashboard_sertifikatList:${userCacheScope}`, [])
   const [showSertifikatOverlay, setShowSertifikatOverlay] = useState(false)
   const [showRiwayatSertifikatOverlay, setShowRiwayatSertifikatOverlay] = useState(false)
   const [selectedSertifikat, setSelectedSertifikat] = useState(null)
@@ -1483,7 +1493,6 @@ export default function JadwalGuru() {
 
   const [activeHari, setActiveHari] = useState('Hari Ini')
   const [currentTime, setCurrentTime] = useState(new Date())
-  const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(() => resolveAcademicPeriod())
 
   const { todayStr, todayName } = React.useMemo(() => {
     const now = new Date()
@@ -1499,23 +1508,6 @@ export default function JadwalGuru() {
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     return () => clearInterval(timer)
-  }, [])
-
-  useEffect(() => {
-    const loadAcademicPeriod = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('settings')
-          .select('tahun_ajaran,semester_aktif,periode_mulai,periode_selesai,periode_ganjil_mulai,periode_ganjil_selesai,periode_genap_mulai,periode_genap_selesai')
-          .limit(1)
-          .maybeSingle()
-        if (error && error.code !== 'PGRST116') throw error
-        setActiveAcademicPeriod(resolveAcademicPeriod(data || {}))
-      } catch (error) {
-        console.warn('Gagal memuat periode akademik aktif:', error)
-      }
-    }
-    loadAcademicPeriod()
   }, [])
 
   // Map siswa
@@ -1563,12 +1555,12 @@ export default function JadwalGuru() {
           .eq('user_id', user.id)
           .order('issued_at', { ascending: false })
 
-        const strukturSekolahQuery = applyAcademicPeriodFilters(supabase
+        const strukturSekolahQuery = applyAcademicYearFilter(supabase
           .from('struktur_sekolah')
           .select('id, jabatan, nama, guru_id')
           .order('jabatan'), activeAcademicPeriod)
 
-        const waliKelasQuery = applyAcademicPeriodFilters(supabase
+        const waliKelasQuery = applyAcademicYearFilter(supabase
           .from('kelas_struktur')
           .select('kelas_id, wali_guru_id, wali_guru_nama')
           .eq('wali_guru_id', user.id), activeAcademicPeriod)
@@ -1593,8 +1585,8 @@ export default function JadwalGuru() {
         if (activeAcademicPeriod.tahunAjaran) {
           jadwalQuery = jadwalQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
         }
-        ekskulQuery = applyAcademicPeriodFilters(ekskulQuery, activeAcademicPeriod)
-        orgQuery = applyAcademicPeriodFilters(orgQuery, activeAcademicPeriod)
+        ekskulQuery = applyAcademicSemesterFilter(ekskulQuery, activeAcademicPeriod)
+        orgQuery = applyAcademicYearFilter(orgQuery, activeAcademicPeriod)
 
         // Eksekusi semua query secara paralel menggunakan Promise.all
         const [
@@ -1683,7 +1675,7 @@ export default function JadwalGuru() {
             .from('ekskul_anggota')
             .select('ekskul_id') // Hanya butuh foreign key untuk dihitung
             .in('ekskul_id', ekskulIds)
-          memberQuery = applyAcademicPeriodFilters(memberQuery, activeAcademicPeriod)
+          memberQuery = applyAcademicSemesterFilter(memberQuery, activeAcademicPeriod)
           
           const { data: members } = await memberQuery
           
@@ -1717,7 +1709,7 @@ export default function JadwalGuru() {
             .from('organisasi_anggota')
             .select('organisasi_id')
             .in('organisasi_id', orgIds)
-          orgMemberQuery = applyAcademicPeriodFilters(orgMemberQuery, activeAcademicPeriod)
+          orgMemberQuery = applyAcademicYearFilter(orgMemberQuery, activeAcademicPeriod)
 
           let { data: orgMembers, error: orgMembersError } = await orgMemberQuery
           if (orgMembersError && /tahun_ajaran|semester/i.test(orgMembersError.message || '')) {

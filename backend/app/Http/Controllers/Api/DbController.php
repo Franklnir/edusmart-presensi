@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Jobs\RefreshAdminPageCacheJob;
+use App\Services\Academic\AcademicPeriodLifecycleService;
+use App\Services\Academic\HistoricalEnrollmentResolver;
+use App\Services\Academic\PeriodMutationGuard;
 use App\Services\Admin\AdminPageCacheService;
 use App\Services\Db\DbDeleteExecutor;
 use App\Services\Db\DbInsertExecutor;
@@ -14,6 +17,7 @@ use App\Services\Db\DbUpsertExecutor;
 use App\Services\Quiz\QuizContentCache;
 use App\Services\WhatsApp\WhatsAppNotificationService;
 use App\Support\AcademicPeriod;
+use App\Support\AcademicScopeRegistry;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -62,43 +66,6 @@ class DbController extends ApiController
         ],
     ];
 
-    private const ACADEMIC_PERIOD_TABLES = [
-        'kelas',
-        'jadwal',
-        'tugas',
-        'quizzes',
-        'absensi',
-        'absensi_ajuan',
-        'absensi_settings',
-        'absensi_eskul',
-        'jam_kosong',
-        'ekskul',
-        'ekskul_anggota',
-        'anggota_ekskul',
-        'struktur_sekolah',
-        'kelas_struktur',
-        'organisasi',
-        'organisasi_anggota',
-    ];
-
-    private const ACADEMIC_DEFAULT_SCOPE_TABLES = [
-        'jadwal',
-        'tugas',
-        'quizzes',
-        'absensi',
-        'absensi_ajuan',
-        'absensi_settings',
-        'absensi_eskul',
-        'jam_kosong',
-        'ekskul',
-        'ekskul_anggota',
-        'anggota_ekskul',
-        'struktur_sekolah',
-        'kelas_struktur',
-        'organisasi',
-        'organisasi_anggota',
-    ];
-
     private const ACADEMIC_DATE_FILTER_COLUMNS = [
         'tugas' => ['created_at', 'mulai', 'deadline'],
         'quizzes' => ['created_at', 'starts_at', 'deadline_at'],
@@ -108,19 +75,10 @@ class DbController extends ApiController
         'jam_kosong' => ['tanggal', 'created_at'],
     ];
 
-    private const ACADEMIC_YEAR_SCOPE_TABLES = [
-        'struktur_sekolah',
-        'kelas_struktur',
-        'organisasi',
-        'organisasi_anggota',
-    ];
-
-    private const ACADEMIC_CHILD_SNAPSHOT_TABLES = [
-        'tugas_jawaban',
-        'quiz_submissions',
-    ];
-
     public function __construct(
+        private readonly PeriodMutationGuard $academicMutationGuard,
+        private readonly AcademicPeriodLifecycleService $academicPeriodLifecycle,
+        private readonly HistoricalEnrollmentResolver $studentAcademicClassResolver,
         private readonly WhatsAppNotificationService $whatsAppNotificationService,
         private readonly DbDeleteExecutor $dbDeleteExecutor,
         private readonly DbRequestShapeValidator $dbRequestShapeValidator,
@@ -133,6 +91,8 @@ class DbController extends ApiController
     ) {}
 
     private ?string $currentTenantId = null;
+
+    private ?array $academicMutationContext = null;
 
     private array $guruKelasCache = [];
 
@@ -167,7 +127,7 @@ class DbController extends ApiController
 
     public function handle(Request $request)
     {
-        set_time_limit(120);
+        set_time_limit($this->gatewayTimeLimitSeconds());
         $table = $request->input('table');
         $action = $request->input('action', 'select');
 
@@ -195,6 +155,7 @@ class DbController extends ApiController
         }
 
         $payload = $request->input('payload');
+        $filters = $request->input('filters', []);
         $query = DB::table($table);
 
         if ($tenantScoped) {
@@ -204,14 +165,36 @@ class DbController extends ApiController
             $query->where('tenant_id', $tenantId);
         }
 
+        $this->academicMutationContext = null;
+        if ($action !== 'select' && $tenantScoped && $tenantId) {
+            $mutationGuard = $this->academicMutationGuard->authorize(
+                $request,
+                $table,
+                $action,
+                $payload,
+                $filters,
+                $tenantId
+            );
+            if (! ($mutationGuard['allowed'] ?? false)) {
+                return response()->json([
+                    'error' => $mutationGuard['message'] ?? 'Perubahan periode ditolak.',
+                    'code' => $mutationGuard['code'] ?? 'academic_period_locked',
+                ], (int) ($mutationGuard['status'] ?? 409));
+            }
+            $this->academicMutationContext = $mutationGuard['context'] ?? null;
+        }
+
         $policy = $this->applyPolicy($table, $action, $query, $payload, $request, $profile);
         if ($policy !== true) {
             return $policy;
         }
 
-        $filters = $request->input('filters', []);
         $this->applyFilters($query, $filters);
-        $this->applyDefaultAcademicSelectScope($table, $query, $filters, $tenantId);
+        if ($action === 'select') {
+            $this->applyDefaultAcademicSelectScope($table, $query, $filters, $tenantId);
+        } else {
+            $this->academicMutationGuard->applyQueryScope($query, $table, $this->academicMutationContext);
+        }
 
         if (in_array($action, ['update', 'delete'], true) && ! $this->isAdmin($request)) {
             $hasFilters = $this->hasAnyFilter($filters);
@@ -224,22 +207,21 @@ class DbController extends ApiController
         $this->applyOrder($query, $orders);
 
         $maxSelectLimit = $this->isAdmin($request)
-            ? (int) env('DB_MAX_SELECT_LIMIT_ADMIN', 10000)
-            : (int) env('DB_MAX_SELECT_LIMIT', 5000);
-        $maxSelectLimit = max(100, min(50000, $maxSelectLimit));
+            ? (int) env('DB_MAX_SELECT_LIMIT_ADMIN', 5000)
+            : (int) env('DB_MAX_SELECT_LIMIT', 2000);
+        $maxSelectLimit = max(100, min(10000, $maxSelectLimit));
 
         $limit = $request->input('limit');
         if ($limit !== null) {
             $limit = min($maxSelectLimit, max(0, (int) $limit));
         } elseif ($action === 'select') {
-            $defaultSelectLimit = (int) env('DB_DEFAULT_SELECT_LIMIT', 1000);
-            $defaultSelectLimit = max(100, min($maxSelectLimit, $defaultSelectLimit));
-            $limit = $defaultSelectLimit;
+            $limit = min($maxSelectLimit, $this->defaultSelectLimitForTable((string) $table));
         }
 
         $offset = $request->input('offset');
         if ($offset !== null) {
-            $offset = min(100000, max(0, (int) $offset));
+            $maxOffset = max(1000, min(100000, (int) env('DB_MAX_OFFSET', 25000)));
+            $offset = min($maxOffset, max(0, (int) $offset));
         }
 
         if ($action === 'select') {
@@ -269,7 +251,7 @@ class DbController extends ApiController
         }
 
         if ($action === 'insert') {
-            return $this->dbInsertExecutor->execute(
+            $response = $this->dbInsertExecutor->execute(
                 $request,
                 [
                     'table' => $table,
@@ -280,10 +262,16 @@ class DbController extends ApiController
                 ],
                 $this->dbInsertCallbacks()
             );
+            $this->auditAcademicGatewayMutation($request, $table, $action, [], null, $response, $tenantId);
+
+            return $response;
         }
 
         if ($action === 'update') {
-            return $this->dbUpdateExecutor->execute(
+            $beforeRows = AcademicScopeRegistry::isDirectlyMutablePeriodTable($table)
+                ? $this->queryRowsToArray(clone $query)
+                : [];
+            $response = $this->dbUpdateExecutor->execute(
                 $request,
                 $query,
                 [
@@ -296,10 +284,16 @@ class DbController extends ApiController
                 ],
                 $this->dbUpdateCallbacks()
             );
+            $this->auditAcademicGatewayMutation($request, $table, $action, $beforeRows, $query, $response, $tenantId);
+
+            return $response;
         }
 
         if ($action === 'delete') {
-            return $this->dbDeleteExecutor->execute(
+            $beforeRows = AcademicScopeRegistry::isDirectlyMutablePeriodTable($table)
+                ? $this->queryRowsToArray(clone $query)
+                : [];
+            $response = $this->dbDeleteExecutor->execute(
                 $request,
                 $query,
                 [
@@ -309,10 +303,16 @@ class DbController extends ApiController
                 ],
                 $this->dbDeleteCallbacks()
             );
+            $this->auditAcademicGatewayMutation($request, $table, $action, $beforeRows, null, $response, $tenantId);
+
+            return $response;
         }
 
         if ($action === 'upsert') {
-            return $this->dbUpsertExecutor->execute(
+            $beforeRows = AcademicScopeRegistry::isDirectlyMutablePeriodTable($table)
+                ? $this->academicRowsForPayload($table, $payload, $tenantId)
+                : [];
+            $response = $this->dbUpsertExecutor->execute(
                 $request,
                 [
                     'table' => $table,
@@ -322,27 +322,133 @@ class DbController extends ApiController
                 ],
                 $this->dbUpsertCallbacks()
             );
+            $this->auditAcademicGatewayMutation($request, $table, $action, $beforeRows, null, $response, $tenantId);
+
+            return $response;
         }
 
         return $this->deny('Aksi tidak dikenali', 400);
     }
 
+    private function auditAcademicGatewayMutation(
+        Request $request,
+        string $table,
+        string $action,
+        array $beforeRows,
+        mixed $afterQuery,
+        mixed $response,
+        ?string $tenantId
+    ): void {
+        if (
+            ! AcademicScopeRegistry::isDirectlyMutablePeriodTable($table)
+            || ! $tenantId
+            || ! method_exists($response, 'getStatusCode')
+            || $response->getStatusCode() >= 400
+        ) {
+            return;
+        }
+
+        $body = json_decode((string) $response->getContent(), true);
+        $result = is_array($body) ? ($body['data'] ?? null) : null;
+        $changed = is_numeric($result) ? (int) $result > 0 : ! empty($result);
+        if (! $changed) {
+            return;
+        }
+
+        $afterRows = [];
+        if (in_array($action, ['insert', 'upsert'], true) && is_array($result)) {
+            $afterRows = array_is_list($result) ? $result : [$result];
+        } elseif ($action === 'update') {
+            $ids = collect($beforeRows)
+                ->pluck('id')
+                ->filter(fn ($id) => is_scalar($id) && trim((string) $id) !== '')
+                ->map(fn ($id) => (string) $id)
+                ->unique()
+                ->values()
+                ->all();
+            if ($ids !== [] && $this->isSelectableColumn($table, 'id')) {
+                $fresh = DB::table($table)->whereIn('id', $ids);
+                if ($this->isSelectableColumn($table, 'tenant_id')) {
+                    $fresh->where('tenant_id', $tenantId);
+                }
+                $afterRows = $this->queryRowsToArray($fresh);
+            } elseif ($afterQuery !== null) {
+                $afterRows = $this->queryRowsToArray(clone $afterQuery);
+            }
+        }
+
+        $context = array_filter([
+            'tenant_id' => $tenantId,
+            'tahun_ajaran' => $this->academicMutationContext['tahun_ajaran'] ?? null,
+            'semester' => $this->academicMutationContext['semester'] ?? null,
+            'academic_year_id' => $this->academicMutationContext['academic_year_id'] ?? null,
+            'academic_term_id' => $this->academicMutationContext['academic_term_id'] ?? null,
+            'mode' => $this->academicMutationContext['mode'] ?? 'active',
+            'correction_session_id' => $this->academicMutationContext['id'] ?? null,
+            'reason' => $this->academicMutationContext['reason'] ?? null,
+        ], fn ($value) => $value !== null && $value !== '');
+        $recordIds = collect(array_merge($beforeRows, $afterRows))
+            ->pluck('id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        $this->logAudit(
+            $request,
+            $table,
+            $recordIds->count() === 1 ? (string) $recordIds->first() : 'bulk',
+            strtoupper($action),
+            ['academic_context' => $context, 'rows' => $beforeRows],
+            ['academic_context' => $context, 'rows' => $afterRows],
+            $tenantId
+        );
+    }
+
+    private function academicRowsForPayload(string $table, mixed $payload, ?string $tenantId): array
+    {
+        if (! $tenantId || ! $this->isSelectableColumn($table, 'id')) {
+            return [];
+        }
+
+        $rows = is_array($payload) && array_is_list($payload) ? $payload : [$payload];
+        $ids = collect($rows)
+            ->filter(fn ($row) => is_array($row))
+            ->pluck('id')
+            ->filter(fn ($id) => is_scalar($id) && trim((string) $id) !== '')
+            ->map(fn ($id) => (string) $id)
+            ->unique()
+            ->values()
+            ->all();
+        if ($ids === []) {
+            return [];
+        }
+
+        $query = DB::table($table)->whereIn('id', $ids);
+        if ($this->isSelectableColumn($table, 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+
+        return $this->queryRowsToArray($query);
+    }
+
     public function batch(Request $request)
     {
-        set_time_limit(120);
+        set_time_limit($this->gatewayTimeLimitSeconds());
         $requests = $request->input('requests', []);
         if (! is_array($requests)) {
             return $this->deny('Daftar request batch tidak valid', 422);
         }
 
-        $maxBatchItems = (int) env('DB_BATCH_MAX_ITEMS', 25);
-        $maxBatchItems = max(1, min(50, $maxBatchItems));
+        $maxBatchItems = (int) env('DB_BATCH_MAX_ITEMS', 12);
+        $maxBatchItems = max(1, min(25, $maxBatchItems));
         if (count($requests) > $maxBatchItems) {
             return $this->deny("Maksimal {$maxBatchItems} request per batch", 422);
         }
 
         $data = [];
         $errors = [];
+        $maxTotalRows = max(500, min(10000, (int) env('DB_BATCH_MAX_TOTAL_ROWS', 5000)));
+        $plannedRows = 0;
 
         foreach (array_values($requests) as $index => $item) {
             if (! is_array($item)) {
@@ -369,13 +475,31 @@ class DbController extends ApiController
                 continue;
             }
 
+            $requestedLimit = array_key_exists('limit', $item) && $item['limit'] !== null
+                ? max(0, (int) $item['limit'])
+                : $this->defaultSelectLimitForTable((string) ($item['table'] ?? ''));
+            if ((bool) ($item['head'] ?? false)) {
+                $requestedLimit = 0;
+            }
+
+            if ($plannedRows + $requestedLimit > $maxTotalRows) {
+                $errors[$key] = [
+                    'message' => "Anggaran hasil batch maksimal {$maxTotalRows} baris",
+                    'code' => 'db_batch_row_budget_exceeded',
+                    'status' => 422,
+                ];
+
+                continue;
+            }
+            $plannedRows += $requestedLimit;
+
             $dbRequest = Request::create('/api/db', 'POST', [
                 'table' => $item['table'] ?? null,
                 'action' => 'select',
                 'columns' => $item['columns'] ?? '*',
                 'filters' => $item['filters'] ?? [],
                 'order' => $item['order'] ?? [],
-                'limit' => $item['limit'] ?? null,
+                'limit' => $requestedLimit,
                 'offset' => $item['offset'] ?? null,
                 'count' => $item['count'] ?? null,
                 'head' => (bool) ($item['head'] ?? false),
@@ -411,6 +535,20 @@ class DbController extends ApiController
             'data' => $data,
             'errors' => $errors,
         ]);
+    }
+
+    private function gatewayTimeLimitSeconds(): int
+    {
+        return max(15, min(120, (int) env('DB_GATEWAY_TIME_LIMIT_SECONDS', 60)));
+    }
+
+    private function defaultSelectLimitForTable(string $table): int
+    {
+        if (in_array($table, ['profiles', 'kelas', 'mata_pelajaran'], true)) {
+            return max(250, min(5000, (int) env('DB_ROSTER_SELECT_LIMIT', 2000)));
+        }
+
+        return max(100, min(1000, (int) env('DB_DEFAULT_SELECT_LIMIT', 250)));
     }
 
     private function dbInsertCallbacks(): array
@@ -829,6 +967,10 @@ class DbController extends ApiController
                         'bobot_quiz_reguler',
                         'bobot_quiz_uts',
                         'bobot_quiz_uas',
+                        'sumber_uts',
+                        'sumber_uas',
+                        'jenis_manual',
+                        'label_manual',
                         'created_at',
                         'updated_at',
                     ]);
@@ -872,6 +1014,10 @@ class DbController extends ApiController
                         'bobot_quiz_reguler',
                         'bobot_quiz_uts',
                         'bobot_quiz_uas',
+                        'sumber_uts',
+                        'sumber_uas',
+                        'jenis_manual',
+                        'label_manual',
                         'updated_at',
                     ]);
                     $payload['updated_at'] = now();
@@ -1039,24 +1185,12 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $kelas = $profile?->kelas;
-                    $tenantId = $this->currentTenantId;
-                    $query->where(function ($q) use ($kelas, $userId, $tenantId) {
-                        if ($kelas) {
-                            $q->where('kelas_id', $kelas);
-                        } else {
-                            $q->whereRaw('1 = 0');
-                        }
-
-                        $q->orWhereIn('id', function ($sub) use ($userId, $tenantId) {
-                            $sub->select('quiz_id')
-                                ->from('quiz_submissions')
-                                ->where('siswa_id', $userId);
-                            if ($tenantId && $this->isSelectableColumn('quiz_submissions', 'tenant_id')) {
-                                $sub->where('tenant_id', $tenantId);
-                            }
-                        });
-                    });
+                    $classId = $this->studentClassForAcademicRequest($request, $profile);
+                    if ($classId === null) {
+                        $query->whereRaw('1 = 0');
+                    } else {
+                        $query->where('kelas_id', $classId);
+                    }
 
                     return true;
                 }
@@ -1083,7 +1217,12 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $query->where('kelas_id', $profile?->kelas);
+                    $classId = $this->studentClassForAcademicRequest($request, $profile);
+                    if ($classId === null) {
+                        $query->whereRaw('1 = 0');
+                    } else {
+                        $query->where('kelas_id', $classId);
+                    }
 
                     return true;
                 }
@@ -1157,7 +1296,12 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $query->where('kelas_id', $profile?->kelas);
+                    $classId = $this->studentClassForAcademicRequest($request, $profile);
+                    if ($classId === null) {
+                        $query->whereRaw('1 = 0');
+                    } else {
+                        $query->where('kelas_id', $classId);
+                    }
 
                     return true;
                 }
@@ -1959,7 +2103,12 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $query->where('kelas', $profile?->kelas);
+                    $classId = $this->studentClassForAcademicRequest($request, $profile);
+                    if ($classId === null) {
+                        $query->whereRaw('1 = 0');
+                    } else {
+                        $query->where('kelas', $classId);
+                    }
 
                     return true;
                 }
@@ -2074,7 +2223,12 @@ class DbController extends ApiController
                     return true;
                 }
                 if ($this->isSiswa($request)) {
-                    $query->where('kelas', $profile?->kelas);
+                    $classId = $this->studentClassForAcademicRequest($request, $profile);
+                    if ($classId === null) {
+                        $query->whereRaw('1 = 0');
+                    } else {
+                        $query->where('kelas', $classId);
+                    }
 
                     return true;
                 }
@@ -2285,6 +2439,13 @@ class DbController extends ApiController
 
         // GURU_MAPEL_MANUAL_NILAI
         if ($table === 'guru_mapel_manual_nilai') {
+            if (in_array($action, ['insert', 'upsert', 'update'], true)) {
+                $validationError = $this->validateGuruMapelManualNilaiPayload($payload);
+                if ($validationError !== null) {
+                    return $this->deny($validationError, 422);
+                }
+            }
+
             if ($this->isAdmin($request)) {
                 return true;
             }
@@ -2301,6 +2462,8 @@ class DbController extends ApiController
                             'mapel',
                             'tahun_ajaran',
                             'nilai_manual',
+                            'nilai_uts_manual',
+                            'nilai_uas_manual',
                             'catatan',
                             'created_at',
                             'updated_at',
@@ -2319,6 +2482,8 @@ class DbController extends ApiController
                     $this->mapPayload($payload, function ($row) {
                         $row = $this->filterPayload($row, [
                             'nilai_manual',
+                            'nilai_uts_manual',
+                            'nilai_uas_manual',
                             'catatan',
                             'updated_at',
                         ]);
@@ -4363,7 +4528,7 @@ class DbController extends ApiController
 
     private function tableHasAcademicPeriodColumns(string $table): bool
     {
-        return $this->isSelectableColumn($table, 'tahun_ajaran')
+        return $this->isSelectableColumn($table, AcademicScopeRegistry::academicYearColumn($table))
             && $this->isSelectableColumn($table, 'semester');
     }
 
@@ -4372,9 +4537,48 @@ class DbController extends ApiController
         return $this->isSelectableColumn($table, 'angkatan');
     }
 
-    private function hasAcademicPeriodFilter($filters): bool
+    private function studentClassForAcademicRequest(Request $request, $profile): ?string
     {
-        return $this->hasFilterOnAnyColumn($filters, ['tahun_ajaran', 'semester']);
+        $filters = $request->input('filters', []);
+        $requestedYear = $this->singleAcademicFilterValue($filters, 'tahun_ajaran');
+        $requestedSemester = $this->singleAcademicFilterValue($filters, 'semester');
+        $activePeriod = $this->currentAcademicPeriodForTenant($this->currentTenantId);
+
+        return $this->studentAcademicClassResolver->resolve(
+            (string) $this->currentTenantId,
+            (string) ($request->user()?->id ?? ''),
+            $requestedYear,
+            $requestedSemester,
+            $profile?->kelas,
+            $activePeriod['tahun_ajaran'] ?? null
+        );
+    }
+
+    private function singleAcademicFilterValue(mixed $filters, string $column): ?string
+    {
+        if (! is_array($filters)) {
+            return null;
+        }
+
+        $equal = $filters['eq'][$column] ?? null;
+        if (is_scalar($equal) && trim((string) $equal) !== '') {
+            return trim((string) $equal);
+        }
+
+        $values = $filters['in'][$column] ?? null;
+        if (is_array($values) && count($values) === 1 && is_scalar($values[0])) {
+            return trim((string) $values[0]);
+        }
+
+        return null;
+    }
+
+    private function hasAcademicPeriodFilter(string $table, $filters): bool
+    {
+        return $this->hasFilterOnAnyColumn($filters, [
+            AcademicScopeRegistry::academicYearColumn($table),
+            'semester',
+        ]);
     }
 
     private function hasFilterOnAnyColumn($filters, array $columns): bool
@@ -4403,13 +4607,13 @@ class DbController extends ApiController
     private function applyDefaultAcademicSelectScope(string $table, $query, $filters, ?string $tenantId): void
     {
         if (
-            ! in_array($table, self::ACADEMIC_DEFAULT_SCOPE_TABLES, true)
+            ! AcademicScopeRegistry::shouldApplyDefaultReadScope($table)
             || ! $this->tableHasAcademicPeriodColumns($table)
         ) {
             return;
         }
 
-        if ($this->hasAcademicPeriodFilter($filters)) {
+        if ($this->hasAcademicPeriodFilter($table, $filters)) {
             return;
         }
 
@@ -4419,9 +4623,9 @@ class DbController extends ApiController
         }
 
         $period = $this->currentAcademicPeriodForTenant($tenantId);
-        $query->where('tahun_ajaran', $period['tahun_ajaran']);
+        $query->where(AcademicScopeRegistry::academicYearColumn($table), $period['tahun_ajaran']);
         if (
-            ! in_array($table, self::ACADEMIC_YEAR_SCOPE_TABLES, true)
+            AcademicScopeRegistry::isTermScoped($table)
             && $this->isSelectableColumn($table, 'semester')
         ) {
             $query->where('semester', $period['semester']);
@@ -4435,8 +4639,10 @@ class DbController extends ApiController
         }
 
         $period = $this->currentAcademicPeriodForTenant($tenantId ?: $this->currentTenantId);
-        $query->where('tahun_ajaran', $period['tahun_ajaran'])
-            ->where('semester', $period['semester']);
+        $query->where(AcademicScopeRegistry::academicYearColumn($table), $period['tahun_ajaran']);
+        if (AcademicScopeRegistry::isTermScoped($table)) {
+            $query->where('semester', $period['semester']);
+        }
     }
 
     private function applyCurrentAcademicYearToQuery($query, string $table, ?string $tenantId = null): void
@@ -4447,33 +4653,34 @@ class DbController extends ApiController
 
     private function applyAcademicYearToQuery($query, string $table, mixed $academicYear, bool $includeLegacyBlank = false): void
     {
-        if (! $this->isSelectableColumn($table, 'tahun_ajaran')) {
+        $yearColumn = AcademicScopeRegistry::academicYearColumn($table);
+        if (! $this->isSelectableColumn($table, $yearColumn)) {
             return;
         }
 
         $year = AcademicPeriod::normalizeAcademicYear($academicYear);
         if ($year !== null && $year !== '') {
             if ($includeLegacyBlank) {
-                $query->where(function ($scope) use ($year) {
-                    $scope->where('tahun_ajaran', $year)
-                        ->orWhereNull('tahun_ajaran')
-                        ->orWhere('tahun_ajaran', '');
+                $query->where(function ($scope) use ($year, $yearColumn) {
+                    $scope->where($yearColumn, $year)
+                        ->orWhereNull($yearColumn)
+                        ->orWhere($yearColumn, '');
                 });
 
                 return;
             }
 
-            $query->where('tahun_ajaran', $year);
+            $query->where($yearColumn, $year);
         }
     }
 
     private function attachAcademicPeriodRows(string $table, array $rows, ?string $tenantId): array
     {
-        if (in_array($table, self::ACADEMIC_CHILD_SNAPSHOT_TABLES, true)) {
+        if (AcademicScopeRegistry::isParentSnapshot($table) && $table !== 'student_class_histories') {
             return $this->attachChildAcademicSnapshotRows($table, $rows, $tenantId);
         }
 
-        if (! in_array($table, self::ACADEMIC_PERIOD_TABLES, true)) {
+        if (! AcademicScopeRegistry::shouldStampLegacyPeriod($table)) {
             return $rows;
         }
 
@@ -4483,9 +4690,16 @@ class DbController extends ApiController
             return $rows;
         }
 
-        $period = $this->currentAcademicPeriodForTenant($tenantId);
+        $period = $this->academicMutationContext ?: $this->currentAcademicPeriodForTenant($tenantId);
+        $normalizedIds = $tenantId
+            ? $this->academicPeriodLifecycle->normalizedIds(
+                $tenantId,
+                $period['tahun_ajaran'] ?? null,
+                $period['semester'] ?? null
+            )
+            : ['academic_year_id' => null, 'academic_term_id' => null];
 
-        return array_map(function ($row) use ($table, $tenantId, $period, $hasPeriodColumns, $hasCohortColumn) {
+        return array_map(function ($row) use ($table, $tenantId, $period, $normalizedIds, $hasPeriodColumns, $hasCohortColumn) {
             if (! is_array($row)) {
                 return $row;
             }
@@ -4499,11 +4713,23 @@ class DbController extends ApiController
             }
 
             if ($hasPeriodColumns) {
-                $year = AcademicPeriod::normalizeAcademicYear($row['tahun_ajaran'] ?? null);
+                $yearColumn = AcademicScopeRegistry::academicYearColumn($table);
+                $year = AcademicPeriod::normalizeAcademicYear($row[$yearColumn] ?? null);
                 $semester = AcademicPeriod::normalizeSemester($row['semester'] ?? null);
 
-                $row['tahun_ajaran'] = $year ?: $period['tahun_ajaran'];
+                $row[$yearColumn] = $year ?: $period['tahun_ajaran'];
                 $row['semester'] = $semester ?: $period['semester'];
+            }
+
+            if ($this->isSelectableColumn($table, 'academic_year_id') && ! empty($normalizedIds['academic_year_id'])) {
+                $row['academic_year_id'] = $normalizedIds['academic_year_id'];
+            }
+            if (
+                AcademicScopeRegistry::isTermScoped($table)
+                && $this->isSelectableColumn($table, 'academic_term_id')
+                && ! empty($normalizedIds['academic_term_id'])
+            ) {
+                $row['academic_term_id'] = $normalizedIds['academic_term_id'];
             }
 
             if ($hasCohortColumn && trim((string) ($row['angkatan'] ?? '')) === '') {
@@ -5733,8 +5959,8 @@ class DbController extends ApiController
         $weightRules = [
             'bobot_tugas_pr' => ['min' => 0, 'max' => 100, 'label' => 'Bobot Tugas/PR'],
             'bobot_quiz_reguler' => ['min' => 0, 'max' => 100, 'label' => 'Bobot Quiz Reguler'],
-            'bobot_quiz_uts' => ['min' => 0, 'max' => 100, 'label' => 'Bobot Quiz UTS'],
-            'bobot_quiz_uas' => ['min' => 0, 'max' => 100, 'label' => 'Bobot Quiz UAS'],
+            'bobot_quiz_uts' => ['min' => 0, 'max' => 100, 'label' => 'Bobot Quiz Tengah Semester'],
+            'bobot_quiz_uas' => ['min' => 0, 'max' => 100, 'label' => 'Bobot Quiz Akhir Semester'],
         ];
 
         $this->mapPayload($payload, function ($row) use (&$error, $weightRules, $requireAllFields) {
@@ -5767,6 +5993,39 @@ class DbController extends ApiController
 
             if (array_key_exists('semester', $row)) {
                 $row['semester'] = trim((string) ($row['semester'] ?? ''));
+            }
+
+            foreach (['sumber_uts', 'sumber_uas'] as $sourceKey) {
+                if (! array_key_exists($sourceKey, $row)) {
+                    continue;
+                }
+                $source = strtolower(trim((string) ($row[$sourceKey] ?? '')));
+                if (! in_array($source, ['digital', 'manual'], true)) {
+                    $error = 'Sumber nilai tengah/akhir semester harus digital atau manual';
+
+                    return $row;
+                }
+                $row[$sourceKey] = $source;
+            }
+
+            if (array_key_exists('jenis_manual', $row)) {
+                $manualType = strtolower(trim((string) ($row['jenis_manual'] ?? '')));
+                if (! in_array($manualType, ['absensi', 'nilai_tambah', 'lainnya'], true)) {
+                    $error = 'Jenis komponen manual harus absensi, nilai tambah, atau lainnya';
+
+                    return $row;
+                }
+                $row['jenis_manual'] = $manualType;
+            }
+
+            if (array_key_exists('label_manual', $row)) {
+                $manualLabel = trim((string) ($row['label_manual'] ?? ''));
+                if (mb_strlen($manualLabel) > 120) {
+                    $error = 'Label komponen manual maksimal 120 karakter';
+
+                    return $row;
+                }
+                $row['label_manual'] = $manualLabel !== '' ? $manualLabel : null;
             }
 
             $weights = [];
@@ -5809,7 +6068,7 @@ class DbController extends ApiController
             if (count($weights) === count($weightRules)) {
                 $total = array_sum($weights);
                 if ($total > 100.01) {
-                    $error = 'Total bobot Tugas/PR + Quiz Reguler + Quiz UTS + Quiz UAS tidak boleh lebih dari 100%';
+                    $error = 'Total bobot Tugas/PR + Quiz Reguler + Quiz Tengah Semester + Quiz Akhir Semester tidak boleh lebih dari 100%';
 
                     return $row;
                 }
@@ -5817,6 +6076,64 @@ class DbController extends ApiController
                 $error = 'Bobot mapel belum lengkap';
 
                 return $row;
+            }
+
+            return $row;
+        });
+
+        return $error;
+    }
+
+    private function validateGuruMapelManualNilaiPayload(&$payload): ?string
+    {
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $error = null;
+        $scoreFields = [
+            'nilai_manual' => 'Nilai komponen manual',
+            'nilai_uts_manual' => 'Nilai ujian tengah semester manual',
+            'nilai_uas_manual' => 'Nilai ujian akhir semester manual',
+        ];
+
+        $this->mapPayload($payload, function ($row) use (&$error, $scoreFields) {
+            if ($error !== null || ! is_array($row)) {
+                return $row;
+            }
+
+            foreach ($scoreFields as $field => $label) {
+                if (! array_key_exists($field, $row)) {
+                    continue;
+                }
+                $raw = $row[$field];
+                if ($raw === '' || $raw === null) {
+                    $row[$field] = null;
+
+                    continue;
+                }
+                if (! is_numeric($raw)) {
+                    $error = $label.' harus berupa angka 0 sampai 100';
+
+                    return $row;
+                }
+                $score = round((float) $raw, 2);
+                if ($score < 0 || $score > 100) {
+                    $error = $label.' harus di antara 0 sampai 100';
+
+                    return $row;
+                }
+                $row[$field] = $score;
+            }
+
+            if (array_key_exists('catatan', $row)) {
+                $note = trim((string) ($row['catatan'] ?? ''));
+                if (mb_strlen($note) > 2000) {
+                    $error = 'Catatan nilai manual maksimal 2000 karakter';
+
+                    return $row;
+                }
+                $row['catatan'] = $note !== '' ? $note : null;
             }
 
             return $row;
@@ -7252,6 +7569,26 @@ class DbController extends ApiController
 
             foreach (self::REMOVED_SETTINGS_POLICY_FIELDS as $field) {
                 unset($row[$field]);
+            }
+
+            $lifecycleFields = [
+                'tahun_ajaran',
+                'semester_aktif',
+                'periode_mulai',
+                'periode_selesai',
+                'periode_ganjil_mulai',
+                'periode_ganjil_selesai',
+                'periode_genap_mulai',
+                'periode_genap_selesai',
+                'current_academic_year_id',
+                'current_academic_term_id',
+            ];
+            foreach ($lifecycleFields as $field) {
+                if (array_key_exists($field, $row)) {
+                    $error = 'Periode operasional hanya dapat diubah melalui menu Periode Akademik.';
+
+                    return $row;
+                }
             }
 
             if (array_key_exists('tahun_ajaran', $row)) {

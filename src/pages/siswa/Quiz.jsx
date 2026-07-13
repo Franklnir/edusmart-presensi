@@ -24,6 +24,10 @@ import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveF
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import useStudentPeriodClass from '../../hooks/useStudentPeriodClass'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
+import {
+  getAssessmentSlotLabel,
+  normalizeAssessmentSlot
+} from '../../utils/academicAssessment'
 
 const QuizEssayTextarea = memo(function QuizEssayTextarea({ value, onChange, onBlur, disabled, placeholder, className }) {
   return (
@@ -57,19 +61,11 @@ const getQuizEndAt = (quiz) => (
 )
 
 const normalizeMode = (quiz) => {
-  const raw = (quiz?.mode || '').toString().toLowerCase()
-  if (raw === 'regular') return 'regular'
-  if (raw === 'uts') return 'uts'
-  if (raw === 'uas') return 'uas'
-  if (raw === 'ulangan') return 'uts'
-  return quiz?.is_live ? 'uts' : 'regular'
+  return normalizeAssessmentSlot(quiz?.mode, { isLive: Boolean(quiz?.is_live) })
 }
 
 const getModeLabel = (quiz) => {
-  const mode = normalizeMode(quiz)
-  if (mode === 'uts') return 'UTS'
-  if (mode === 'uas') return 'UAS'
-  return 'Reguler'
+  return getAssessmentSlotLabel(normalizeMode(quiz), quiz?.semester, { formal: true })
 }
 
 const normalizeQuestionType = (value) => {
@@ -518,6 +514,7 @@ export default function SiswaQuiz() {
   const {
 	    activeAcademicPeriod,
 	    period,
+	    termPeriod,
 	    dateFilterPeriod,
 	    periodFilter,
     academicYearOptions,
@@ -525,13 +522,15 @@ export default function SiswaQuiz() {
     setAcademicYear,
     setSemester,
     resetToActivePeriod,
-    applyPeriodFilters
+    applyAcademicYearFilter,
+    academicSemesterCacheKey,
+    isViewingArchivePeriod
   } = useActiveAcademicPeriod({
     storageKey: 'edusmart.siswa.quiz.periodFilter'
   })
 
   // ================= STATE =================
-  const [quizList, setQuizList, hasQuizList] = useLocalCache('siswa_quiz_list', [])
+  const [quizList, setQuizList, hasQuizList] = useLocalCache(`siswa_quiz_list:${academicSemesterCacheKey}`, [])
   const [quizLoadDone, setQuizLoadDone] = useState(hasQuizList)
   const [mapelList, setMapelList] = useState([])
   const [selectedMapel, setSelectedMapel] = useState('')
@@ -614,7 +613,9 @@ export default function SiswaQuiz() {
   const kelasId = useStudentPeriodClass({
     userId: profile?.id || user?.id,
     profile,
-    tahunAjaran: period.tahunAjaran
+    tahunAjaran: termPeriod.tahunAjaran,
+    semester: termPeriod.semester,
+    activeTahunAjaran: activeAcademicPeriod.tahunAjaran
   })
   const buildQuizClientMeta = useCallback((extra = {}) => ({
     client: 'web',
@@ -1286,7 +1287,7 @@ export default function SiswaQuiz() {
 	        .select('mapel,periode_berlaku')
 	        .eq('kelas_id', kelasId)
 	        .order('mapel', { ascending: true })
-      query = applyPeriodFilters(query)
+      query = applyAcademicYearFilter(query)
 
       const { data, error } = await query
       if (error) throw error
@@ -1300,7 +1301,7 @@ export default function SiswaQuiz() {
       console.warn('Gagal memuat mapel jadwal quiz siswa:', err)
       return []
     }
-	  }, [applyPeriodFilters, kelasId, periodFilter.semester])
+	  }, [applyAcademicYearFilter, kelasId, periodFilter.semester])
 
   const rememberEssayDraft = (questionId, value) => {
     const key = String(questionId || '')
@@ -1361,8 +1362,8 @@ export default function SiswaQuiz() {
           page: 1,
           per_page: 100,
           kelas: kelasId,
-          tahun_ajaran: period.tahunAjaran,
-          semester: period.semester
+          tahun_ajaran: termPeriod.tahunAjaran,
+          semester: termPeriod.semester
         }),
         loadScheduleMapels()
       ])
@@ -1401,7 +1402,7 @@ export default function SiswaQuiz() {
   useEffect(() => {
     if (user?.id && kelasId) loadQuizzes()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, kelasId, quizRealtimeTick, period.tahunAjaran, period.semester])
+  }, [user?.id, kelasId, quizRealtimeTick, termPeriod.tahunAjaran, termPeriod.semester])
 
   useEffect(() => {
     if (isSessionPage) return undefined
@@ -1528,8 +1529,8 @@ export default function SiswaQuiz() {
       setQuizDetailsError('')
       setLoading(true)
       const { data, error } = await supabase.quiz.detail(targetQuizId, {
-        tahun_ajaran: period.tahunAjaran,
-        semester: period.semester,
+        tahun_ajaran: termPeriod.tahunAjaran,
+        semester: termPeriod.semester,
         client: 'web',
         client_device_id: getStableQuizDeviceId()
       })
@@ -1658,7 +1659,7 @@ export default function SiswaQuiz() {
   useEffect(() => {
     loadQuizDetails()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedQuizId, selectedQuiz?.id, selectedQuiz?.submission?.id, user?.id, quizDetailsRetryTick, quizDetailRealtimeTick, period.tahunAjaran, period.semester])
+  }, [selectedQuizId, selectedQuiz?.id, selectedQuiz?.submission?.id, user?.id, quizDetailsRetryTick, quizDetailRealtimeTick, termPeriod.tahunAjaran, termPeriod.semester])
 
   useEffect(() => {
     if (isSessionPage || isTaking || !quizLoadDone || !resumableQuiz?.id) return
@@ -3682,7 +3683,7 @@ export default function SiswaQuiz() {
                         <button
                           type="button"
                           onClick={handleStartQuiz}
-                          disabled={isStartCountdownActive}
+                          disabled={isViewingArchivePeriod || isStartCountdownActive}
                           className={`rounded-lg px-5 py-2.5 font-semibold text-white shadow-sm transition-colors ${
                             isStartCountdownActive
                               ? 'bg-indigo-300 cursor-not-allowed'

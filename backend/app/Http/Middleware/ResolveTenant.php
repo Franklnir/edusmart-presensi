@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\Tenancy\TenantContext;
 use App\Support\Tenancy\TenantDomainService;
 use Closure;
 use Illuminate\Http\Request;
@@ -10,7 +11,8 @@ use Illuminate\Support\Facades\DB;
 class ResolveTenant
 {
     public function __construct(
-        private readonly TenantDomainService $tenantDomainService
+        private readonly TenantDomainService $tenantDomainService,
+        private readonly TenantContext $tenantContext
     ) {}
 
     public function handle(Request $request, Closure $next)
@@ -60,8 +62,21 @@ class ResolveTenant
 
         $request->attributes->set('tenant_id', $tenant->id);
         $request->attributes->set('tenant_slug', $tenant->slug);
+        $this->tenantContext->set((string) $tenant->id, (string) $tenant->slug);
 
-        return $next($request);
+        $usesPostgresContext = DB::getDriverName() === 'pgsql';
+        if ($usesPostgresContext) {
+            DB::selectOne("select set_config('app.current_tenant_id', ?, false)", [(string) $tenant->id]);
+        }
+
+        try {
+            return $next($request);
+        } finally {
+            if ($usesPostgresContext) {
+                DB::selectOne("select set_config('app.current_tenant_id', '', false)");
+            }
+            $this->tenantContext->clear();
+        }
     }
 
     private function resolveHeaderTenantSlug(Request $request): string

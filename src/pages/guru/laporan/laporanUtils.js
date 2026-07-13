@@ -198,13 +198,36 @@ export const DEFAULT_RANKING_POLICY = {
 export const MAPEL_COMPONENT_WEIGHT_RULES = [
   { key: 'bobot_tugas_pr', label: 'Tugas/PR', min: 0, max: 100, default: 30 },
   { key: 'bobot_quiz_reguler', label: 'Quiz Reguler', min: 0, max: 100, default: 20 },
-  { key: 'bobot_quiz_uts', label: 'Quiz UTS', min: 0, max: 100, default: 20 },
-  { key: 'bobot_quiz_uas', label: 'Quiz UAS', min: 0, max: 100, default: 30 }
+  { key: 'bobot_quiz_uts', label: 'Tengah Semester', min: 0, max: 100, default: 20 },
+  { key: 'bobot_quiz_uas', label: 'Akhir Semester', min: 0, max: 100, default: 30 }
 ]
-export const DEFAULT_MAPEL_COMPONENT_WEIGHTS = MAPEL_COMPONENT_WEIGHT_RULES.reduce((acc, item) => {
+export const MAPEL_ASSESSMENT_SOURCE_DIGITAL = 'digital'
+export const MAPEL_ASSESSMENT_SOURCE_MANUAL = 'manual'
+export const MAPEL_MANUAL_COMPONENT_ATTENDANCE = 'absensi'
+export const MAPEL_MANUAL_COMPONENT_BONUS = 'nilai_tambah'
+export const MAPEL_MANUAL_COMPONENT_OTHER = 'lainnya'
+
+const DEFAULT_MAPEL_WEIGHT_VALUES = MAPEL_COMPONENT_WEIGHT_RULES.reduce((acc, item) => {
   acc[item.key] = item.default
   return acc
 }, {})
+export const DEFAULT_MAPEL_COMPONENT_WEIGHTS = {
+  ...DEFAULT_MAPEL_WEIGHT_VALUES,
+  sumber_uts: MAPEL_ASSESSMENT_SOURCE_DIGITAL,
+  sumber_uas: MAPEL_ASSESSMENT_SOURCE_DIGITAL,
+  jenis_manual: MAPEL_MANUAL_COMPONENT_ATTENDANCE,
+  label_manual: ''
+}
+
+export const getMapelManualComponentLabel = (source) => {
+  if (source?.jenis_manual === MAPEL_MANUAL_COMPONENT_BONUS) {
+    return 'Nilai tambah'
+  }
+  if (source?.jenis_manual === MAPEL_MANUAL_COMPONENT_OTHER) {
+    return String(source?.label_manual || '').trim() || 'Komponen manual lainnya'
+  }
+  return 'Absensi (input manual)'
+}
 
 export const round2 = (num) => Math.round(num * 100) / 100
 
@@ -408,6 +431,17 @@ export const normalizeMapelComponentWeights = (source) => {
     return { ...DEFAULT_MAPEL_COMPONENT_WEIGHTS }
   }
 
+  normalized.sumber_uts = source?.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL
+    ? MAPEL_ASSESSMENT_SOURCE_MANUAL
+    : MAPEL_ASSESSMENT_SOURCE_DIGITAL
+  normalized.sumber_uas = source?.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL
+    ? MAPEL_ASSESSMENT_SOURCE_MANUAL
+    : MAPEL_ASSESSMENT_SOURCE_DIGITAL
+  normalized.jenis_manual = [MAPEL_MANUAL_COMPONENT_BONUS, MAPEL_MANUAL_COMPONENT_OTHER].includes(source?.jenis_manual)
+    ? source.jenis_manual
+    : MAPEL_MANUAL_COMPONENT_ATTENDANCE
+  normalized.label_manual = String(source?.label_manual || '').trim().slice(0, 120)
+
   return normalized
 }
 
@@ -428,6 +462,20 @@ export const getMapelWeightValidation = (source) => {
       errors.push(`${rule.label} harus ${rule.min}% - ${rule.max}%`)
     }
   })
+
+  normalized.sumber_uts = source?.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL
+    ? MAPEL_ASSESSMENT_SOURCE_MANUAL
+    : MAPEL_ASSESSMENT_SOURCE_DIGITAL
+  normalized.sumber_uas = source?.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL
+    ? MAPEL_ASSESSMENT_SOURCE_MANUAL
+    : MAPEL_ASSESSMENT_SOURCE_DIGITAL
+  normalized.jenis_manual = [MAPEL_MANUAL_COMPONENT_BONUS, MAPEL_MANUAL_COMPONENT_OTHER].includes(source?.jenis_manual)
+    ? source.jenis_manual
+    : MAPEL_MANUAL_COMPONENT_ATTENDANCE
+  normalized.label_manual = String(source?.label_manual || '').trim()
+  if (normalized.label_manual.length > 120) {
+    errors.push('Label komponen manual maksimal 120 karakter')
+  }
 
   const total = MAPEL_COMPONENT_WEIGHT_RULES.reduce(
     (sum, rule) => sum + Number(normalized[rule.key] || 0),
@@ -585,14 +633,25 @@ export const hitungNilaiMapelBerbobot = ({
   rataQuizRegulerMapel,
   rataQuizUtsMapel,
   rataQuizUasMapel,
+  nilaiUtsManual,
+  nilaiUasManual,
+  nilaiKomponenManual,
   bobotMapel
 }) => {
   const activeBobotMapel = normalizeMapelComponentWeights(bobotMapel)
+  const validation = getMapelWeightValidation(activeBobotMapel)
+  const nilaiTengahSemester = activeBobotMapel.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL
+    ? nilaiUtsManual
+    : rataQuizUtsMapel
+  const nilaiAkhirSemester = activeBobotMapel.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL
+    ? nilaiUasManual
+    : rataQuizUasMapel
   return hitungRataBerbobot([
     { nilai: rataTugasMapel, bobot: activeBobotMapel.bobot_tugas_pr },
     { nilai: rataQuizRegulerMapel, bobot: activeBobotMapel.bobot_quiz_reguler },
-    { nilai: rataQuizUtsMapel, bobot: activeBobotMapel.bobot_quiz_uts },
-    { nilai: rataQuizUasMapel, bobot: activeBobotMapel.bobot_quiz_uas }
+    { nilai: nilaiTengahSemester, bobot: activeBobotMapel.bobot_quiz_uts },
+    { nilai: nilaiAkhirSemester, bobot: activeBobotMapel.bobot_quiz_uas },
+    { nilai: nilaiKomponenManual, bobot: validation.remaining }
   ])
 }
 

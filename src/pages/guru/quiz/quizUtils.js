@@ -1,6 +1,10 @@
 ﻿// src/pages/guru/quiz/quizUtils.js
 
 import { parseDateTime } from '../../../lib/time'
+import {
+  getAssessmentSlotLabel,
+  normalizeAssessmentSlot
+} from '../../../utils/academicAssessment'
 
 export const POINT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30]
 export const QUIZ_MAX_POINTS = 100
@@ -102,19 +106,12 @@ export const formatDurationText = (startedAtValue, endedAtValue = new Date()) =>
 }
 
 export const normalizeMode = (quiz) => {
-  const raw = (quiz?.mode || '').toString().toLowerCase()
-  if (raw === 'regular') return 'regular'
-  if (raw === 'uts') return 'uts'
-  if (raw === 'uas') return 'uas'
-  if (raw === 'ulangan') return 'uts'
-  return quiz?.is_live ? 'uts' : 'regular'
+  return normalizeAssessmentSlot(quiz?.mode, { isLive: Boolean(quiz?.is_live) })
 }
 
-export const getModeLabel = (quiz) => {
+export const getModeLabel = (quiz, semester = quiz?.semester) => {
   const mode = normalizeMode(quiz)
-  if (mode === 'uts') return 'Mode UTS'
-  if (mode === 'uas') return 'Mode UAS'
-  return 'Mode Reguler'
+  return `Mode ${getAssessmentSlotLabel(mode, semester, { formal: mode !== 'regular' })}`
 }
 
 export const normalizeQuestionType = (value) => {

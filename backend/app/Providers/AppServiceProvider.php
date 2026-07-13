@@ -2,12 +2,14 @@
 
 namespace App\Providers;
 
+use App\Support\Tenancy\TenantContext;
 use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -20,7 +22,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->scoped(TenantContext::class, fn () => new TenantContext);
     }
 
     /**
@@ -41,6 +43,26 @@ class AppServiceProvider extends ServiceProvider
             ->mixedCase()
             ->numbers()
             ->symbols());
+
+        Gate::define('manage-academic-period', function (object $user, string $tenantId): bool {
+            if ($tenantId === '' || empty($user->id)) {
+                return false;
+            }
+
+            try {
+                if (DB::table('super_admins')->where('user_id', $user->id)->exists()) {
+                    return true;
+                }
+
+                return DB::table('profiles')
+                    ->where('id', $user->id)
+                    ->where('tenant_id', $tenantId)
+                    ->where('role', 'admin')
+                    ->exists();
+            } catch (\Throwable) {
+                return false;
+            }
+        });
 
         ResetPassword::createUrlUsing(function (object $user, string $token) use ($frontendUrl): string {
             $tenantFrontendUrl = $this->tenantFrontendBaseUrlForUser($user, $frontendUrl);

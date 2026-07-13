@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Profile;
+use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -152,7 +153,9 @@ class ApiController extends Controller
 
     protected function tenantId(Request $request): ?string
     {
-        return $request->attributes->get('tenant_id');
+        $contextTenantId = app(TenantContext::class)->id();
+
+        return $contextTenantId ?: $request->attributes->get('tenant_id');
     }
 
     protected function profileTenantId(Request $request): ?string

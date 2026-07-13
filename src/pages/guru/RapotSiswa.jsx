@@ -6,11 +6,12 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
+import { getAcademicAssessmentLabels } from '../../utils/academicAssessment'
 import { getKelasDisplayName, normalizeKelasKey, toNumberOrNull, round2, makeLocalId } from './laporan/laporanUtils'
 
 const RAPOT_TYPES = [
-  { key: 'uts', label: 'UTS' },
-  { key: 'uas', label: 'UAS' }
+  { key: 'uts', labelKey: 'midterm' },
+  { key: 'uas', labelKey: 'final' }
 ]
 
 const SOURCE_LABELS = {
@@ -76,7 +77,10 @@ const buildScoreTone = (nilai, kkm = 75) => {
 export default function RapotSiswa() {
   const { user } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
-  const { period } = useActiveAcademicPeriod({ storageKey: 'edusmart.guru.rapot.periodFilter' })
+  const { period, termPeriod } = useActiveAcademicPeriod({
+    storageKey: 'edusmart.guru.rapot.periodFilter',
+    persistFilter: false
+  })
   const [waliKelasList, setWaliKelasList] = useState([])
   const [waliHistoryOptions, setWaliHistoryOptions] = useState([])
   const [selectedContext, setSelectedContext] = useState('')
@@ -86,7 +90,7 @@ export default function RapotSiswa() {
   const [rapotItemsByRapotId, setRapotItemsByRapotId] = useState({})
   const [activeModal, setActiveModal] = useState(null)
   const [rapotRows, setRapotRows] = useState([])
-  const [semesterText, setSemesterText] = useState('')
+  const [selectedSemester, setSelectedSemester] = useState(termPeriod?.semester || 'Ganjil')
   const [saving, setSaving] = useState(false)
   const [loadingClassData, setLoadingClassData] = useState(false)
   const [exportingRapot, setExportingRapot] = useState(false)
@@ -98,6 +102,19 @@ export default function RapotSiswa() {
   )
   const selectedKelas = selectedHistory?.kelasId || ''
   const tahunPelajaran = selectedHistory?.tahunPelajaran || activeTahunPelajaran || ''
+  const assessmentLabels = useMemo(
+    () => getAcademicAssessmentLabels(selectedSemester),
+    [selectedSemester]
+  )
+  const isViewingArchiveRapot =
+    tahunPelajaran !== activeTahunPelajaran ||
+    selectedSemester !== termPeriod?.semester
+
+  useEffect(() => {
+    if (selectedHistory?.status === 'aktif' && termPeriod?.semester) {
+      setSelectedSemester(termPeriod.semester)
+    }
+  }, [selectedHistory?.status, termPeriod?.semester])
   const selectedKelasMeta = useMemo(
     () => selectedHistory?.kelasMeta || waliKelasList.find((kelas) => String(kelas.id) === String(selectedKelas)) || null,
     [selectedHistory, selectedKelas, waliKelasList]
@@ -168,10 +185,11 @@ export default function RapotSiswa() {
       'class',
       selectedKelas || '',
       tahunPelajaran || '',
+      selectedSemester || '',
       selectedHistory?.status || 'aktif',
       getKelasDisplayName(selectedKelasMeta) || ''
     ],
-    [selectedHistory?.status, selectedKelas, selectedKelasMeta, tahunPelajaran]
+    [selectedHistory?.status, selectedKelas, selectedKelasMeta, selectedSemester, tahunPelajaran]
   )
 
   const loadMaster = useCallback(async () => {
@@ -190,24 +208,22 @@ export default function RapotSiswa() {
       const masterData = await queryClient.fetchQuery({
         queryKey: rapotMasterQueryKey,
         queryFn: async () => {
-          const [{ data: strukturRows, error: strukturError }, { data: rapotHistoryRows, error: rapotHistoryError }] = await Promise.all([
-            supabase
-              .from('kelas_struktur')
-              .select('kelas_id')
-              .eq('wali_guru_id', user.id),
+          const [{ data: homeroomRows, error: homeroomError }, { data: rapotHistoryRows, error: rapotHistoryError }] = await Promise.all([
+            supabase.reports.homeroomOptions(),
             supabase
               .from('rapot_siswa')
               .select('kelas_id, tahun_pelajaran, jenis, siswa_id, created_at, updated_at')
               .order('tahun_pelajaran', { ascending: false })
           ])
-          if (strukturError) throw strukturError
+          if (homeroomError) throw homeroomError
           if (rapotHistoryError) throw rapotHistoryError
-          const activeKelasIds = toArray(strukturRows).map((row) => row.kelas_id).filter(Boolean)
+          const homeroomAssignments = toArray(homeroomRows)
+          const assignedKelasIds = homeroomAssignments.map((row) => row.kelas_id).filter(Boolean)
           const historyKelasIds = toArray(rapotHistoryRows).map((row) => row.kelas_id).filter(Boolean)
-          const kelasIds = Array.from(new Set([...activeKelasIds, ...historyKelasIds].map(String).filter(Boolean)))
+          const kelasIds = Array.from(new Set([...assignedKelasIds, ...historyKelasIds].map(String).filter(Boolean)))
 
           if (!kelasIds.length) {
-            return { kelas: [], options: [], activeKelasIds: [], historyRows: [] }
+            return { kelas: [], options: [] }
           }
 
           const { data: kelasRows, error: kelasError } = await supabase
@@ -219,16 +235,17 @@ export default function RapotSiswa() {
           const nextKelas = toArray(kelasRows)
           const kelasById = new Map(nextKelas.map((kelas) => [String(kelas.id), kelas]))
           const optionMap = new Map()
-          activeKelasIds.forEach((kelasId) => {
-            const normalizedId = String(kelasId || '')
-            const year = activeTahunPelajaran || ''
+          homeroomAssignments.forEach((assignment) => {
+            const normalizedId = String(assignment?.kelas_id || '')
+            const year = String(assignment?.tahun_ajaran || '').trim()
+            if (!normalizedId || !year) return
             const key = `${normalizedId}|${year}`
             optionMap.set(key, {
               key,
               kelasId: normalizedId,
               tahunPelajaran: year,
-              status: 'aktif',
-              kelasMeta: kelasById.get(normalizedId) || { id: normalizedId, nama: normalizedId },
+              status: assignment?.is_active ? 'aktif' : 'riwayat',
+              kelasMeta: kelasById.get(normalizedId) || assignment?.kelas || { id: normalizedId, nama: normalizedId },
               rapotCount: 0
             })
           })
@@ -298,6 +315,7 @@ export default function RapotSiswa() {
             .select('id, siswa_id, jenis, semester, tahun_pelajaran, jumlah, rata_rata, rata_rata_manual, locked_at, locked_by, created_by, updated_by, created_at, updated_at')
             .eq('kelas_id', selectedKelas)
             .eq('tahun_pelajaran', tahunPelajaran)
+            .eq('semester', selectedSemester)
 
           let siswaQuery = supabase
             .from('profiles')
@@ -424,7 +442,7 @@ export default function RapotSiswa() {
     } finally {
       setLoadingClassData(false)
     }
-  }, [applyClassData, pushToast, rapotClassQueryKey, selectedHistory?.status, selectedKelas, selectedKelasMeta, tahunPelajaran])
+  }, [applyClassData, pushToast, rapotClassQueryKey, selectedHistory?.status, selectedKelas, selectedKelasMeta, selectedSemester, tahunPelajaran])
 
   useEffect(() => {
     loadMaster()
@@ -437,7 +455,6 @@ export default function RapotSiswa() {
   const openRapot = useCallback(async (student, type) => {
     const rapot = rapotIndex[`${student.id}|${type}`] || null
     setActiveModal({ student, type, rapot })
-    setSemesterText(rapot?.semester || period?.semester || 'Genap')
 
     if (!rapot?.id) {
       setRapotRows(makeDefaultRapotRows())
@@ -478,11 +495,10 @@ export default function RapotSiswa() {
   }, [
     makeDefaultRapotRows,
     mergeSavedRapotItems,
-    period?.semester,
     pushToast,
     rapotIndex,
     rapotItemsByRapotId,
-    setLoading
+    setLoading,
   ])
 
   const computedTotal = useMemo(() => {
@@ -503,6 +519,10 @@ export default function RapotSiswa() {
 
   const saveRapot = useCallback(async () => {
     if (!activeModal?.student || !activeModal?.type || !selectedKelas || !tahunPelajaran) return
+    if (isViewingArchiveRapot) {
+      pushToast('error', 'Rapot arsip hanya dapat dibaca. Gunakan sesi koreksi resmi untuk mengubahnya.')
+      return
+    }
     const invalid = rapotRows.find((row) => {
       const nilai = toNumberOrNull(row.nilai)
       const kkm = toNumberOrNull(row.kkm)
@@ -529,6 +549,7 @@ export default function RapotSiswa() {
           .eq('kelas_id', selectedKelas)
           .eq('jenis', activeModal.type)
           .eq('tahun_pelajaran', tahunPelajaran)
+          .eq('semester', selectedSemester)
           .maybeSingle()
         if (foundRapotError) throw foundRapotError
         existingRapot = foundRapot || null
@@ -539,7 +560,7 @@ export default function RapotSiswa() {
         siswa_id: activeModal.student.id,
         kelas_id: selectedKelas,
         jenis: activeModal.type,
-        semester: String(semesterText || '').trim() || null,
+        semester: selectedSemester,
         tahun_pelajaran: tahunPelajaran,
         jumlah: computedTotal,
         rata_rata: computedAverage,
@@ -553,7 +574,7 @@ export default function RapotSiswa() {
       }
       const { error: rapotError } = await supabase
         .from('rapot_siswa')
-        .upsert(rapotPayload, { onConflict: 'tenant_id,siswa_id,kelas_id,jenis,tahun_pelajaran' })
+        .upsert(rapotPayload, { onConflict: 'tenant_id,siswa_id,kelas_id,tahun_pelajaran,semester,jenis' })
       if (rapotError) throw rapotError
 
       const itemPayloads = rapotRows
@@ -622,18 +643,23 @@ export default function RapotSiswa() {
     activeModal,
     computedAverage,
     computedTotal,
+    isViewingArchiveRapot,
     loadClassData,
     pushToast,
     rapotClassQueryKey,
     rapotRows,
     selectedKelas,
-    semesterText,
+    selectedSemester,
     tahunPelajaran,
     user?.id
   ])
 
   const toggleRapotLock = useCallback(async () => {
     if (!activeModal?.student || !activeModal?.type || !selectedKelas || !tahunPelajaran) return
+    if (isViewingArchiveRapot) {
+      pushToast('error', 'Kunci rapot arsip tidak dapat diubah tanpa sesi koreksi resmi.')
+      return
+    }
 
     try {
       setSaving(true)
@@ -646,7 +672,7 @@ export default function RapotSiswa() {
           siswa_id: activeModal.student.id,
           kelas_id: selectedKelas,
           jenis: activeModal.type,
-          semester: String(semesterText || '').trim() || null,
+          semester: selectedSemester,
           tahun_pelajaran: tahunPelajaran,
           jumlah: computedTotal,
           rata_rata: computedAverage,
@@ -669,7 +695,7 @@ export default function RapotSiswa() {
 
       const { error } = await supabase
         .from('rapot_siswa')
-        .upsert(payload, { onConflict: 'tenant_id,siswa_id,kelas_id,jenis,tahun_pelajaran' })
+        .upsert(payload, { onConflict: 'tenant_id,siswa_id,kelas_id,tahun_pelajaran,semester,jenis' })
       if (error) throw error
 
       setActiveModal((prev) => prev ? { ...prev, rapot: payload } : prev)
@@ -688,10 +714,11 @@ export default function RapotSiswa() {
   }, [
     activeModal,
     computedTotal,
+    isViewingArchiveRapot,
     pushToast,
     rapotClassQueryKey,
     selectedKelas,
-    semesterText,
+    selectedSemester,
     tahunPelajaran,
     computedAverage,
     user?.id
@@ -716,7 +743,7 @@ export default function RapotSiswa() {
       worksheet.getCell('A1').font = { bold: true, size: 15 }
       worksheet.getCell('A1').alignment = { horizontal: 'center' }
       worksheet.addRow([`Nama`, activeModal.student.nama || '-', `NIS`, activeModal.student.nis || '-', `NISN`, activeModal.student.nisn || '-'])
-      worksheet.addRow([`Kelas`, getKelasDisplayName(selectedKelasMeta) || '-', `Semester`, semesterText || '-', `Tahun Pelajaran`, tahunPelajaran || '-'])
+      worksheet.addRow([`Kelas`, getKelasDisplayName(selectedKelasMeta) || '-', `Semester`, selectedSemester || '-', `Tahun Pelajaran`, tahunPelajaran || '-'])
       worksheet.addRow([`Jumlah`, computedTotal ?? '-', `Rata-rata`, displayedAverage ?? '-', `Status`, activeModal.rapot?.locked_at ? 'Dikunci' : 'Terbuka'])
       worksheet.addRow([])
 
@@ -773,7 +800,7 @@ export default function RapotSiswa() {
     pushToast,
     rapotRows,
     selectedKelasMeta,
-    semesterText,
+    selectedSemester,
     tahunPelajaran
   ])
 
@@ -789,11 +816,12 @@ export default function RapotSiswa() {
               <div>
                 <p className="page-title-kicker">Wali Kelas</p>
                 <h1 className="page-title-heading">Rapot Siswa</h1>
-                <p className="page-title-description">Kelola rapot UTS dan UAS siswa wali secara terstruktur.</p>
+                <p className="page-title-description">Kelola rapot tengah dan akhir semester siswa wali secara terstruktur.</p>
               </div>
             </div>
-            <div className="page-title-actions w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:w-[380px]">
-              <div className="w-full">
+            <div className="page-title-actions w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:w-[520px]">
+              <div className="grid w-full gap-3 sm:grid-cols-[minmax(0,1fr)_170px]">
+                <div>
                 <label className={metricLabelClass}>Kelas / Riwayat Wali</label>
                 <select
                   value={selectedContext}
@@ -809,7 +837,24 @@ export default function RapotSiswa() {
                 {!waliHistoryOptions.length && (
                   <p className="mt-2 text-xs text-slate-500">Belum ada kelas wali atau riwayat rapot.</p>
                 )}
+                </div>
+                <div>
+                  <label className={metricLabelClass}>Semester</label>
+                  <select
+                    value={selectedSemester}
+                    onChange={(event) => setSelectedSemester(event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                  >
+                    <option value="Ganjil">Ganjil</option>
+                    <option value="Genap">Genap</option>
+                  </select>
+                </div>
               </div>
+              {isViewingArchiveRapot && (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                  Mode arsip aktif. Data dapat dibaca dan diekspor, tetapi perubahan nilai maupun kunci rapot dinonaktifkan.
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -842,13 +887,13 @@ export default function RapotSiswa() {
             </div>
             <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Format Rapot</p>
-              <p className={metricValueClass}>UTS & UAS</p>
+              <p className={metricValueClass}>{assessmentLabels.midterm.short} & {assessmentLabels.final.short}</p>
             </div>
           </div>
 
           <div className="mb-4 flex flex-col gap-1 border-b border-slate-100 pb-4">
             <h2 className="text-lg font-semibold text-slate-950">Daftar Siswa Wali</h2>
-            <p className="text-sm text-slate-500">Klik detail UTS atau UAS untuk membuka overlay pengisian rapot siswa.</p>
+            <p className="text-sm text-slate-500">Klik detail {assessmentLabels.midterm.formal} atau {assessmentLabels.final.formal} untuk membuka pengisian rapot siswa.</p>
           </div>
 
           {loadingClassData && (
@@ -865,8 +910,8 @@ export default function RapotSiswa() {
                 <tr>
                   <th className={`${tableHeaderClass} text-left`}>Nama</th>
                   <th className={`${tableHeaderClass} text-left`}>NIS</th>
-                  <th className={`${tableHeaderClass} text-center`}>UTS</th>
-                  <th className={`${tableHeaderClass} text-center`}>UAS</th>
+                  <th className={`${tableHeaderClass} text-center`}>{assessmentLabels.midterm.formal}</th>
+                  <th className={`${tableHeaderClass} text-center`}>{assessmentLabels.final.formal}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -890,7 +935,9 @@ export default function RapotSiswa() {
                                 : 'border-indigo-200 bg-indigo-50 text-indigo-700'
                             }`}
                           >
-                            {rapot ? `Detail ${type.label}` : `Isi ${type.label}`}
+                            {rapot
+                              ? `Detail ${assessmentLabels[type.labelKey].short}`
+                              : `Isi ${assessmentLabels[type.labelKey].short}`}
                           </button>
                         </td>
                       )
@@ -914,7 +961,9 @@ export default function RapotSiswa() {
             <div className="mx-auto my-6 max-w-6xl rounded-2xl bg-white shadow-2xl overflow-hidden">
               <div className="border-b border-slate-200 bg-slate-50/80 p-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Rapot {String(activeModal.type).toUpperCase()}</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
+                    Rapot {activeModal.type === 'uas' ? assessmentLabels.final.formal : assessmentLabels.midterm.formal}
+                  </p>
                   <h2 className="mt-1 text-xl font-semibold text-slate-950">{activeModal.student.nama}</h2>
                   <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
                     {[
@@ -922,7 +971,7 @@ export default function RapotSiswa() {
                       ['NISN', activeModal.student.nisn || '-'],
                       ['Kelas', getKelasDisplayName(selectedKelasMeta) || '-'],
                       ['Tahun', tahunPelajaran || '-'],
-                      ['Semester', semesterText || '-']
+                      ['Semester', selectedSemester || '-']
                     ].map(([label, value]) => (
                       <span key={label} className="text-slate-500">
                         {label}: <span className="font-semibold text-slate-800">{value}</span>
@@ -971,6 +1020,7 @@ export default function RapotSiswa() {
                             max="100"
                             step="0.01"
                             value={row.kkm ?? ''}
+                            disabled={isViewingArchiveRapot}
                             onChange={(event) => updateRow(row.id, 'kkm', event.target.value)}
                             className={`${inputClass} text-center`}
                             placeholder="KKM"
@@ -989,6 +1039,7 @@ export default function RapotSiswa() {
                         <td className="px-3 py-3">
                           <input
                             value={row.keterangan}
+                            disabled={isViewingArchiveRapot}
                             onChange={(event) => updateRow(row.id, 'keterangan', event.target.value)}
                             className={inputClass}
                             placeholder="Opsional"
@@ -1027,7 +1078,7 @@ export default function RapotSiswa() {
                 </button>
                 <button
                   type="button"
-                  disabled={saving}
+                  disabled={saving || isViewingArchiveRapot}
                   onClick={toggleRapotLock}
                   className={`rounded-xl px-5 py-3 text-sm font-semibold transition disabled:opacity-60 ${
                     activeModal.rapot?.locked_at
@@ -1046,7 +1097,7 @@ export default function RapotSiswa() {
                 </button>
                 <button
                   type="button"
-                  disabled={saving}
+                  disabled={saving || isViewingArchiveRapot}
                   onClick={saveRapot}
                   className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60"
                 >

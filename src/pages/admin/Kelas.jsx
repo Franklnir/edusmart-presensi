@@ -410,13 +410,12 @@ export default function AKelas({ initialTab = 'kelas' }) {
     activeSemesterPeriod: schedulePeriod,
     periodFilter: schedulePeriodFilter,
     academicYearOptions,
-    semesterOptions,
     setAcademicYear,
-    setSemester,
     resetToActivePeriod,
     isViewingArchivePeriod: isViewingScheduleArchive
   } = useActiveAcademicPeriod({
-    storageKey: 'edusmart.admin.jadwal.periodFilter'
+    storageKey: 'edusmart.admin.jadwal.periodFilter',
+    scope: 'year'
   })
   const routeClassId = React.useMemo(() => {
     const params = new URLSearchParams(location.search)
@@ -473,7 +472,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
   const [scheduleDecisionLoading, setScheduleDecisionLoading] = useState(false)
   const [scheduleDecisionAction, setScheduleDecisionAction] = useState('')
   const [filterHari, setFilterHari] = useState('')
-  const [academicPeriod, setAcademicPeriod] = useState(() => resolveAcademicPeriod())
+  const [academicPeriod, setAcademicPeriod] = useState(activeSchedulePeriod)
   const [scheduleDefaultScope, setScheduleDefaultScope] = useState(SCHEDULE_SCOPE_YEAR)
   const [deletedHistoryOpen, setDeletedHistoryOpen] = useState(false)
   const [deletedHistoryLoading, setDeletedHistoryLoading] = useState(false)
@@ -717,6 +716,10 @@ export default function AKelas({ initialTab = 'kelas' }) {
   useEffect(() => {
     setTab(isSchedulePage ? 'jadwal' : 'kelas')
   }, [isSchedulePage])
+
+  useEffect(() => {
+    setAcademicPeriod(activeSchedulePeriod)
+  }, [activeSchedulePeriod])
 
   // Load guru & siswa setelah password benar
   useEffect(() => {
@@ -3073,9 +3076,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
                         activeAcademicPeriod={activeSchedulePeriod}
                         periodFilter={schedulePeriodFilter}
                         academicYearOptions={academicYearOptions}
-                        semesterOptions={semesterOptions}
                         setAcademicYear={setAcademicYear}
-                        setSemester={setSemester}
                         resetToActivePeriod={resetToActivePeriod}
                         title="Periode Data"
                         compact
@@ -3167,7 +3168,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
                           Kelola jadwal pelajaran untuk kelas ini
                         </p>
 	                        <p className="text-xs text-blue-700 mt-1">
-	                          Periode: {schedulePeriod.tahunAjaran} • tampilan Semester {schedulePeriod.semester}
+	                          Periode: {schedulePeriod.tahunAjaran} • berlaku satu tahun ajaran
 	                        </p>
                         {isViewingScheduleArchive && (
                           <p className="text-xs text-amber-700 mt-1">
@@ -3559,7 +3560,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
 	                                <p className="text-lg font-medium text-gray-600">
 	                                  {filterHari
 	                                    ? `Tidak ada jadwal untuk hari ${filterHari}`
-	                                    : `Belum ada jadwal yang berlaku untuk Semester ${schedulePeriod.semester}.`}
+	                                    : 'Belum ada jadwal untuk tahun ajaran ini.'}
 	                                </p>
 	                                <p className="text-sm mt-1">Tambahkan jadwal tahunan, atau jadwal khusus semester jika memang berbeda.</p>
                               </td>

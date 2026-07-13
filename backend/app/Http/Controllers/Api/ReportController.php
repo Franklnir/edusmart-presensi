@@ -11,6 +11,57 @@ use Illuminate\Support\Facades\Schema;
 
 class ReportController extends ApiController
 {
+    public function homeroomOptions(Request $request)
+    {
+        if (! $this->isAdmin($request) && ! $this->isGuru($request)) {
+            return $this->deny();
+        }
+
+        $tenantId = (string) ($this->tenantId($request) ?? '');
+        if ($tenantId === '' || ! Schema::hasTable('kelas_struktur')) {
+            return response()->json(['data' => []]);
+        }
+
+        $query = $this->tenantQuery('kelas_struktur', $tenantId)
+            ->whereNotNull('kelas_id')
+            ->where('kelas_id', '<>', '');
+        if ($this->isGuru($request)) {
+            $query->where('wali_guru_id', (string) $request->user()->id);
+        }
+
+        $assignments = $query
+            ->select($this->existingColumns('kelas_struktur', [
+                'kelas_id', 'wali_guru_id', 'wali_guru_nama', 'tahun_ajaran',
+            ]))
+            ->orderByDesc('tahun_ajaran')
+            ->get()
+            ->unique(fn ($row) => (string) ($row->kelas_id ?? '').'|'.(string) ($row->tahun_ajaran ?? ''))
+            ->values();
+
+        $classIds = $assignments->pluck('kelas_id')->filter()->map(fn ($id) => (string) $id)->unique()->values();
+        $classes = Schema::hasTable('kelas') && $classIds->isNotEmpty()
+            ? $this->tenantQuery('kelas', $tenantId)
+                ->whereIn('id', $classIds->all())
+                ->get($this->existingColumns('kelas', ['id', 'nama', 'tingkat', 'jurusan', 'grade', 'suffix', 'angkatan']))
+                ->keyBy(fn ($row) => (string) $row->id)
+            : collect();
+        $activeYear = $this->activeAcademicYear($tenantId);
+
+        $rows = $assignments->map(function ($assignment) use ($classes, $activeYear) {
+            $classId = (string) ($assignment->kelas_id ?? '');
+            $year = AcademicPeriod::normalizeAcademicYear($assignment->tahun_ajaran ?? null);
+
+            return [
+                'kelas_id' => $classId,
+                'tahun_ajaran' => $year,
+                'is_active' => $year === $activeYear,
+                'kelas' => (array) ($classes->get($classId) ?? (object) ['id' => $classId, 'nama' => $classId]),
+            ];
+        })->values()->all();
+
+        return response()->json(['data' => $rows]);
+    }
+
     public function teacherSummary(Request $request)
     {
         set_time_limit(120);

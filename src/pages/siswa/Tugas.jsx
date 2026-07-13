@@ -492,6 +492,7 @@ export default function TugasSiswa() {
   const {
 	    activeAcademicPeriod,
 	    period,
+	    termPeriod,
 	    dateFilterPeriod,
 	    periodFilter,
     academicYearOptions,
@@ -499,7 +500,9 @@ export default function TugasSiswa() {
     setAcademicYear,
     setSemester,
     resetToActivePeriod,
-    applyPeriodFilters,
+    applyAcademicYearFilter,
+    applyAcademicSemesterFilter,
+    academicSemesterCacheKey,
     academicPeriodPayload,
     isViewingArchivePeriod
   } = useActiveAcademicPeriod({
@@ -509,7 +512,7 @@ export default function TugasSiswa() {
   const requestedTugasId = String(searchParams.get('tugas') || '').trim()
 
   /* ---------- State ---------- */
-  const [tugasList, setTugasList, hasTugasList] = useLocalCache('siswa_tugas_list', [])
+  const [tugasList, setTugasList, hasTugasList] = useLocalCache(`siswa_tugas_list:${academicSemesterCacheKey}`, [])
   const [selectedMapel, setSelectedMapel] = useState('')
   const [mapelOptions, setMapelOptions] = useState([])
   const [isMapelLoading, setIsMapelLoading] = useState(false)
@@ -572,7 +575,9 @@ export default function TugasSiswa() {
   const kelasSiswa = useStudentPeriodClass({
     userId: profile?.id || user?.id,
     profile,
-    tahunAjaran: period.tahunAjaran
+    tahunAjaran: termPeriod.tahunAjaran,
+    semester: termPeriod.semester,
+    activeTahunAjaran: activeAcademicPeriod.tahunAjaran
   })
   const selectedKelas = kelasSiswa
 
@@ -650,14 +655,14 @@ export default function TugasSiswa() {
         .select(TUGAS_MAPEL_COLUMNS)
         .eq('kelas', kelas)
         .order('mapel', { ascending: true })
-      tugasQuery = applyPeriodFilters(tugasQuery)
+      tugasQuery = applyAcademicSemesterFilter(tugasQuery)
 
 	      let jadwalQuery = supabase
 	        .from('jadwal')
 	        .select('mapel,periode_berlaku')
 	        .eq('kelas_id', kelas)
 	        .order('mapel', { ascending: true })
-      jadwalQuery = applyPeriodFilters(jadwalQuery)
+      jadwalQuery = applyAcademicYearFilter(jadwalQuery)
 
       const [
         { data: tugasMapelData, error },
@@ -684,7 +689,7 @@ export default function TugasSiswa() {
         setIsMapelLoading(false)
       }
     }
-  }, [applyPeriodFilters, user?.id, selectedKelas, kelasSiswa, periodFilter.semester])
+  }, [applyAcademicSemesterFilter, applyAcademicYearFilter, user?.id, selectedKelas, kelasSiswa, periodFilter.semester])
 
   const loadTugasList = useCallback(async () => {
     if (!user?.id) return
@@ -698,7 +703,7 @@ export default function TugasSiswa() {
 
       // tugas untuk kelas siswa
       let query = supabase.from('tugas').select(TUGAS_LIST_COLUMNS).eq('kelas', kelas)
-      query = applyPeriodFilters(query)
+      query = applyAcademicSemesterFilter(query)
       const normalizedSearch = debouncedSearchTerm.trim().toLowerCase()
 
       if (selectedMapel) query = query.eq('mapel', selectedMapel)
@@ -792,7 +797,7 @@ export default function TugasSiswa() {
       }
     }
   }, [
-    applyPeriodFilters,
+    applyAcademicSemesterFilter,
     user?.id,
     selectedKelas,
     kelasSiswa,
@@ -866,7 +871,7 @@ export default function TugasSiswa() {
         .select(TUGAS_LIST_COLUMNS)
         .eq('id', tugas.id)
         .single()
-      tugasQuery = applyPeriodFilters(tugasQuery)
+      tugasQuery = applyAcademicSemesterFilter(tugasQuery)
       const { data: tugasData, error: tErr } = await tugasQuery
 
       if (tErr) throw tErr
@@ -1512,8 +1517,9 @@ export default function TugasSiswa() {
   }, [visibleTugasList])
 
   const submitLockReason = useMemo(() => {
+    if (isViewingArchivePeriod) return 'Mode Arsip aktif. Jawaban hanya dapat dilihat dan tidak dapat diubah.'
     return getSubmitLockReason(detail?.tugas, detail?.myJawaban, detail?.myStatus)
-  }, [detail?.tugas, detail?.myJawaban, detail?.myStatus])
+  }, [detail?.tugas, detail?.myJawaban, detail?.myStatus, isViewingArchivePeriod])
 
   const isSubmissionLocked = Boolean(submitLockReason)
 

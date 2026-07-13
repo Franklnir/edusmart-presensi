@@ -1387,8 +1387,8 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $archiveAttempt->assertStatus(422);
-        $archiveAttempt->assertJsonPath('error', 'Anggota ekstrakurikuler hanya dapat ditambahkan pada periode aktif');
+        $archiveAttempt->assertStatus(409);
+        $archiveAttempt->assertJsonPath('code', 'academic_period_locked');
     }
 
     private function defaultTenantId(): string

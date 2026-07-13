@@ -25,27 +25,40 @@ export const queryClient = new QueryClient({
   },
 })
 
+const tenantCacheIdentity = () => {
+  if (typeof window === 'undefined') return 'server'
+  return String(window.location?.hostname || 'unknown').toLowerCase()
+}
+
+export const withAcademicCacheScope = (params = {}) => ({
+  tenant: params.tenantId || params.tenant_id || tenantCacheIdentity(),
+  tahun_ajaran: params.tahun_ajaran || params.tahunAjaran || '',
+  semester: params.semester || '',
+  mode: params.mode || 'active',
+  ...params
+})
+
 export const queryKeys = {
   admin: {
-    dashboardSummary: (params = {}) => ['admin', 'dashboard-summary', params],
-    homeBootstrap: (params = {}) => ['admin', 'home-bootstrap', params],
-    academicSummary: (params = {}) => ['admin', 'academic-summary', params],
-    structureBootstrap: (params = {}) => ['admin', 'structure-bootstrap', params],
-    activeAcademicPeriodSettings: () => ['admin', 'active-academic-period-settings'],
-    organizations: (params = {}) => ['admin', 'organizations', params],
-    organizationBootstrap: (params = {}) => ['admin', 'organization-bootstrap', params],
-    organizationDetail: (params = {}) => ['admin', 'organization-detail', params],
-    organizationMembers: (params = {}) => ['admin', 'organization-members', params],
-    students: (params = {}) => ['admin', 'students', params],
-    studentOptions: (params = {}) => ['admin', 'student-options', params],
-    teachers: (params = {}) => ['admin', 'teachers', params],
-    teacherOptions: (params = {}) => ['admin', 'teacher-options', params],
+    dashboardSummary: (params = {}) => ['admin', 'dashboard-summary', withAcademicCacheScope(params)],
+    homeBootstrap: (params = {}) => ['admin', 'home-bootstrap', withAcademicCacheScope(params)],
+    academicSummary: (params = {}) => ['admin', 'academic-summary', withAcademicCacheScope(params)],
+    structureBootstrap: (params = {}) => ['admin', 'structure-bootstrap', withAcademicCacheScope(params)],
+    activeAcademicPeriodSettings: (context = {}) => ['admin', 'active-academic-period-settings', context],
+    organizations: (params = {}) => ['admin', 'organizations', withAcademicCacheScope(params)],
+    organizationBootstrap: (params = {}) => ['admin', 'organization-bootstrap', withAcademicCacheScope(params)],
+    organizationDetail: (params = {}) => ['admin', 'organization-detail', withAcademicCacheScope(params)],
+    organizationMembers: (params = {}) => ['admin', 'organization-members', withAcademicCacheScope(params)],
+    students: (params = {}) => ['admin', 'students', withAcademicCacheScope(params)],
+    studentOptions: (params = {}) => ['admin', 'student-options', withAcademicCacheScope(params)],
+    teachers: (params = {}) => ['admin', 'teachers', withAcademicCacheScope(params)],
+    teacherOptions: (params = {}) => ['admin', 'teacher-options', withAcademicCacheScope(params)],
   },
   reports: {
-    teacherSummary: (params = {}) => ['reports', 'teacher-summary', params],
-    attendanceSummary: (params = {}) => ['reports', 'attendance-summary', params],
-    taskSummary: (params = {}) => ['reports', 'task-summary', params],
-    quizSummary: (params = {}) => ['reports', 'quiz-summary', params],
-    homeroomSummary: (params = {}) => ['reports', 'homeroom-summary', params],
+    teacherSummary: (params = {}) => ['reports', 'teacher-summary', withAcademicCacheScope(params)],
+    attendanceSummary: (params = {}) => ['reports', 'attendance-summary', withAcademicCacheScope(params)],
+    taskSummary: (params = {}) => ['reports', 'task-summary', withAcademicCacheScope(params)],
+    quizSummary: (params = {}) => ['reports', 'quiz-summary', withAcademicCacheScope(params)],
+    homeroomSummary: (params = {}) => ['reports', 'homeroom-summary', withAcademicCacheScope(params)],
   },
 }

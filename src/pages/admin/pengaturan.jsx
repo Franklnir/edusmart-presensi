@@ -29,6 +29,7 @@ import { queryClient } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import AccountSecurityPanel from '../../components/AccountSecurityPanel'
+import AcademicLifecyclePanel from '../../components/AcademicLifecyclePanel'
 import FileDropzone from '../../components/FileDropzone'
 import GoogleCredentialButton from '../../components/GoogleCredentialButton'
 import { sanitizeText, sanitizeUrl } from '../../utils/sanitize'
@@ -1049,6 +1050,33 @@ export default function APengaturan() {
     const yearMovesForwardOneStep = yearChanged && targetStartYear === previousStartYear + 1
     const yearMovesBackward = yearChanged && targetStartYear < previousStartYear
 
+    if (yearMovesBackward) {
+      pushToast('warning', 'Periode yang sudah ditutup tidak dapat diaktifkan kembali. Gunakan filter Mode Arsip untuk melihat data lama atau buka sesi koreksi terbatas.', {
+        title: 'Periode arsip terkunci',
+        duration: 8000
+      })
+      return
+    }
+
+    const previewPayload = {
+      ...nextPayload,
+      periode_mulai: academicYearRange.startsAt,
+      periode_selesai: academicYearRange.endsAt,
+      periode_ganjil_mulai: ganjilPreview.startsAt,
+      periode_ganjil_selesai: ganjilPreview.endsAt,
+      periode_genap_mulai: genapPreview.startsAt,
+      periode_genap_selesai: genapPreview.endsAt
+    }
+    const previewResult = await supabase.admin.previewAcademicPeriod(previewPayload)
+    if (previewResult.error) {
+      pushToast('error', previewResult.error.message || 'Pratinjau dampak periode gagal dimuat.')
+      return
+    }
+    const impactPreview = previewResult.data || {}
+    const affectedArchiveRows = Object.values(impactPreview.affected_rows_becoming_archive || {})
+      .reduce((total, value) => total + (Number(value) || 0), 0)
+    const rolloverPreview = impactPreview.rollover || {}
+
     if (yearChanged) {
       const confirmedYear = yearMovesForwardOneStep
         ? await requestConfirmation({
@@ -1063,17 +1091,17 @@ export default function APengaturan() {
               'Metadata kelas aktif, filter tugas, absensi, jadwal, laporan, rekap, dan storage akan mengikuti periode baru.',
               'Jadwal periode baru tidak disalin dari halaman ini. Saat membuka menu Jadwal, admin akan memilih buat baru atau memakai jadwal periode sebelumnya.',
               'Daftar ekskul disalin sebagai katalog periode baru; riwayat katalog dan anggota periode lama tetap utuh.',
+              `Pratinjau server: ${rolloverPreview.promoted_students || 0} siswa naik kelas, ${rolloverPreview.alumni_students || 0} menjadi alumni, dan ${rolloverPreview.retained_students || 0} tetap di kelas asal.`,
+              `${affectedArchiveRows} baris data periode aktif akan berubah status menjadi arsip.`,
               carryEskulMembers
                 ? 'Anggota eskul aktif akan disalin sebagai keanggotaan baru pada periode target.'
                 : 'Anggota eskul tidak disalin otomatis; keanggotaan periode baru bisa diatur manual.'
             ]
           })
         : await requestConfirmation({
-            title: yearMovesBackward ? 'Konfirmasi koreksi periode aktif' : 'Konfirmasi tahun ajaran tidak berurutan',
-            message: yearMovesBackward
-              ? `Periode aktif akan dikoreksi dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`
-              : `Periode aktif akan berubah dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`,
-            confirmText: yearMovesBackward ? 'Ya, koreksi periode' : 'Ya, cek ke server',
+            title: 'Konfirmasi tahun ajaran tidak berurutan',
+            message: `Periode aktif akan berubah dari ${previousPayload.tahun_ajaran || '-'} ke ${nextPayload.tahun_ajaran}.`,
+            confirmText: 'Ya, cek ke server',
             cancelText: 'Batal',
             tone: 'warning',
             details: [
@@ -1122,7 +1150,8 @@ export default function APengaturan() {
           'Jadwal berlaku untuk 1 tahun ajaran penuh.',
           'Jika semester berubah dan katalog target masih kosong, daftar ekskul disiapkan sebagai snapshot baru tanpa menyalin anggota.',
           'Halaman tugas, quiz, laporan, absensi, dan storage tetap berada dalam satu tahun ajaran kecuali fiturnya memakai filter sendiri.',
-          `Cakupan aktif setelah disimpan: ${tahunAjaran} penuh.`
+          `Cakupan aktif setelah disimpan: ${tahunAjaran} penuh.`,
+          `${affectedArchiveRows} baris data berada pada cakupan periode yang akan ditutup.`
         ]
       })
       if (!confirmedPeriod) return
@@ -1131,16 +1160,11 @@ export default function APengaturan() {
     setSavingPeriod(true)
     try {
       const payload = {
-        ...nextPayload,
-        periode_mulai: academicYearRange.startsAt,
-        periode_selesai: academicYearRange.endsAt,
-        periode_ganjil_mulai: ganjilPreview.startsAt,
-        periode_ganjil_selesai: ganjilPreview.endsAt,
-        periode_genap_mulai: genapPreview.startsAt,
-        periode_genap_selesai: genapPreview.endsAt,
+        ...previewPayload,
         jadwal_periode_berlaku: nextPayload.jadwal_periode_berlaku,
         auto_rollover: yearMovesForwardOneStep,
-        carry_eskul_members: yearMovesForwardOneStep && carryEskulMembers
+        carry_eskul_members: yearMovesForwardOneStep && carryEskulMembers,
+        impact_confirmed: true
       }
 
       let { data, error, raw } = await supabase.admin.applyAcademicPeriod(payload)
@@ -2078,6 +2102,8 @@ export default function APengaturan() {
                 </div>
               </div>
             </form>
+
+            <AcademicLifecyclePanel />
 
             <div className="mt-5">
               <div>

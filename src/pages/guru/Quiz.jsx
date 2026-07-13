@@ -10,6 +10,7 @@ import FilePreviewModal from '../../components/FilePreviewModal'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
+import { getAcademicAssessmentLabels } from '../../utils/academicAssessment'
 
 import {
   POINT_OPTIONS,
@@ -91,6 +92,7 @@ export default function GuruQuiz() {
   const {
 	    activeAcademicPeriod,
 	    period,
+	    termPeriod,
 	    dateFilterPeriod,
 	    periodFilter,
     academicYearOptions,
@@ -98,21 +100,27 @@ export default function GuruQuiz() {
     setAcademicYear,
     setSemester,
     resetToActivePeriod,
-    applyPeriodFilters,
+    applyAcademicYearFilter,
+    academicYearCacheKey,
+    academicSemesterCacheKey,
     activeAcademicPeriodPayload,
     isViewingArchivePeriod
   } = useActiveAcademicPeriod({
     storageKey: 'edusmart.guru.quiz.periodFilter'
   })
+  const assessmentLabels = useMemo(
+    () => getAcademicAssessmentLabels(termPeriod.semester),
+    [termPeriod.semester]
+  )
 
-  const [jadwal, setJadwal] = useLocalCache('guru_quiz_jadwal', [])
-  const [kelasList, setKelasList] = useLocalCache('guru_quiz_kelasList', [])
+  const [jadwal, setJadwal] = useLocalCache(`guru_quiz_jadwal:${academicYearCacheKey}`, [])
+  const [kelasList, setKelasList] = useLocalCache(`guru_quiz_kelasList:${academicYearCacheKey}`, [])
   const [selectedKelas, setSelectedKelas] = useState('')
   const [mapelList, setMapelList] = useState([])
   const [selectedMapel, setSelectedMapel] = useState('')
   const [selectedMonth, setSelectedMonth] = useState('')
 
-  const [quizList, setQuizList, hasQuizList] = useLocalCache('guru_quiz_list', [])
+  const [quizList, setQuizList, hasQuizList] = useLocalCache(`guru_quiz_list:${academicSemesterCacheKey}`, [])
   const [quizStatsById, setQuizStatsById] = useState({})
   const [selectedQuizId, setSelectedQuizId] = useState('')
   const [questions, setQuestions] = useState([])
@@ -755,7 +763,7 @@ export default function GuruQuiz() {
       if (!user?.id) return
       try {
         let jadwalQuery = supabase.from('jadwal').select(JADWAL_GURU_COLUMNS).eq('guru_id', user.id)
-        jadwalQuery = applyPeriodFilters(jadwalQuery)
+        jadwalQuery = applyAcademicYearFilter(jadwalQuery)
 
         const { data, error } = await supabase.batch([
           { key: 'jadwal', query: jadwalQuery },
@@ -787,7 +795,7 @@ export default function GuruQuiz() {
       }
     }
     loadInitialTeachingData()
-  }, [applyPeriodFilters, periodFilter.semester, user?.id, pushToast])
+  }, [applyAcademicYearFilter, periodFilter.semester, user?.id, pushToast])
 
   useEffect(() => {
     // Guru doesn't need per-second countdown — 15s is enough for status badges
@@ -837,8 +845,8 @@ export default function GuruQuiz() {
       per_page: 100,
       kelas: selectedKelas,
       mapel: selectedMapel,
-      tahun_ajaran: period.tahunAjaran,
-      semester: period.semester
+      tahun_ajaran: termPeriod.tahunAjaran,
+      semester: termPeriod.semester
     })
     if (error?.code === 'REQUEST_ABORTED') return
     if (error) throw error
@@ -890,7 +898,7 @@ export default function GuruQuiz() {
   useEffect(() => {
     loadQuizzes()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKelas, selectedMapel, quizRealtimeTick, period.tahunAjaran, period.semester])
+  }, [selectedKelas, selectedMapel, quizRealtimeTick, termPeriod.tahunAjaran, termPeriod.semester])
 
   const loadQuizDetails = async () => {
     if (!selectedQuizId) {
@@ -907,7 +915,7 @@ export default function GuruQuiz() {
     try {
       // --- Phase 1: Fetch quiz detail + side data in PARALLEL ---
       const quizIsActive = selectedQuiz && (toBoolean(selectedQuiz.is_active) || toBoolean(selectedQuiz.is_live))
-      const shouldUseHistoryRoster = Boolean(isViewingArchivePeriod && period.tahunAjaran && selectedKelas)
+      const shouldUseHistoryRoster = Boolean(isViewingArchivePeriod && termPeriod.tahunAjaran && selectedKelas)
       const siswaQuery = shouldUseHistoryRoster
         ? supabase
           .from('profiles')
@@ -922,8 +930,8 @@ export default function GuruQuiz() {
           .eq('role', 'siswa')
           .order('nama')
       const detailPromise = supabase.quiz.detail(selectedQuizId, {
-        tahun_ajaran: period.tahunAjaran,
-        semester: period.semester
+        tahun_ajaran: termPeriod.tahunAjaran,
+        semester: termPeriod.semester
       })
       const sidePromise = Promise.all([
         supabase.batch([
@@ -986,7 +994,7 @@ export default function GuruQuiz() {
           .from('student_class_histories')
           .select('student_id')
           .eq('class_id', selectedKelas)
-          .eq('tahun_ajaran', period.tahunAjaran)
+          .eq('tahun_ajaran', termPeriod.tahunAjaran)
           .in('status', ['active', 'nonaktif', 'mutasi'])
 
         if (histError) {
@@ -1130,7 +1138,7 @@ export default function GuruQuiz() {
   useEffect(() => {
     loadQuizDetails()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedQuizId, detailRealtimeTick, period.tahunAjaran, period.semester])
+  }, [selectedQuizId, detailRealtimeTick, termPeriod.tahunAjaran, termPeriod.semester])
 
   useEffect(() => {
     setDetailStudent(null)
@@ -1388,8 +1396,8 @@ export default function GuruQuiz() {
         nama: cloneForm.nama.trim(),
         copy_security: Boolean(cloneForm.copy_security),
         copy_schedule: false,
-        tahun_ajaran: period.tahunAjaran,
-        semester: period.semester
+        tahun_ajaran: termPeriod.tahunAjaran,
+        semester: termPeriod.semester
       })
       if (error) throw error
 
@@ -2474,7 +2482,8 @@ export default function GuruQuiz() {
               <button
                 type="button"
                 onClick={openCreateQuizForm}
-                className="px-5 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-semibold hover:from-indigo-700 hover:to-blue-700 transition-all shadow-sm hover:shadow-md"
+                disabled={isViewingArchivePeriod}
+                className="px-5 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-semibold hover:from-indigo-700 hover:to-blue-700 transition-all shadow-sm hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
               >
                 + Buat Quiz
               </button>
@@ -2684,14 +2693,16 @@ export default function GuruQuiz() {
                     <button
                       type="button"
                       onClick={openEditQuizForm}
-                      className="inline-flex w-fit rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
+                      disabled={isViewingArchivePeriod}
+                      className="inline-flex w-fit rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Edit Info Quiz
                     </button>
                     <button
                       type="button"
                       onClick={openCloneQuizForm}
-                      className="inline-flex w-fit rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50"
+                      disabled={isViewingArchivePeriod}
+                      className="inline-flex w-fit rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Duplikat
                     </button>
@@ -2757,7 +2768,7 @@ export default function GuruQuiz() {
                       max={periodEndInput || undefined}
                       value={scheduleForm.starts_at}
                       onChange={(e) => setScheduleForm((prev) => ({ ...prev, starts_at: e.target.value }))}
-                      disabled={quizContentLocked}
+                      disabled={isViewingArchivePeriod || quizContentLocked}
                     />
                   </div>
                   <div>
@@ -2783,7 +2794,8 @@ export default function GuruQuiz() {
                   <button
                     type="button"
                     onClick={handleSaveSchedule}
-                    className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
+                    disabled={isViewingArchivePeriod}
+                    className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Simpan Jadwal
                   </button>
@@ -2832,7 +2844,7 @@ export default function GuruQuiz() {
                       className="h-5 w-5 rounded border-slate-300 text-slate-800 focus:ring-slate-500"
                       checked={securityForm.shuffle_questions}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, shuffle_questions: e.target.checked }))}
-                      disabled={quizContentLocked}
+                      disabled={isViewingArchivePeriod || quizContentLocked}
                     />
                   </label>
                   <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
@@ -2844,7 +2856,7 @@ export default function GuruQuiz() {
                       className="h-5 w-5 rounded border-slate-300 text-slate-800 focus:ring-slate-500"
                       checked={securityForm.shuffle_options}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, shuffle_options: e.target.checked }))}
-                      disabled={quizContentLocked}
+                      disabled={isViewingArchivePeriod || quizContentLocked}
                     />
                   </label>
                   <div>
@@ -2855,7 +2867,7 @@ export default function GuruQuiz() {
                       className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
                       value={securityForm.max_attempts}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, max_attempts: e.target.value }))}
-                      disabled={quizContentLocked}
+                      disabled={isViewingArchivePeriod || quizContentLocked}
                     >
                       {ATTEMPT_LIMIT_OPTIONS.map((option) => (
                         <option key={option.value || 'none'} value={option.value}>
@@ -2873,7 +2885,7 @@ export default function GuruQuiz() {
                       className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
                       value={securityForm.security_mode}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, security_mode: e.target.value }))}
-                      disabled={quizContentLocked}
+                      disabled={isViewingArchivePeriod || quizContentLocked}
                     >
                       <option value="standard">Standard</option>
                       <option value="strict">Strict</option>
@@ -2887,7 +2899,7 @@ export default function GuruQuiz() {
                       className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500"
                       value={securityForm.access_device}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, access_device: e.target.value }))}
-                      disabled={quizContentLocked}
+                      disabled={isViewingArchivePeriod || quizContentLocked}
                     >
                       {ACCESS_DEVICE_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -2918,7 +2930,7 @@ export default function GuruQuiz() {
                       value={securityForm.access_code}
                       onChange={(e) => setSecurityForm((prev) => ({ ...prev, access_code: e.target.value }))}
                       placeholder="Kosongkan jika tidak diubah"
-                      disabled={quizContentLocked}
+                      disabled={isViewingArchivePeriod || quizContentLocked}
                     />
                   </div>
                   <div className="md:col-span-2 flex justify-end">
@@ -2981,7 +2993,7 @@ export default function GuruQuiz() {
                     <button
                       type="button"
                       onClick={() => openQuestionForm()}
-                      disabled={quizContentLocked}
+                      disabled={isViewingArchivePeriod || quizContentLocked}
 	                      className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {quizContentLocked ? 'Soal Dikunci' : '+ Tambah Soal'}
@@ -3048,7 +3060,7 @@ export default function GuruQuiz() {
                           <button
                             type="button"
                             onClick={() => openQuestionForm(teacherQuestion)}
-                            disabled={quizContentLocked}
+                            disabled={isViewingArchivePeriod || quizContentLocked}
                             className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             Edit
@@ -3056,7 +3068,7 @@ export default function GuruQuiz() {
                           <button
                             type="button"
                             onClick={() => handleDeleteQuestion(teacherQuestion.id)}
-                            disabled={quizContentLocked}
+                            disabled={isViewingArchivePeriod || quizContentLocked}
                             className="px-2.5 py-1 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             Hapus
@@ -3686,7 +3698,7 @@ export default function GuruQuiz() {
                               <button
                                 type="button"
                                 onClick={() => handleSaveEssayScore(row)}
-                                disabled={isScoring || !row.answerId}
+                                disabled={isViewingArchivePeriod || isScoring || !row.answerId}
                                 className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60"
                               >
                                 {isScoring ? 'Menyimpan...' : 'Simpan Nilai Esai'}
@@ -3769,8 +3781,8 @@ export default function GuruQuiz() {
                   disabled={Boolean(editingQuizId) && !canChangeSelectedQuizMode}
                 >
                   <option value="regular">Reguler</option>
-                  <option value="uts">UTS</option>
-                  <option value="uas">UAS</option>
+                  <option value="uts">{assessmentLabels.midterm.formal}</option>
+                  <option value="uas">{assessmentLabels.final.formal}</option>
                 </select>
                 {Boolean(editingQuizId) && !canChangeSelectedQuizMode && (
                   <div className="mt-1 text-[11px] text-amber-700">
@@ -3793,7 +3805,8 @@ export default function GuruQuiz() {
                 <button
                   type="button"
                   onClick={handleSaveQuizForm}
-                  className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors"
+                  disabled={isViewingArchivePeriod}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {editingQuizId ? 'Simpan Perubahan' : 'Simpan'}
                 </button>
@@ -3891,7 +3904,7 @@ export default function GuruQuiz() {
               <button
                 type="button"
                 onClick={handleCloneQuiz}
-                disabled={cloneSaving || !cloneForm.target_kelas_id || !cloneForm.target_mapel || !cloneForm.nama.trim()}
+                disabled={isViewingArchivePeriod || cloneSaving || !cloneForm.target_kelas_id || !cloneForm.target_mapel || !cloneForm.nama.trim()}
                 className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {cloneSaving ? 'Membuat Salinan...' : 'Buat Salinan'}
@@ -4372,7 +4385,7 @@ export default function GuruQuiz() {
               <button
                 type="button"
                 onClick={handleSaveQuestion}
-                disabled={projectedQuestionPoints > QUIZ_MAX_POINTS}
+                disabled={isViewingArchivePeriod || projectedQuestionPoints > QUIZ_MAX_POINTS}
                 className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 Simpan Soal

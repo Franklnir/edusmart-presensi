@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Jobs\FinalizeQuizSubmissionJob;
+use App\Services\Academic\AcademicContextResolver;
+use App\Services\Academic\AcademicPeriodLifecycleService;
+use App\Services\Academic\HistoricalEnrollmentResolver;
 use App\Services\Quiz\QuizContentCache;
 use App\Services\Quiz\QuizScoringService;
 use App\Services\WhatsApp\WhatsAppNotificationService;
@@ -25,6 +28,9 @@ class QuizController extends ApiController
     public function __construct(
         private readonly QuizScoringService $scoringService,
         private readonly QuizContentCache $contentCache,
+        private readonly AcademicContextResolver $academicContextResolver,
+        private readonly AcademicPeriodLifecycleService $academicPeriodLifecycle,
+        private readonly HistoricalEnrollmentResolver $studentAcademicClassResolver,
         private readonly WhatsAppNotificationService $whatsAppNotificationService
     ) {}
 
@@ -59,7 +65,16 @@ class QuizController extends ApiController
         if ($this->isGuru($request) && ! $this->isAdmin($request)) {
             $query->where('guru_id', $request->user()?->id);
         } elseif ($this->isSiswa($request)) {
-            $query->where('kelas_id', $this->studentClassId($request));
+            $studentClassId = $this->studentClassIdForPeriod(
+                $request,
+                $request->query('tahun_ajaran'),
+                $request->query('semester')
+            );
+            if ($studentClassId === '') {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->where('kelas_id', $studentClassId);
+            }
         }
 
         if ($kelas !== '') {
@@ -266,7 +281,12 @@ class QuizController extends ApiController
             return $this->deny('Anda tidak memiliki akses quiz ini.', 403);
         }
         if ($this->isSiswa($request)) {
-            if (! $this->sameClassId($this->studentClassId($request), $quiz->kelas_id ?? '')) {
+            $studentClassId = $this->studentClassIdForPeriod(
+                $request,
+                $quiz->tahun_ajaran ?? null,
+                $quiz->semester ?? null
+            );
+            if (! $this->sameClassId($studentClassId, $quiz->kelas_id ?? '')) {
                 return $this->deny('Quiz tidak tersedia untuk kelas Anda.', 403);
             }
             $deviceResponse = $this->denyIfQuizDeviceNotAllowed($quiz, $this->requestClientDevice($request));
@@ -386,6 +406,13 @@ class QuizController extends ApiController
             ?: ($tenantPeriod['tahun_ajaran'] ?? null);
         $targetSemester = AcademicPeriod::normalizeSemester($request->input('semester'))
             ?: ($tenantPeriod['semester'] ?? null);
+
+        if (
+            $targetAcademicYear !== ($tenantPeriod['tahun_ajaran'] ?? null)
+            || $targetSemester !== ($tenantPeriod['semester'] ?? null)
+        ) {
+            return $this->deny('Quiz hanya dapat diduplikasi ke periode akademik aktif.', 409);
+        }
 
         if ($sourceQuizId === '' || $targetKelasId === '' || $targetMapel === '') {
             return response()->json([
@@ -2257,8 +2284,10 @@ class QuizController extends ApiController
 
     private function applyQuizAcademicQueryFilters($query, string $table, Request $request): void
     {
-        $academicYear = AcademicPeriod::normalizeAcademicYear($request->query('tahun_ajaran'));
-        $semester = AcademicPeriod::normalizeSemester($request->query('semester'));
+        $tenantId = (string) ($this->tenantId($request) ?? '');
+        $context = $tenantId !== '' ? $this->academicContextResolver->forRead($request, $tenantId) : [];
+        $academicYear = $context['tahun_ajaran'] ?? null;
+        $semester = $context['semester'] ?? null;
 
         if ($academicYear && Schema::hasColumn($table, 'tahun_ajaran')) {
             $query->where('tahun_ajaran', $academicYear);
@@ -2315,6 +2344,27 @@ class QuizController extends ApiController
         return trim((string) ($this->profile($request)?->kelas ?? ''));
     }
 
+    private function studentClassIdForPeriod(Request $request, mixed $year, mixed $semester): string
+    {
+        $tenantId = (string) ($this->tenantId($request) ?? '');
+        $studentId = (string) ($request->user()?->id ?? '');
+        if ($tenantId === '' || $studentId === '') {
+            return '';
+        }
+
+        $active = $this->currentAcademicPeriodForTenant($tenantId);
+        $resolved = $this->studentAcademicClassResolver->resolve(
+            $tenantId,
+            $studentId,
+            is_scalar($year) ? (string) $year : null,
+            is_scalar($semester) ? (string) $semester : null,
+            $this->studentClassId($request),
+            $active['tahun_ajaran'] ?? null
+        );
+
+        return trim((string) $resolved);
+    }
+
     private function quizTargetClassExists(string $tenantId, string $kelasId): bool
     {
         if ($kelasId === '' || ! Schema::hasTable('kelas')) {
@@ -2353,9 +2403,8 @@ class QuizController extends ApiController
         if ($academicYear && Schema::hasColumn('jadwal', 'tahun_ajaran')) {
             $query->where('tahun_ajaran', $academicYear);
         }
-        if ($semester && Schema::hasColumn('jadwal', 'semester')) {
-            $query->where('semester', $semester);
-        }
+        // Jadwal adalah data tahunan. Nilai semester pada baris lama hanya
+        // metadata kompatibilitas dan tidak boleh membatasi penugasan guru.
 
         return $query->exists();
     }
@@ -2367,6 +2416,13 @@ class QuizController extends ApiController
 
     private function currentAcademicPeriodForTenant(string $tenantId): array
     {
+        if ($this->academicPeriodLifecycle->ready()) {
+            $context = $this->academicPeriodLifecycle->currentContext($tenantId);
+            if (($context['tahun_ajaran'] ?? null) && ($context['semester'] ?? null)) {
+                return $context;
+            }
+        }
+
         $settings = null;
         if (Schema::hasTable('settings')) {
             $settingsQuery = DB::table('settings')->orderBy('id');

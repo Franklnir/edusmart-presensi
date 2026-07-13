@@ -1,11 +1,11 @@
 # Dokumentasi Endpoint API EduSmart
 
-Tanggal audit: 2026-07-03
+Tanggal audit: 2026-07-12
 
 Dokumen ini merangkum kontrak endpoint API backend EduSmart dari source
 `backend/routes/api.php`, hasil verifikasi `php artisan route:list --path=api`,
 dan pembacaan controller utama. Total endpoint API aplikasi aktif saat audit:
-210 route. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai
+242 route. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai
 API aplikasi.
 
 ## Status Kualitas Dokumen
@@ -331,6 +331,14 @@ Catatan:
 - Batch `/api/db/batch` hanya mendukung `select`.
 - Limit select dibatasi env `DB_MAX_SELECT_LIMIT` dan
   `DB_MAX_SELECT_LIMIT_ADMIN`.
+- Default data transaksi adalah 250 baris. Tabel roster/master (`profiles`,
+  `kelas`, `mata_pelajaran`) sementara memakai `DB_ROSTER_SELECT_LIMIT=2000`
+  agar layar operasional lama tidak terpotong selama migrasi pagination.
+- Offset dibatasi `DB_MAX_OFFSET=25000`. Endpoint baru untuk daftar besar wajib
+  memakai cursor/keyset pagination, bukan menaikkan offset.
+- Batch hanya select, default maksimal 12 item, dan memiliki anggaran hasil
+  `DB_BATCH_MAX_TOTAL_ROWS=5000` agar satu request tidak menahan worker PHP dan
+  koneksi database berlebihan.
 - Tabel tenant scoped otomatis diberi `tenant_id`.
 - Tabel akademik tertentu otomatis memakai scope periode aktif jika client tidak
   mengirim filter periode eksplisit.
@@ -1060,17 +1068,21 @@ curl -X POST "https://<tenant-host>/api/storage/direct-upload" \
 
 Katalog ini digenerate ulang pada 2026-07-02 dari `php artisan route:list --json --path=api` dan hanya memasukkan route aplikasi dengan URI `api/*`. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai API aplikasi.
 
-Total route API aplikasi aktif: 210.
+Total route API aplikasi aktif: 242.
 
 ### Admin
 
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
 | `POST` | `/api/admin/academic-period/apply` | `AdminController@applyAcademicPeriod` | Sanctum |
+| `POST` | `/api/admin/academic-period/preview` | `AdminController@previewAcademicPeriod` | Sanctum |
 | `POST` | `/api/admin/academic-period/copy-structure` | `AdminController@copyAcademicStructure` | Sanctum |
 | `POST` | `/api/admin/academic-period/restore-roster` | `AdminController@restoreAcademicPeriodRoster` | Sanctum |
 | `GET` | `/api/admin/academic-period/schedule-decision` | `AdminController@schedulePeriodDecisionStatus` | Sanctum |
 | `POST` | `/api/admin/academic-period/schedule-decision` | `AdminController@resolveSchedulePeriodDecision` | Sanctum |
+| `GET` | `/api/admin/academic-periods` | `AdminController@academicPeriods` | Sanctum |
+| `POST` | `/api/admin/academic-periods/correction-sessions` | `AdminController@createAcademicCorrectionSession` | Sanctum |
+| `DELETE` | `/api/admin/academic-periods/correction-sessions/{sessionId}` | `AdminController@closeAcademicCorrectionSession` | Sanctum |
 | `GET` | `/api/admin/academic-rollover-exceptions` | `AdminController@academicRolloverExceptions` | Sanctum |
 | `PUT` | `/api/admin/academic-rollover-exceptions` | `AdminController@replaceAcademicRolloverExceptions` | Sanctum |
 | `GET` | `/api/admin/academic-summary` | `AdminController@academicSummary` | Sanctum |
@@ -1270,6 +1282,7 @@ Total route API aplikasi aktif: 210.
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
 | `GET` | `/api/reports/attendance-summary` | `ReportController@attendanceSummary` | Sanctum |
+| `GET` | `/api/reports/homeroom-options` | `ReportController@homeroomOptions` | Sanctum |
 | `GET` | `/api/reports/homeroom-summary` | `ReportController@homeroomSummary` | Sanctum |
 | `GET` | `/api/reports/quiz-summary` | `ReportController@quizSummaryEndpoint` | Sanctum |
 | `GET` | `/api/reports/task-summary` | `ReportController@taskSummary` | Sanctum |
@@ -1350,7 +1363,12 @@ Total route API aplikasi aktif: 210.
 
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
+| `GET` | `/api/tugas` | `TugasController@index` | Sanctum |
+| `POST` | `/api/tugas` | `TugasController@store` | Sanctum Guru/Admin |
 | `POST` | `/api/tugas/jawaban/submit` | `TugasController@submitJawaban` | Sanctum |
+| `GET` | `/api/tugas/{id}` | `TugasController@show` | Sanctum + tenant/ownership |
+| `PATCH` | `/api/tugas/{id}` | `TugasController@update` | Sanctum Guru/Admin + periode aktif |
+| `DELETE` | `/api/tugas/{id}` | `TugasController@destroy` | Sanctum Guru/Admin + periode aktif |
 
 ### WhatsApp Webhook
 

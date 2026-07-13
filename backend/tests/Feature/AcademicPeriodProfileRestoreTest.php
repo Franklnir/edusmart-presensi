@@ -24,7 +24,7 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_period_change_restores_student_roster_from_authoritative_snapshot(): void
+    public function test_closed_period_cannot_be_reactivated_even_with_authoritative_snapshot(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
 
@@ -47,20 +47,18 @@ class AcademicPeriodProfileRestoreTest extends TestCase
             'calendar_confirmed' => true,
         ]));
 
-        $response->assertOk()
-            ->assertJsonPath('data.period_snapshot_restored', true)
-            ->assertJsonPath('data.student_profile_restores', 1)
-            ->assertJsonPath('data.student_profiles_outside_period', 1);
+        $response->assertStatus(409)
+            ->assertJsonPath('code', 'academic_period_closed');
 
         $this->assertDatabaseHas('settings', [
             'tenant_id' => $tenantId,
-            'tahun_ajaran' => '2025/2026',
-            'semester_aktif' => 'Genap',
+            'tahun_ajaran' => '2026/2027',
+            'semester_aktif' => 'Ganjil',
         ]);
         $this->assertDatabaseHas('profiles', [
             'id' => $student->id,
             'tenant_id' => $tenantId,
-            'kelas' => 'x-a',
+            'kelas' => 'xi-a',
             'status' => 'active',
             'angkatan' => '2025',
         ]);
@@ -68,8 +66,8 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         $this->assertDatabaseHas('profiles', [
             'id' => $outsidePeriodStudent->id,
             'tenant_id' => $tenantId,
-            'kelas' => '',
-            'status' => 'nonaktif',
+            'kelas' => 'xi-a',
+            'status' => 'active',
         ]);
         $this->assertDatabaseHas('student_class_histories', [
             'tenant_id' => $tenantId,
@@ -78,7 +76,7 @@ class AcademicPeriodProfileRestoreTest extends TestCase
             'semester' => 'Genap',
             'class_id' => 'x-a',
             'status' => 'active',
-            'source' => 'period_snapshot_restore',
+            'source' => 'before_period_change',
         ]);
     }
 
@@ -119,7 +117,7 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         $this->assertNotNull(DB::table('profiles')->where('id', $student->id)->value('disabled_at'));
     }
 
-    public function test_period_change_rejects_backward_restore_without_authoritative_snapshot(): void
+    public function test_period_change_rejects_backward_restore_without_mutating_profile(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
 
@@ -136,7 +134,8 @@ class AcademicPeriodProfileRestoreTest extends TestCase
             'calendar_confirmed' => true,
         ]));
 
-        $response->assertOk();
+        $response->assertStatus(409)
+            ->assertJsonPath('code', 'academic_period_closed');
 
         $this->assertDatabaseHas('profiles', [
             'id' => $student->id,
@@ -160,7 +159,26 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         $this->insertClass($tenantId, 'x-a', 'X A', 'X', 'A', '2025', '2025/2026', 'Genap');
         $this->insertClass($tenantId, 'xi-a', 'XI A', 'XI', 'A', '2024', '2025/2026', 'Genap');
         $this->insertClass($tenantId, 'xii-a', 'XII A', 'XII', 'A', '2023', '2025/2026', 'Genap');
-        $this->insertClassStructure($tenantId, 'xi-a', $teacher->id, 'Pak Wali Tetap', 'old-ketua', 'Ketua Lama');
+        $this->insertClassStructure(
+            $tenantId,
+            'xi-a',
+            $teacher->id,
+            'Pak Wali Tetap',
+            'old-ketua',
+            'Ketua Lama',
+            '2025/2026',
+            'Genap'
+        );
+        $this->insertClassStructure(
+            $tenantId,
+            'x-a',
+            $teacher->id,
+            'Pak Wali Target',
+            'target-ketua',
+            'Ketua Target',
+            '2026/2027',
+            'Ganjil'
+        );
         $this->insertSettingsPeriod($tenantId, '2025/2026', 'Genap');
 
         $students = [
@@ -181,7 +199,10 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('data.rollover.promoted_students', 4)
             ->assertJsonPath('data.rollover.alumni_students', 2)
-            ->assertJsonPath('data.rollover.skipped_students', 0);
+            ->assertJsonPath('data.rollover.skipped_students', 0)
+            ->assertJsonPath('data.rollover_preview.promoted_students', 4)
+            ->assertJsonPath('data.rollover_preview.alumni_students', 2)
+            ->assertJsonPath('data.rollover_preview.skipped_students', 0);
 
         $this->assertDatabaseHas('profiles', ['id' => $students['vii']->id, 'kelas' => 'viii-a', 'status' => 'active', 'angkatan' => '2025']);
         $this->assertDatabaseHas('profiles', ['id' => $students['viii']->id, 'kelas' => 'ix-a', 'status' => 'active', 'angkatan' => '2024']);
@@ -197,6 +218,16 @@ class AcademicPeriodProfileRestoreTest extends TestCase
             'kelas_id' => 'xi-a',
             'wali_guru_id' => $teacher->id,
             'wali_guru_nama' => 'Pak Wali Tetap',
+            'tahun_ajaran' => '2025/2026',
+            'ketua_siswa_id' => 'old-ketua',
+            'ketua_siswa_nama' => 'Ketua Lama',
+        ]);
+        $this->assertDatabaseHas('kelas_struktur', [
+            'tenant_id' => $tenantId,
+            'kelas_id' => 'x-a',
+            'wali_guru_id' => $teacher->id,
+            'wali_guru_nama' => 'Pak Wali Target',
+            'tahun_ajaran' => '2026/2027',
             'ketua_siswa_id' => null,
             'ketua_siswa_nama' => null,
         ]);
@@ -633,6 +664,44 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         ]);
     }
 
+    public function test_roster_restore_rejects_snapshot_from_different_semester(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
+
+        $tenantId = $this->defaultTenantId();
+        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-exact-semester-snapshot@example.com', 'admin');
+        $student = $this->createUserWithProfile($tenantId, 'siswa', 'student-exact-semester-snapshot@example.com', 'xi-a');
+        $this->insertClass($tenantId, 'x-a', 'X A', 'X', 'A', '2025', '2025/2026', 'Ganjil');
+        $this->insertSettingsPeriod($tenantId, '2025/2026', 'Genap');
+        $this->insertClassSnapshot(
+            $tenantId,
+            $student->id,
+            'x-a',
+            'X A',
+            'X',
+            'A',
+            '2025',
+            '2025/2026',
+            'Ganjil',
+            'active'
+        );
+
+        Sanctum::actingAs($admin);
+        $this->postJson('/api/admin/academic-period/restore-roster', ['apply' => false])
+            ->assertStatus(422)
+            ->assertJsonPath(
+                'error',
+                'Snapshot roster siswa untuk periode 2025/2026 belum tersedia. Tidak ada data aman untuk dipulihkan.'
+            );
+
+        $this->assertDatabaseHas('profiles', [
+            'id' => $student->id,
+            'tenant_id' => $tenantId,
+            'kelas' => 'xi-a',
+            'status' => 'active',
+        ]);
+    }
+
     public function test_roster_repair_keeps_students_created_inside_period_after_base_snapshot(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-06-13 09:00:00', 'Asia/Jakarta'));
@@ -794,15 +863,20 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         string $teacherId,
         string $teacherName,
         ?string $leaderId = null,
-        ?string $leaderName = null
+        ?string $leaderName = null,
+        ?string $year = null,
+        ?string $semester = null
     ): void {
         DB::table('kelas_struktur')->insert([
+            'id' => (string) Str::uuid(),
             'kelas_id' => $classId,
             'tenant_id' => $tenantId,
             'wali_guru_id' => $teacherId,
             'wali_guru_nama' => $teacherName,
             'ketua_siswa_id' => $leaderId,
             'ketua_siswa_nama' => $leaderName,
+            'tahun_ajaran' => $year,
+            'semester' => $semester,
             'created_at' => now(),
             'updated_at' => now(),
         ]);

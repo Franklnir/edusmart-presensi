@@ -138,7 +138,7 @@ const isAfterPeriodEnd = (isoValue, period) => {
   return date > periodEnd
 }
 
-const applySemesterPeriodFilters = (query, period) => {
+const applyAcademicSemesterFilter = (query, period) => {
   let next = query
   if (period?.tahunAjaran) next = next.eq('tahun_ajaran', period.tahunAjaran)
   if (period?.semester) next = next.eq('semester', period.semester)
@@ -238,7 +238,7 @@ export default function AHome() {
   const [settingsId, setSettingsId] = useState(null)
   const [maxEskulPerSiswa, setMaxEskulPerSiswa] = useState(DEFAULT_MAX_ESKUL_PER_SISWA)
   const [savingMaxEskul, setSavingMaxEskul] = useState(false)
-  const [activeEskulPeriod, setActiveEskulPeriod] = useState(() => resolveAcademicPeriod())
+  const [activeEskulPeriod, setActiveEskulPeriod] = useState(activeSchoolPeriod)
   const hasLoadedInitialDataRef = useRef(false)
 
   useEffect(() => {
@@ -627,7 +627,7 @@ export default function AHome() {
         .from('ekskul')
         .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,created_at,updated_at,tahun_ajaran,semester')
         .order('nama')
-      query = applySemesterPeriodFilters(query, eskulDataPeriod)
+      query = applyAcademicSemesterFilter(query, eskulDataPeriod)
 
       let { data, error } = await query
       if (error && /tahun_ajaran|semester/i.test(error.message || '')) {
@@ -674,7 +674,7 @@ export default function AHome() {
         .from('ekskul')
         .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,tahun_ajaran,semester')
         .eq('id', eskulSel)
-      detailQuery = applySemesterPeriodFilters(detailQuery, eskulDataPeriod)
+      detailQuery = applyAcademicSemesterFilter(detailQuery, eskulDataPeriod)
 
       let { data, error } = await detailQuery
         .order('updated_at', { ascending: false })
@@ -732,7 +732,7 @@ export default function AHome() {
         .from('ekskul_anggota')
         .select('id,ekskul_id,user_id,angkatan,status,created_at,updated_at,tahun_ajaran,semester')
         .eq('ekskul_id', eskulSel)
-      anggotaQuery = applySemesterPeriodFilters(anggotaQuery, period)
+      anggotaQuery = applyAcademicSemesterFilter(anggotaQuery, period)
 
       let { data, error } = await anggotaQuery
       if (error && /tahun_ajaran|semester|angkatan/i.test(error.message || '')) {
@@ -770,7 +770,7 @@ export default function AHome() {
         .eq('ekskul_id', eskulSel)
         .in('user_id', userIds)
         .in('status', ['Hadir', 'Izin'])
-      absQuery = applySemesterPeriodFilters(absQuery, period)
+      absQuery = applyAcademicSemesterFilter(absQuery, period)
 
       let { data: absData, error: absError } = await absQuery
       if (absError && /tahun_ajaran|semester/i.test(absError.message || '')) {
@@ -1039,7 +1039,7 @@ export default function AHome() {
         .from('ekskul_anggota')
         .delete()
         .eq('ekskul_id', eskulSel)
-      anggotaDeleteQuery = applySemesterPeriodFilters(anggotaDeleteQuery, activeEskulPeriod)
+      anggotaDeleteQuery = applyAcademicSemesterFilter(anggotaDeleteQuery, activeEskulPeriod)
 
       const { error: errorAnggota } = await anggotaDeleteQuery
 
@@ -1129,7 +1129,7 @@ export default function AHome() {
         .select('user_id')
         .eq('ekskul_id', eskulSel)
         .in('user_id', targetStudents.map((student) => student.uid))
-      existingQuery = applySemesterPeriodFilters(existingQuery, period)
+      existingQuery = applyAcademicSemesterFilter(existingQuery, period)
 
       let { data: existing, error: existingError } = await existingQuery
       if (existingError && /tahun_ajaran|semester/i.test(existingError.message || '')) {

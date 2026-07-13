@@ -9,12 +9,15 @@ export default function StrukturSekolahPage() {
   const { pushToast } = useUIStore()
   const {
     activeAcademicPeriod,
-    activeSemesterPeriod: academicPeriod,
+    period: academicPeriod,
     periodFilter,
     academicYearOptions,
     setAcademicYear,
     isViewingArchivePeriod
-  } = useActiveAcademicPeriod({ storageKey: 'edusmart.admin.strukturSekolah.periodFilter' })
+  } = useActiveAcademicPeriod({
+    storageKey: 'edusmart.admin.strukturSekolah.periodFilter',
+    scope: 'year'
+  })
   const periodLabel = academicPeriod?.tahunAjaran ? `Tahun ajaran ${academicPeriod.tahunAjaran}` : 'Tahun ajaran aktif'
 
   return (

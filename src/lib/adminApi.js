@@ -143,6 +143,23 @@ const adminApi = {
       })
       return { data: res.raw?.data ?? res.data, error: res.error }
     },
+    async academicPeriods() {
+      const res = await apiFetch('/api/admin/academic-periods', {
+        method: 'GET',
+        cacheTtlMs: 0,
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error }
+    },
+    async previewAcademicPeriod(payload = {}) {
+      const res = await apiFetch('/api/admin/academic-period/preview', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 20000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
+    },
     async applyAcademicPeriod(payload = {}) {
       const res = await apiFetch('/api/admin/academic-period/apply', {
         method: 'POST',
@@ -150,6 +167,24 @@ const adminApi = {
         timeoutMs: 45000
       })
       if (!res.error) invalidateDbSelectCache()
+      return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
+    },
+    async createAcademicCorrectionSession(payload = {}) {
+      const res = await apiFetch('/api/admin/academic-periods/correction-sessions', {
+        method: 'POST',
+        body: payload,
+        cacheTtlMs: 0,
+        timeoutMs: 15000
+      })
+      return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
+    },
+    async closeAcademicCorrectionSession(sessionId) {
+      const id = encodeURIComponent(String(sessionId || ''))
+      const res = await apiFetch(`/api/admin/academic-periods/correction-sessions/${id}`, {
+        method: 'DELETE',
+        cacheTtlMs: 0,
+        timeoutMs: 15000
+      })
       return { data: res.raw?.data ?? res.data, error: res.error, raw: res.raw }
     },
     async restoreAcademicPeriodRoster(payload = {}) {

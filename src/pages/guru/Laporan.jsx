@@ -12,6 +12,10 @@ import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveF
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import {
+  getAcademicAssessmentLabels,
+  getAssessmentSlotLabel
+} from '../../utils/academicAssessment'
+import {
   getKelasDisplayName,
   getNamaKelasFromList,
   normalizeKelasKey,
@@ -33,6 +37,11 @@ import {
   DEFAULT_RANKING_POLICY,
   MAPEL_COMPONENT_WEIGHT_RULES,
   DEFAULT_MAPEL_COMPONENT_WEIGHTS,
+  MAPEL_ASSESSMENT_SOURCE_MANUAL,
+  MAPEL_MANUAL_COMPONENT_ATTENDANCE,
+  MAPEL_MANUAL_COMPONENT_BONUS,
+  MAPEL_MANUAL_COMPONENT_OTHER,
+  getMapelManualComponentLabel,
   round2,
   getCellTextLength,
   autoFitWorksheetColumns,
@@ -106,12 +115,16 @@ const getAcademicYearStartValue = (tahunAjaran = '') => {
   return match ? Number(match[1]) : 0
 }
 
-const getQuizSpecialLabel = (quiz) => {
+const getQuizSpecialLabel = (quiz, fallbackSemester = '') => {
   const mode = normalizeQuizMode(quiz)
   const name = String(quiz?.nama || quiz?.judul || quiz?.title || '').trim().toLowerCase()
 
-  if (mode === 'uas' || /\b(uas|pas)\b|ujian akhir semester/.test(name)) return 'UAS'
-  if (mode === 'uts' || /\b(uts|pts)\b|ujian tengah semester/.test(name)) return 'UTS'
+  if (mode === 'uas' || /\b(uas|pas|ukk|pat)\b|ujian (akhir semester|kenaikan kelas)/.test(name)) {
+    return getAssessmentSlotLabel('uas', quiz?.semester || fallbackSemester)
+  }
+  if (mode === 'uts' || /\b(uts|pts)\b|ujian tengah semester/.test(name)) {
+    return getAssessmentSlotLabel('uts', quiz?.semester || fallbackSemester)
+  }
   return ''
 }
 
@@ -217,26 +230,56 @@ export default function LaporanRekap() {
       return {
         manualScore: null,
         manualWeighted: 0,
+        midtermScore: row?.quizUts ?? null,
+        midtermWeighted: 0,
+        finalScore: row?.quizUas ?? null,
+        finalWeighted: 0,
         nilaiAkhir: row?.nilaiAkhir ?? null,
         invalid: false
       }
     }
 
     const draft = mapelManualDrafts[row.id] || {}
+    const weight = mapelReportData.bobot || DEFAULT_MAPEL_COMPONENT_WEIGHTS
+    const usesManualMidterm = weight.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL
+    const usesManualFinal = weight.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL
+    const hasMidtermValue = draft.nilai_uts_manual !== '' && draft.nilai_uts_manual !== null && draft.nilai_uts_manual !== undefined
+    const hasFinalValue = draft.nilai_uas_manual !== '' && draft.nilai_uas_manual !== null && draft.nilai_uas_manual !== undefined
     const hasDraftValue = draft.nilai_manual !== '' && draft.nilai_manual !== null && draft.nilai_manual !== undefined
+    const midtermManualScore = hasMidtermValue ? toNumberOrNull(draft.nilai_uts_manual) : null
+    const finalManualScore = hasFinalValue ? toNumberOrNull(draft.nilai_uas_manual) : null
     const manualScore = hasDraftValue ? toNumberOrNull(draft.nilai_manual) : null
-    const invalid = hasDraftValue && (manualScore == null || manualScore < 0 || manualScore > 100)
     const sisaBobot = Number(mapelReportData.sisaBobot || 0)
-    const manualWeighted = !invalid && manualScore != null && sisaBobot > 0
+    const invalidMidterm = usesManualMidterm && hasMidtermValue && (midtermManualScore == null || midtermManualScore < 0 || midtermManualScore > 100)
+    const invalidFinal = usesManualFinal && hasFinalValue && (finalManualScore == null || finalManualScore < 0 || finalManualScore > 100)
+    const invalidManual = sisaBobot > 0 && hasDraftValue && (manualScore == null || manualScore < 0 || manualScore > 100)
+    const invalid = invalidMidterm || invalidFinal || invalidManual
+    const midtermWeighted = usesManualMidterm && !invalidMidterm && midtermManualScore != null
+      ? midtermManualScore * Number(weight.bobot_quiz_uts || 0) / 100
+      : 0
+    const finalWeighted = usesManualFinal && !invalidFinal && finalManualScore != null
+      ? finalManualScore * Number(weight.bobot_quiz_uas || 0) / 100
+      : 0
+    const manualWeighted = !invalidManual && manualScore != null && sisaBobot > 0
       ? manualScore * sisaBobot / 100
       : 0
     const baseScore = Number(row.baseScore || 0)
-    const hasAnyScore = row.hasAnyScore || (manualScore != null && !invalid)
+    const hasAnyScore = row.hasAnyScore
+      || (usesManualMidterm && midtermManualScore != null && !invalidMidterm)
+      || (usesManualFinal && finalManualScore != null && !invalidFinal)
+      || (sisaBobot > 0 && manualScore != null && !invalidManual)
 
     return {
       manualScore,
       manualWeighted,
-      nilaiAkhir: hasAnyScore ? round2(baseScore + manualWeighted) : null,
+      midtermScore: usesManualMidterm ? midtermManualScore : row.quizUts,
+      midtermWeighted,
+      finalScore: usesManualFinal ? finalManualScore : row.quizUas,
+      finalWeighted,
+      nilaiAkhir: hasAnyScore ? round2(baseScore + midtermWeighted + finalWeighted + manualWeighted) : null,
+      invalidMidterm,
+      invalidFinal,
+      invalidManual,
       invalid
     }
   }, [mapelManualDrafts, mapelReportData])
@@ -266,6 +309,10 @@ export default function LaporanRekap() {
   }, [reportLoadingKey])
   const selectedTahunAjaran = selectedAcademicPeriodPayload.tahun_ajaran
   const selectedSemester = selectedAcademicPeriodPayload.semester
+  const assessmentLabels = useMemo(
+    () => getAcademicAssessmentLabels(selectedSemester || reportPeriod.semester),
+    [reportPeriod.semester, selectedSemester]
+  )
   const selectedMapelWeightPeriodKey = `${selectedTahunAjaran || ''}|${selectedSemester || ''}`
   const selectedPeriodStartYear = getAcademicYearStartValue(selectedTahunAjaran)
   const activePeriodStartYear = getAcademicYearStartValue(activeAcademicPeriod?.tahunAjaran)
@@ -502,6 +549,7 @@ export default function LaporanRekap() {
           .from('kelas_struktur')
           .select('kelas_id')
           .eq('wali_guru_id', user.id)
+          .eq('tahun_ajaran', reportPeriod.tahunAjaran)
 
         const kelasIds = (data || []).map((d) => d.kelas_id).filter(Boolean)
         if (!kelasIds.length) {
@@ -527,7 +575,7 @@ export default function LaporanRekap() {
       }
     }
     loadWaliKelas()
-  }, [user?.id])
+  }, [reportPeriod.tahunAjaran, user?.id])
 
   useEffect(() => {
     const load = async () => {
@@ -735,6 +783,10 @@ export default function LaporanRekap() {
       bobot_quiz_reguler: mapelWeightValidation.normalized.bobot_quiz_reguler,
       bobot_quiz_uts: mapelWeightValidation.normalized.bobot_quiz_uts,
       bobot_quiz_uas: mapelWeightValidation.normalized.bobot_quiz_uas,
+      sumber_uts: mapelWeightValidation.normalized.sumber_uts,
+      sumber_uas: mapelWeightValidation.normalized.sumber_uas,
+      jenis_manual: mapelWeightValidation.normalized.jenis_manual,
+      label_manual: mapelWeightValidation.normalized.label_manual || null,
       created_at: existing?.created_at || nowIso,
       updated_at: nowIso
     }
@@ -757,7 +809,11 @@ export default function LaporanRekap() {
         bobot_tugas_pr: savedRow.bobot_tugas_pr,
         bobot_quiz_reguler: savedRow.bobot_quiz_reguler,
         bobot_quiz_uts: savedRow.bobot_quiz_uts,
-        bobot_quiz_uas: savedRow.bobot_quiz_uas
+        bobot_quiz_uas: savedRow.bobot_quiz_uas,
+        sumber_uts: savedRow.sumber_uts || 'digital',
+        sumber_uas: savedRow.sumber_uas || 'digital',
+        jenis_manual: savedRow.jenis_manual || MAPEL_MANUAL_COMPONENT_ATTENDANCE,
+        label_manual: savedRow.label_manual || ''
       })
 
       pushToast('success', `Bobot mapel ${selectedWeightMapel} berhasil disimpan.`)
@@ -1066,6 +1122,7 @@ export default function LaporanRekap() {
           .eq('kelas_id', selectedKelas)
           .eq('mapel', selectedMapel)
           .eq('tahun_ajaran', tahunAjaran)
+          .eq('semester', selectedSemester || reportPeriod.semester)
           .in('siswa_id', studentIds)
         })
         detailBatchItems.push({
@@ -1076,6 +1133,7 @@ export default function LaporanRekap() {
             .in('kelas_id', kelasAliases)
             .eq('jenis', mapelRapotTargetType)
             .eq('tahun_pelajaran', tahunAjaran)
+            .eq('semester', selectedSemester || reportPeriod.semester)
             .in('siswa_id', studentIds)
         })
       }
@@ -1106,6 +1164,8 @@ export default function LaporanRekap() {
         || { ...DEFAULT_MAPEL_COMPONENT_WEIGHTS }
       const weightValidation = getMapelWeightValidation(bobotMapel)
       const sisaBobot = weightValidation.remaining
+      const usesManualMidterm = bobotMapel.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL
+      const usesManualFinal = bobotMapel.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL
       const jawabanByStudent = new Map()
       ;(taskData.siswa || []).forEach((student) => {
         const key = String(student?.id || '')
@@ -1150,14 +1210,28 @@ export default function LaporanRekap() {
         const rapotRow = rapotByStudent.get(String(student.id)) || null
         const sentItem = rapotRow?.id ? sentItemByRapotId.get(String(rapotRow.id)) : null
         const manualScore = toNumberOrNull(manualRow?.nilai_manual)
+        const manualMidtermScore = toNumberOrNull(manualRow?.nilai_uts_manual)
+        const manualFinalScore = toNumberOrNull(manualRow?.nilai_uas_manual)
         const manualWeighted = manualScore != null && sisaBobot > 0 ? manualScore * sisaBobot / 100 : 0
+        const manualMidtermWeighted = usesManualMidterm && manualMidtermScore != null
+          ? manualMidtermScore * Number(bobotMapel.bobot_quiz_uts || 0) / 100
+          : 0
+        const manualFinalWeighted = usesManualFinal && manualFinalScore != null
+          ? manualFinalScore * Number(bobotMapel.bobot_quiz_uas || 0) / 100
+          : 0
         const componentScore =
           (taskAvg != null ? taskAvg * Number(bobotMapel.bobot_tugas_pr || 0) / 100 : 0) +
           (regularAvg != null ? regularAvg * Number(bobotMapel.bobot_quiz_reguler || 0) / 100 : 0) +
-          (utsAvg != null ? utsAvg * Number(bobotMapel.bobot_quiz_uts || 0) / 100 : 0) +
-          (uasAvg != null ? uasAvg * Number(bobotMapel.bobot_quiz_uas || 0) / 100 : 0)
-        const hasAnyScore = taskAvg != null || regularAvg != null || utsAvg != null || uasAvg != null || manualScore != null
-        const totalWeighted = round2(componentScore + manualWeighted)
+          (!usesManualMidterm && utsAvg != null ? utsAvg * Number(bobotMapel.bobot_quiz_uts || 0) / 100 : 0) +
+          (!usesManualFinal && uasAvg != null ? uasAvg * Number(bobotMapel.bobot_quiz_uas || 0) / 100 : 0)
+        const hasAnyScore = taskAvg != null
+          || regularAvg != null
+          || (!usesManualMidterm && utsAvg != null)
+          || (!usesManualFinal && uasAvg != null)
+          || (usesManualMidterm && manualMidtermScore != null)
+          || (usesManualFinal && manualFinalScore != null)
+          || (sisaBobot > 0 && manualScore != null)
+        const totalWeighted = round2(componentScore + manualMidtermWeighted + manualFinalWeighted + manualWeighted)
 
         return {
           id: student.id,
@@ -1168,6 +1242,8 @@ export default function LaporanRekap() {
           quizReguler: regularAvg,
           quizUts: utsAvg,
           quizUas: uasAvg,
+          nilaiUtsManual: manualMidtermScore,
+          nilaiUasManual: manualFinalScore,
           nilaiManual: manualScore,
           baseScore: round2(componentScore),
           hasAnyScore,
@@ -1184,6 +1260,8 @@ export default function LaporanRekap() {
       const nextDrafts = {}
       rows.forEach((row) => {
         nextDrafts[row.id] = {
+          nilai_uts_manual: row.nilaiUtsManual ?? '',
+          nilai_uas_manual: row.nilaiUasManual ?? '',
           nilai_manual: row.nilaiManual ?? '',
           catatan: row.catatan || ''
         }
@@ -1229,11 +1307,13 @@ export default function LaporanRekap() {
     monthLabelByValue,
     isActiveReportPeriod,
     pushToast,
+    reportPeriod.semester,
     reportPeriod.tahunAjaran,
     reportPeriodLabel,
     selectedBulan,
     selectedKelas,
     selectedMapel,
+    selectedSemester,
     selectedTahunAjaran,
     startReportLoad,
     user?.email,
@@ -1244,16 +1324,16 @@ export default function LaporanRekap() {
   const handleSaveMapelManual = useCallback(async (row) => {
     if (!user?.id || !row?.id || !mapelReportData) return
     const draft = mapelManualDrafts[row.id] || {}
-    const nilaiManual = toNumberOrNull(draft.nilai_manual)
-    if (nilaiManual != null && (nilaiManual < 0 || nilaiManual > 100)) {
-      pushToast('error', 'Nilai tambahan manual harus 0 sampai 100.')
+    const preview = getMapelManualPreview(row)
+    const nilaiUtsManual = toNumberOrNull(draft.nilai_uts_manual)
+    const nilaiUasManual = toNumberOrNull(draft.nilai_uas_manual)
+    const nilaiManual = Number(mapelReportData.sisaBobot || 0) > 0
+      ? toNumberOrNull(draft.nilai_manual)
+      : null
+    if (preview.invalid) {
+      pushToast('error', 'Semua nilai manual harus berupa angka 0 sampai 100.')
       return
     }
-    if (Number(mapelReportData.sisaBobot || 0) <= 0 && nilaiManual != null) {
-      pushToast('error', 'Tidak ada sisa bobot manual karena total bobot sudah 100%.')
-      return
-    }
-
     const existingId = row.manualRow?.id
     const nowIso = new Date().toISOString()
     const payload = {
@@ -1263,7 +1343,10 @@ export default function LaporanRekap() {
       kelas_id: selectedKelas,
       mapel: selectedMapel,
       tahun_ajaran: selectedTahunAjaran || reportPeriod.tahunAjaran,
+      semester: selectedSemester || reportPeriod.semester,
       nilai_manual: nilaiManual,
+      nilai_uts_manual: nilaiUtsManual,
+      nilai_uas_manual: nilaiUasManual,
       catatan: String(draft.catatan || '').trim() || null,
       created_at: row.manualRow?.created_at || nowIso,
       updated_at: nowIso
@@ -1273,24 +1356,27 @@ export default function LaporanRekap() {
       setSavingMapelManualId(row.id)
       const { error } = await supabase
         .from('guru_mapel_manual_nilai')
-        .upsert(payload, { onConflict: 'tenant_id,guru_id,siswa_id,kelas_id,mapel,tahun_ajaran' })
+        .upsert(payload, { onConflict: 'tenant_id,guru_id,siswa_id,kelas_id,mapel,tahun_ajaran,semester' })
       if (error) throw error
-      pushToast('success', `Nilai tambahan ${row.nama} berhasil disimpan.`)
+      pushToast('success', `Nilai manual ${row.nama} berhasil disimpan.`)
       await loadLaporanMapel()
     } catch (error) {
       console.error(error)
-      pushToast('error', error?.message || 'Gagal menyimpan nilai tambahan.')
+      pushToast('error', error?.message || 'Gagal menyimpan nilai manual.')
     } finally {
       setSavingMapelManualId('')
     }
   }, [
     loadLaporanMapel,
+    getMapelManualPreview,
     mapelManualDrafts,
     mapelReportData,
     pushToast,
+    reportPeriod.semester,
     reportPeriod.tahunAjaran,
     selectedKelas,
     selectedMapel,
+    selectedSemester,
     selectedTahunAjaran,
     user?.id
   ])
@@ -1351,7 +1437,7 @@ export default function LaporanRekap() {
 
       const { error: rapotError } = await supabase
         .from('rapot_siswa')
-        .upsert(rapotPayloads, { onConflict: 'tenant_id,siswa_id,kelas_id,jenis,tahun_pelajaran' })
+        .upsert(rapotPayloads, { onConflict: 'tenant_id,siswa_id,kelas_id,tahun_pelajaran,semester,jenis' })
       if (rapotError) throw rapotError
 
       const { data: savedRapots, error: savedRapotsError } = await supabase
@@ -1360,6 +1446,7 @@ export default function LaporanRekap() {
         .in('kelas_id', kelasAliases)
         .eq('jenis', mapelRapotTargetType)
         .eq('tahun_pelajaran', tahunAjaran)
+        .eq('semester', semesterLabel)
         .in('siswa_id', rowsToSend.map(({ row }) => row.id))
       if (savedRapotsError) throw savedRapotsError
 
@@ -1415,7 +1502,10 @@ export default function LaporanRekap() {
         .upsert(itemPayloads, { onConflict: 'tenant_id,rapot_id,nomor' })
       if (itemsError) throw itemsError
 
-      pushToast('success', `${itemPayloads.length} nilai ${selectedMapel} dikirim ke Rapot ${String(mapelRapotTargetType).toUpperCase()}.`)
+      const targetLabel = mapelRapotTargetType === 'uas'
+        ? assessmentLabels.final.short
+        : assessmentLabels.midterm.short
+      pushToast('success', `${itemPayloads.length} nilai ${selectedMapel} dikirim ke Rapot ${targetLabel}.`)
       await loadLaporanMapel()
     } catch (error) {
       console.error(error)
@@ -1424,6 +1514,8 @@ export default function LaporanRekap() {
       setSendingMapelToWali(false)
     }
   }, [
+    assessmentLabels.final.short,
+    assessmentLabels.midterm.short,
     getMapelManualPreview,
     loadLaporanMapel,
     mapelRapotTargetType,
@@ -1475,9 +1567,9 @@ export default function LaporanRekap() {
       'NIS',
       `Tugas/PR (${Number(b.bobot_tugas_pr || 0)}%)`,
       `Quiz Reguler (${Number(b.bobot_quiz_reguler || 0)}%)`,
-      `Quiz UTS (${Number(b.bobot_quiz_uts || 0)}%)`,
-      `Quiz UAS (${Number(b.bobot_quiz_uas || 0)}%)`,
-      `Tambahan Manual (${Number(mapelReportData.sisaBobot || 0)}%)`,
+      `${b.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Kertas' : 'Quiz'} ${assessmentLabels.midterm.short} (${Number(b.bobot_quiz_uts || 0)}%)`,
+      `${b.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Kertas' : 'Quiz'} ${assessmentLabels.final.short} (${Number(b.bobot_quiz_uas || 0)}%)`,
+      `${getMapelManualComponentLabel(b)} (${Number(mapelReportData.sisaBobot || 0)}%)`,
       'Nilai Akhir'
     ])
     header.font = { bold: true }
@@ -1488,16 +1580,17 @@ export default function LaporanRekap() {
     })
 
     mapelReportData.rows.forEach((row, index) => {
+      const preview = getMapelManualPreview(row)
       const excelRow = ws.addRow([
         index + 1,
         row.nama,
         row.nis || '-',
         row.tugasPr ?? '',
         row.quizReguler ?? '',
-        row.quizUts ?? '',
-        row.quizUas ?? '',
-        row.nilaiManual ?? '',
-        row.nilaiAkhir ?? ''
+        preview.midtermScore ?? '',
+        preview.finalScore ?? '',
+        preview.manualScore ?? '',
+        preview.nilaiAkhir ?? ''
       ])
       excelRow.eachCell((cell, col) => {
         cell.border = borderAll
@@ -1515,7 +1608,7 @@ export default function LaporanRekap() {
     anchor.download = `Laporan_Mapel_${mapelReportData.mapel}_${mapelReportData.kelas}.xlsx`
     anchor.click()
     URL.revokeObjectURL(url)
-  }, [mapelReportData, pushToast])
+  }, [assessmentLabels.final.short, assessmentLabels.midterm.short, getMapelManualPreview, mapelReportData, pushToast])
 
   const loadRekapWali = useCallback(async () => {
     if (!selectedWaliKelas || selectedBulan.length === 0) {
@@ -1727,6 +1820,19 @@ export default function LaporanRekap() {
       }
 
       const siswaIds = (siswaData || []).map((s) => s.id).filter(Boolean)
+      let guruMapelManualRows = []
+      if (siswaIds.length && guruIdsPengampu.length) {
+        const { data, error } = await supabase
+          .from('guru_mapel_manual_nilai')
+          .select('guru_id,siswa_id,kelas_id,mapel,nilai_manual,nilai_uts_manual,nilai_uas_manual')
+          .in('guru_id', guruIdsPengampu)
+          .in('siswa_id', siswaIds)
+          .eq('kelas_id', selectedWaliKelas)
+          .eq('tahun_ajaran', selectedTahunAjaran || reportPeriod.tahunAjaran)
+          .eq('semester', selectedSemester || reportPeriod.semester)
+        if (error) throw error
+        guruMapelManualRows = data || []
+      }
       let ekskulAnggotaList = []
       if (siswaIds.length) {
         let ekskulAnggotaQuery = supabase
@@ -1780,6 +1886,12 @@ export default function LaporanRekap() {
         ; (submissionList || []).forEach((s) => {
           subByKey.set(`${s.siswa_id}|${s.quiz_id}`, s)
         })
+
+      const manualMapelByStudentKey = new Map()
+      ;(guruMapelManualRows || []).forEach((row) => {
+        const key = `${String(row?.siswa_id || '')}|${normalizeMapelKey(row?.mapel)}`
+        if (!manualMapelByStudentKey.has(key)) manualMapelByStudentKey.set(key, row)
+      })
 
       const mapelGuruIdsByKey = new Map()
       ;(jadwalKelasList || []).forEach((item) => {
@@ -2022,11 +2134,21 @@ export default function LaporanRekap() {
           const rataQuizUtsMapel = hitungRataSederhana(nilaiQuizUtsMapel)
           const rataQuizUasMapel = hitungRataSederhana(nilaiQuizUasMapel)
           const bobotKomponenMapel = normalizeMapelComponentWeights(mapelInfo?.bobotKomponen)
+          const manualMapel = manualMapelByStudentKey.get(`${String(s.id)}|${mapelInfo?.key || normalizeMapelKey(mapelInfo?.mapel)}`)
+          const nilaiTengahTerpilih = bobotKomponenMapel.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL
+            ? toNumberOrNull(manualMapel?.nilai_uts_manual)
+            : rataQuizUtsMapel
+          const nilaiAkhirTerpilih = bobotKomponenMapel.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL
+            ? toNumberOrNull(manualMapel?.nilai_uas_manual)
+            : rataQuizUasMapel
           const nilaiAkhirMapel = hitungNilaiMapelBerbobot({
             rataTugasMapel,
             rataQuizRegulerMapel,
             rataQuizUtsMapel,
             rataQuizUasMapel,
+            nilaiUtsManual: manualMapel?.nilai_uts_manual,
+            nilaiUasManual: manualMapel?.nilai_uas_manual,
+            nilaiKomponenManual: manualMapel?.nilai_manual,
             bobotMapel: bobotKomponenMapel
           })
 
@@ -2037,8 +2159,9 @@ export default function LaporanRekap() {
             rataTugas: rataTugasMapel,
             rataQuiz: rataQuizMapel,
             rataQuizReguler: rataQuizRegulerMapel,
-            rataQuizUts: rataQuizUtsMapel,
-            rataQuizUas: rataQuizUasMapel,
+            rataQuizUts: nilaiTengahTerpilih,
+            rataQuizUas: nilaiAkhirTerpilih,
+            nilaiManual: toNumberOrNull(manualMapel?.nilai_manual),
             nilaiAkhir: nilaiAkhirMapel,
             jumlahTugasDinilai: nilaiTugasMapel.length,
             jumlahQuizDinilai: nilaiQuizMapel.length,
@@ -2366,6 +2489,26 @@ export default function LaporanRekap() {
           submissionList = data || []
         }
 
+        let manualMapelRows = []
+        if (guruIdsPengampu.length) {
+          const { data, error } = await supabase
+            .from('guru_mapel_manual_nilai')
+            .select('guru_id,mapel,nilai_manual,nilai_uts_manual,nilai_uas_manual')
+            .eq('siswa_id', siswa.id)
+            .eq('kelas_id', selectedWaliKelas)
+            .eq('tahun_ajaran', selectedTahunAjaran || reportPeriod.tahunAjaran)
+            .eq('semester', selectedSemester || reportPeriod.semester)
+            .in('guru_id', guruIdsPengampu)
+          if (error) throw error
+          manualMapelRows = data || []
+        }
+
+        const manualMapelByKey = new Map()
+        ;(manualMapelRows || []).forEach((row) => {
+          const key = normalizeMapelKey(row?.mapel)
+          if (key && !manualMapelByKey.has(key)) manualMapelByKey.set(key, row)
+        })
+
         const mapelSet = new Set()
         jadwalList.forEach((j) => mapelSet.add(normalizeMapel(j?.mapel)))
         tugasList.forEach((t) => mapelSet.add(normalizeMapel(t?.mapel)))
@@ -2480,11 +2623,21 @@ export default function LaporanRekap() {
             const rataQuizRegulerMapel = hitungRataSederhana(row.nilaiQuizRegulerList)
             const rataQuizUtsMapel = hitungRataSederhana(row.nilaiQuizUtsList)
             const rataQuizUasMapel = hitungRataSederhana(row.nilaiQuizUasList)
+            const manualMapel = manualMapelByKey.get(row.mapelKey)
+            const nilaiTengahTerpilih = row.bobotKomponen.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL
+              ? toNumberOrNull(manualMapel?.nilai_uts_manual)
+              : rataQuizUtsMapel
+            const nilaiAkhirTerpilih = row.bobotKomponen.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL
+              ? toNumberOrNull(manualMapel?.nilai_uas_manual)
+              : rataQuizUasMapel
             const rataAkademik = hitungNilaiMapelBerbobot({
               rataTugasMapel,
               rataQuizRegulerMapel,
               rataQuizUtsMapel,
               rataQuizUasMapel,
+              nilaiUtsManual: manualMapel?.nilai_uts_manual,
+              nilaiUasManual: manualMapel?.nilai_uas_manual,
+              nilaiKomponenManual: manualMapel?.nilai_manual,
               bobotMapel: row.bobotKomponen
             })
             const totalKomponenQuiz = [
@@ -2497,8 +2650,9 @@ export default function LaporanRekap() {
               ...row,
               rataTugas: rataTugasMapel ?? '-',
               rataQuizReguler: rataQuizRegulerMapel ?? '-',
-              rataQuizUts: rataQuizUtsMapel ?? '-',
-              rataQuizUas: rataQuizUasMapel ?? '-',
+              rataQuizUts: nilaiTengahTerpilih ?? '-',
+              rataQuizUas: nilaiAkhirTerpilih ?? '-',
+              nilaiManual: toNumberOrNull(manualMapel?.nilai_manual) ?? '-',
               rataQuiz: hitungRataSederhana(totalKomponenQuiz) ?? '-',
               rataAkademik: rataAkademik ?? '-',
               grade: getGrade(rataAkademik),
@@ -4267,7 +4421,11 @@ export default function LaporanRekap() {
                           {MAPEL_COMPONENT_WEIGHT_RULES.map((rule) => (
                             <div key={rule.key}>
                               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                                {rule.label}
+                                {rule.key === 'bobot_quiz_uts'
+                                  ? `Quiz ${assessmentLabels.midterm.formal}`
+                                  : rule.key === 'bobot_quiz_uas'
+                                    ? `Quiz ${assessmentLabels.final.formal}`
+                                    : rule.label}
                               </label>
                               <input
                                 type="number"
@@ -4281,6 +4439,67 @@ export default function LaporanRekap() {
                             </div>
                           ))}
                         </div>
+
+                        <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-200 pt-4 lg:grid-cols-2">
+                          <div>
+                            <label className="mb-1 block text-xs font-semibold text-slate-600">
+                              Sumber nilai {assessmentLabels.midterm.formal}
+                            </label>
+                            <select
+                              value={mapelWeightForm.sumber_uts || 'digital'}
+                              onChange={(event) => setMapelWeightForm((prev) => ({ ...prev, sumber_uts: event.target.value }))}
+                              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="digital">Quiz digital SISMU</option>
+                              <option value="manual">Ujian kertas, input nilai manual</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-semibold text-slate-600">
+                              Sumber nilai {assessmentLabels.final.formal}
+                            </label>
+                            <select
+                              value={mapelWeightForm.sumber_uas || 'digital'}
+                              onChange={(event) => setMapelWeightForm((prev) => ({ ...prev, sumber_uas: event.target.value }))}
+                              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="digital">Quiz digital SISMU</option>
+                              <option value="manual">Ujian kertas, input nilai manual</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {mapelWeightValidation.remaining > 0 && (
+                          <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                            <div>
+                              <label className="mb-1 block text-xs font-semibold text-slate-600">
+                                Penggunaan bobot manual {mapelWeightValidation.remaining}%
+                              </label>
+                              <select
+                                value={mapelWeightForm.jenis_manual || MAPEL_MANUAL_COMPONENT_ATTENDANCE}
+                                onChange={(event) => setMapelWeightForm((prev) => ({ ...prev, jenis_manual: event.target.value }))}
+                                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <option value={MAPEL_MANUAL_COMPONENT_ATTENDANCE}>Absensi, input nilai manual</option>
+                                <option value={MAPEL_MANUAL_COMPONENT_BONUS}>Nilai tambah Guru</option>
+                                <option value={MAPEL_MANUAL_COMPONENT_OTHER}>Komponen lain</option>
+                              </select>
+                            </div>
+                            {mapelWeightForm.jenis_manual === MAPEL_MANUAL_COMPONENT_OTHER && (
+                              <div>
+                                <label className="mb-1 block text-xs font-semibold text-slate-600">Nama komponen manual</label>
+                                <input
+                                  type="text"
+                                  maxLength={120}
+                                  value={mapelWeightForm.label_manual || ''}
+                                  onChange={(event) => setMapelWeightForm((prev) => ({ ...prev, label_manual: event.target.value }))}
+                                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  placeholder="Contoh: Praktik laboratorium"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
                           <span
@@ -4304,9 +4523,9 @@ export default function LaporanRekap() {
                         </div>
 
                         <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs leading-relaxed text-slate-600">
-                          <p>Nilai akhir mapel memakai bobot Tugas/PR, Quiz Reguler, UTS, dan UAS pada periode yang sedang dipilih.</p>
-                          <p>Komponen yang belum punya nilai tidak dihitung sebagai penyebut nilai akhir.</p>
-                          <p>Total bobot maksimal 100%. Sisa bobot menjadi kolom nilai tambahan manual di Laporan Mapel.</p>
+                          <p>Nilai tengah dan akhir semester dapat berasal dari Quiz digital atau ujian kertas yang nilainya dimasukkan Guru.</p>
+                          <p>Jika total bobot belum 100%, sisanya dipakai untuk {getMapelManualComponentLabel(mapelWeightForm)}.</p>
+                          <p>Setiap nilai manual wajib 0-100 dan sistem menampilkan kontribusi poin sesuai bobotnya.</p>
                         </div>
                       </div>
                     </div>
@@ -4425,8 +4644,8 @@ export default function LaporanRekap() {
                   onChange={(event) => setMapelRapotTargetType(event.target.value)}
                   className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
                 >
-                  <option value="uts">Kirim ke Rapot UTS</option>
-                  <option value="uas">Kirim ke Rapot UAS</option>
+                  <option value="uts">Kirim ke Rapot {assessmentLabels.midterm.formal}</option>
+                  <option value="uas">Kirim ke Rapot {assessmentLabels.final.formal}</option>
                 </select>
                 <button
                   type="button"
@@ -4450,14 +4669,14 @@ export default function LaporanRekap() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 xl:grid-cols-6 gap-3 p-4 border-b border-slate-100">
+            <div className="grid grid-cols-2 xl:grid-cols-7 gap-3 p-4 border-b border-slate-100">
               {[
                 ['Siswa', mapelReportData.totals.siswa],
                 [`Tugas/PR (${mapelReportData.bobot.bobot_tugas_pr}%)`, mapelReportData.totals.tugas],
                 [`Quiz Reguler (${mapelReportData.bobot.bobot_quiz_reguler}%)`, mapelReportData.totals.quizReguler],
-                [`Quiz UTS (${mapelReportData.bobot.bobot_quiz_uts}%)`, mapelReportData.totals.quizUts],
-                [`Quiz UAS (${mapelReportData.bobot.bobot_quiz_uas}%)`, mapelReportData.totals.quizUas],
-                [`Tambahan Manual (${mapelReportData.sisaBobot}%)`, mapelReportData.sisaBobot > 0 ? 'Bisa diisi' : 'Tidak ada'],
+                [`${mapelReportData.bobot.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Kertas' : 'Quiz'} ${assessmentLabels.midterm.short} (${mapelReportData.bobot.bobot_quiz_uts}%)`, mapelReportData.bobot.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Input manual' : mapelReportData.totals.quizUts],
+                [`${mapelReportData.bobot.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Kertas' : 'Quiz'} ${assessmentLabels.final.short} (${mapelReportData.bobot.bobot_quiz_uas}%)`, mapelReportData.bobot.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Input manual' : mapelReportData.totals.quizUas],
+                [`${getMapelManualComponentLabel(mapelReportData.bobot)} (${mapelReportData.sisaBobot}%)`, mapelReportData.sisaBobot > 0 ? 'Input manual' : 'Tidak dipakai'],
                 [`Terkirim ke Rapot ${String(mapelReportData.targetType || '').toUpperCase()}`, mapelReportData.rows.filter((row) => row.sentToWali).length]
               ].map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -4475,9 +4694,13 @@ export default function LaporanRekap() {
                     <th className="px-4 py-3 text-center">NIS</th>
                     <th className="px-4 py-3 text-center">Tugas/PR ({mapelReportData.bobot.bobot_tugas_pr}%)</th>
                     <th className="px-4 py-3 text-center">Quiz Reguler ({mapelReportData.bobot.bobot_quiz_reguler}%)</th>
-                    <th className="px-4 py-3 text-center">Quiz UTS ({mapelReportData.bobot.bobot_quiz_uts}%)</th>
-                    <th className="px-4 py-3 text-center">Quiz UAS ({mapelReportData.bobot.bobot_quiz_uas}%)</th>
-                    <th className="px-4 py-3 text-center min-w-[180px]">Tambahan Manual ({mapelReportData.sisaBobot}%)</th>
+                    <th className="px-4 py-3 text-center min-w-[150px]">
+                      {mapelReportData.bobot.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Kertas' : 'Quiz'} {assessmentLabels.midterm.short} ({mapelReportData.bobot.bobot_quiz_uts}%)
+                    </th>
+                    <th className="px-4 py-3 text-center min-w-[150px]">
+                      {mapelReportData.bobot.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Kertas' : 'Quiz'} {assessmentLabels.final.short} ({mapelReportData.bobot.bobot_quiz_uas}%)
+                    </th>
+                    <th className="px-4 py-3 text-center min-w-[180px]">{getMapelManualComponentLabel(mapelReportData.bobot)} ({mapelReportData.sisaBobot}%)</th>
                     <th className="px-4 py-3 text-center">Nilai Akhir</th>
                     <th className="px-4 py-3 text-center print:hidden">Aksi</th>
                   </tr>
@@ -4486,18 +4709,87 @@ export default function LaporanRekap() {
                   {mapelReportData.rows.map((row) => {
                     const draft = mapelManualDrafts[row.id] || {}
                     const manualPreview = getMapelManualPreview(row)
-                    const manualDisabled = Number(mapelReportData.sisaBobot || 0) <= 0
+                    const usesManualMidterm = mapelReportData.bobot.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL
+                    const usesManualFinal = mapelReportData.bobot.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL
+                    const manualDisabled = Number(mapelReportData.sisaBobot || 0) <= 0 || !isActiveReportPeriod
+                    const midtermManualDisabled = Number(mapelReportData.bobot.bobot_quiz_uts || 0) <= 0 || !isActiveReportPeriod
+                    const finalManualDisabled = Number(mapelReportData.bobot.bobot_quiz_uas || 0) <= 0 || !isActiveReportPeriod
+                    const hasEditableManualComponent = !manualDisabled
+                      || (usesManualMidterm && !midtermManualDisabled)
+                      || (usesManualFinal && !finalManualDisabled)
                     return (
                       <tr key={row.id} className="hover:bg-slate-50">
                         <td className="px-4 py-3 font-semibold text-slate-900">{row.nama}</td>
                         <td className="px-4 py-3 text-center text-slate-600">{row.nis || '-'}</td>
-                        {[row.tugasPr, row.quizReguler, row.quizUts, row.quizUas].map((value, index) => (
+                        {[row.tugasPr, row.quizReguler].map((value, index) => (
                           <td key={index} className="px-4 py-3 text-center">
                             <span className={`inline-flex min-w-[54px] justify-center rounded-lg border px-2 py-1 text-xs font-bold ${getNilaiToneClass(value)}`}>
                               {value ?? '-'}
                             </span>
                           </td>
                         ))}
+                        <td className="px-4 py-3 text-center">
+                          {usesManualMidterm ? (
+                            <div className="flex flex-col gap-1.5">
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.01"
+                                disabled={midtermManualDisabled}
+                                value={draft.nilai_uts_manual ?? ''}
+                                onChange={(event) => setMapelManualDrafts((prev) => ({
+                                  ...prev,
+                                  [row.id]: { ...(prev[row.id] || {}), nilai_uts_manual: event.target.value }
+                                }))}
+                                className={`w-full rounded-lg border px-3 py-2 text-sm disabled:bg-slate-100 ${
+                                  manualPreview.invalidMidterm ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-300'
+                                }`}
+                                placeholder="0-100"
+                              />
+                              <span className="text-[11px] text-slate-500">
+                                {manualPreview.midtermScore != null && !manualPreview.invalidMidterm
+                                  ? `+${round2(manualPreview.midtermWeighted)} poin`
+                                  : 'Nilai ujian kertas'}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className={`inline-flex min-w-[54px] justify-center rounded-lg border px-2 py-1 text-xs font-bold ${getNilaiToneClass(row.quizUts)}`}>
+                              {row.quizUts ?? '-'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {usesManualFinal ? (
+                            <div className="flex flex-col gap-1.5">
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.01"
+                                disabled={finalManualDisabled}
+                                value={draft.nilai_uas_manual ?? ''}
+                                onChange={(event) => setMapelManualDrafts((prev) => ({
+                                  ...prev,
+                                  [row.id]: { ...(prev[row.id] || {}), nilai_uas_manual: event.target.value }
+                                }))}
+                                className={`w-full rounded-lg border px-3 py-2 text-sm disabled:bg-slate-100 ${
+                                  manualPreview.invalidFinal ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-300'
+                                }`}
+                                placeholder="0-100"
+                              />
+                              <span className="text-[11px] text-slate-500">
+                                {manualPreview.finalScore != null && !manualPreview.invalidFinal
+                                  ? `+${round2(manualPreview.finalWeighted)} poin`
+                                  : 'Nilai ujian kertas'}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className={`inline-flex min-w-[54px] justify-center rounded-lg border px-2 py-1 text-xs font-bold ${getNilaiToneClass(row.quizUas)}`}>
+                              {row.quizUas ?? '-'}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex flex-col gap-2">
                             <input
@@ -4512,25 +4804,26 @@ export default function LaporanRekap() {
                                 [row.id]: { ...(prev[row.id] || {}), nilai_manual: e.target.value }
                               }))}
                               className={`w-full rounded-lg border px-3 py-2 text-sm disabled:bg-slate-100 ${
-                                manualPreview.invalid ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-300'
+                                manualPreview.invalidManual ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-300'
                               }`}
                               placeholder={manualDisabled ? 'Bobot penuh' : '0-100'}
                             />
                             <input
                               type="text"
+                              disabled={!isActiveReportPeriod}
                               value={draft.catatan ?? ''}
                               onChange={(e) => setMapelManualDrafts((prev) => ({
                                 ...prev,
                                 [row.id]: { ...(prev[row.id] || {}), catatan: e.target.value }
                               }))}
-                              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs"
+                              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs disabled:bg-slate-100"
                               placeholder="Catatan opsional"
                             />
                             {manualDisabled ? (
                               <span className="text-[11px] text-slate-500">Total bobot sudah 100%, nilai manual tidak dipakai.</span>
                             ) : (
                               <span className="text-[11px] text-slate-500">
-                                Bobot manual {mapelReportData.sisaBobot}% {manualPreview.manualScore != null && !manualPreview.invalid
+                                Bobot {getMapelManualComponentLabel(mapelReportData.bobot)} {mapelReportData.sisaBobot}% {manualPreview.manualScore != null && !manualPreview.invalidManual
                                   ? `= +${round2(manualPreview.manualWeighted)} poin`
                                   : ''}
                               </span>
@@ -4556,7 +4849,7 @@ export default function LaporanRekap() {
                           <div className="flex flex-col items-center gap-2">
                             <button
                               type="button"
-                              disabled={savingMapelManualId === row.id || manualDisabled || manualPreview.invalid}
+                              disabled={savingMapelManualId === row.id || !hasEditableManualComponent || manualPreview.invalid}
                               onClick={() => handleSaveMapelManual(row)}
                               className="w-full min-w-[92px] rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
                             >
@@ -4564,7 +4857,7 @@ export default function LaporanRekap() {
                             </button>
                             <button
                               type="button"
-                              disabled={sendingMapelToWali || manualPreview.nilaiAkhir == null || manualPreview.invalid || row.rapotLocked}
+                              disabled={!isActiveReportPeriod || sendingMapelToWali || manualPreview.nilaiAkhir == null || manualPreview.invalid || row.rapotLocked}
                               onClick={() => handleSendMapelToWali([row])}
                               className="w-full min-w-[92px] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
                             >
