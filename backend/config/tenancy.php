@@ -19,6 +19,7 @@ return [
     'reserved_subdomains' => $reservedSubdomains,
     'header' => env('TENANT_HEADER', 'X-Tenant'),
     'edge_proxy_secret' => env('TENANT_EDGE_PROXY_SECRET', ''),
+    'require_edge_proxy' => filter_var(env('TENANT_REQUIRE_EDGE_PROXY', false), FILTER_VALIDATE_BOOL),
     'edge_origin_host' => env('TENANT_EDGE_ORIGIN_HOST', ''),
     'edge_secret_header' => env('TENANT_EDGE_SECRET_HEADER', 'X-Sismu-Edge-Secret'),
     'edge_forwarded_host_header' => env('TENANT_EDGE_FORWARDED_HOST_HEADER', 'X-Sismu-Forwarded-Host'),

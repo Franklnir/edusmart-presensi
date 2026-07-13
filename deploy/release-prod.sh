@@ -13,7 +13,7 @@ AUTO_ROLLBACK="true"
 RUN_EXTERNAL_SMOKE_CHECK="false"
 APP_SERVICES=(backend worker scheduler rfid_bridge nginx caddy mosquitto mosquitto_reloader mosquitto_cert_sync)
 IMAGE_SERVICES=(backend nginx)
-CORE_HEALTH_SERVICES=(postgres redis backend worker scheduler nginx caddy mosquitto)
+CORE_HEALTH_SERVICES=(postgres pgbouncer redis backend worker scheduler nginx caddy mosquitto)
 OPTIONAL_APP_SERVICES=()
 OPTIONAL_HEALTH_SERVICES=()
 COMPOSE_FILES=()
@@ -554,7 +554,7 @@ run_internal_health_checks() {
   timeout="${DEPLOY_HEALTH_WAIT_SECONDS:-180}"
   start_ts="$(date +%s)"
   response=""
-  until response="$(compose exec -T nginx wget -q -O - "http://127.0.0.1/api/health" 2>/dev/null)" \
+  until response="$(compose exec -T nginx sh -lc 'wget -q --header="X-Sismu-Edge-Secret: $TENANT_EDGE_PROXY_SECRET" -O - http://127.0.0.1/api/health' 2>/dev/null)" \
     && printf '%s' "$response" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; do
     now_ts="$(date +%s)"
     if (( now_ts - start_ts >= timeout )); then
@@ -703,7 +703,9 @@ rollback_application() {
   fi
 
   compose exec -T backend php artisan optimize:clear >/dev/null
-  curl -fsS "http://127.0.0.1:${HEALTH_PORT}/api/health" >/dev/null
+  curl -fsS \
+    -H "X-Sismu-Edge-Secret: $(read_env_var TENANT_EDGE_PROXY_SECRET "$ENV_FILE")" \
+    "http://127.0.0.1:${HEALTH_PORT}/api/health" >/dev/null
   local health_status=$?
 
   if [[ "$health_status" -eq 0 ]]; then

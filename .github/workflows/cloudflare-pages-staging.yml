@@ -172,6 +172,60 @@ jobs:
             }
           )
 
+          const withEdgeTelemetry = (response, startedAt, cacheStatus = 'BYPASS') => {
+            const headers = new Headers(response.headers)
+            const durationMs = Math.max(0, Date.now() - startedAt)
+            const timing = cacheStatus === 'HIT'
+              ? 'edge-cache;dur=' + durationMs
+              : 'edge-origin;dur=' + durationMs
+
+            if (cacheStatus === 'HIT') {
+              headers.set('Server-Timing', timing)
+            } else {
+              const existing = headers.get('Server-Timing')
+              headers.set('Server-Timing', existing ? existing + ', ' + timing : timing)
+            }
+            headers.set('X-Sismu-Edge-Cache', cacheStatus)
+
+            return new Response(response.body, {
+              status: response.status,
+              statusText: response.statusText,
+              headers
+            })
+          }
+
+          const proxyBackendWithCache = async (request, context) => {
+            const startedAt = Date.now()
+            const url = new URL(request.url)
+            const cacheable = request.method === 'GET' && url.pathname === '/api/public/settings'
+
+            if (!cacheable) {
+              return withEdgeTelemetry(await proxyBackend(request), startedAt)
+            }
+
+            const cache = caches.default
+            const cacheKey = new Request(url.toString(), { method: 'GET' })
+            const cached = await cache.match(cacheKey)
+            if (cached) {
+              return withEdgeTelemetry(cached, startedAt, 'HIT')
+            }
+
+            const response = await proxyBackend(request)
+            if (response.ok && !response.headers.has('Set-Cookie')) {
+              const headers = new Headers(response.headers)
+              headers.set('Cache-Control', 'public, max-age=30')
+              const cacheResponse = new Response(response.body, {
+                status: response.status,
+                statusText: response.statusText,
+                headers
+              })
+              context.waitUntil(cache.put(cacheKey, cacheResponse.clone()))
+              return withEdgeTelemetry(cacheResponse, startedAt, 'MISS')
+            }
+
+            return withEdgeTelemetry(response, startedAt)
+          }
+
           const backendRequestInit = (request, publicUrl, publicHost) => {
             const headers = new Headers(request.headers)
             const forwardedHost = normalizeHost(publicHost || publicUrl.host)
@@ -239,10 +293,10 @@ jobs:
           }
 
           export default {
-            async fetch(request, env) {
+            async fetch(request, env, context) {
               const url = new URL(request.url)
               if (isBackendPath(url.pathname)) {
-                return proxyBackend(request)
+                return proxyBackendWithCache(request, context)
               }
 
               if (isSensitiveFileProbe(url.pathname)) {

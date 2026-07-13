@@ -26,6 +26,53 @@ services:
     networks:
       - internal
 
+  pgbouncer_init:
+    image: postgres:16-alpine
+    container_name: edusmart-pgbouncer-init
+    restart: "no"
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_SOURCE_HOST: postgres
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+    volumes:
+      - ./deploy/pgbouncer/generate-userlist.sh:/generate-userlist.sh:ro
+      - ./deploy/pgbouncer/pgbouncer.ini:/seed/pgbouncer.ini:ro
+      - pgbouncer_config:/pgbouncer-config
+    command: ["sh", "/generate-userlist.sh"]
+    networks:
+      - internal
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.23.1-p3
+    container_name: edusmart-pgbouncer
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer_init:
+        condition: service_completed_successfully
+    environment:
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+    volumes:
+      - pgbouncer_config:/etc/pgbouncer
+    expose:
+      - "6432"
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=\"$${DB_PASSWORD}\" psql -h 127.0.0.1 -p 6432 -U \"$${DB_USERNAME}\" -d \"$${DB_DATABASE}\" -Atqc 'select 1' | grep -qx 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
   redis:
     image: redis:7-alpine
     container_name: edusmart-redis
@@ -293,6 +340,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
@@ -307,15 +356,15 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_DAILY_DAYS: ${LOG_DAILY_DAYS:-7}
       PHP_FPM_PM: ${PHP_FPM_PM:-dynamic}
-      PHP_FPM_PM_MAX_CHILDREN: ${PHP_FPM_PM_MAX_CHILDREN:-50}
-      PHP_FPM_PM_START_SERVERS: ${PHP_FPM_PM_START_SERVERS:-10}
-      PHP_FPM_PM_MIN_SPARE_SERVERS: ${PHP_FPM_PM_MIN_SPARE_SERVERS:-5}
-      PHP_FPM_PM_MAX_SPARE_SERVERS: ${PHP_FPM_PM_MAX_SPARE_SERVERS:-20}
+      PHP_FPM_PM_MAX_CHILDREN: ${PHP_FPM_PM_MAX_CHILDREN:-12}
+      PHP_FPM_PM_START_SERVERS: ${PHP_FPM_PM_START_SERVERS:-3}
+      PHP_FPM_PM_MIN_SPARE_SERVERS: ${PHP_FPM_PM_MIN_SPARE_SERVERS:-2}
+      PHP_FPM_PM_MAX_SPARE_SERVERS: ${PHP_FPM_PM_MAX_SPARE_SERVERS:-5}
       PHP_FPM_PM_MAX_REQUESTS: ${PHP_FPM_PM_MAX_REQUESTS:-500}
 
       DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -362,6 +411,14 @@ services:
       PUBLIC_DIRECTORY_RATE_LIMIT_PER_MINUTE: ${PUBLIC_DIRECTORY_RATE_LIMIT_PER_MINUTE:-60}
       DB_RATE_LIMIT_PER_MINUTE: ${DB_RATE_LIMIT_PER_MINUTE:-300}
       DB_GUEST_RATE_LIMIT_PER_MINUTE: ${DB_GUEST_RATE_LIMIT_PER_MINUTE:-360}
+      DB_DEFAULT_SELECT_LIMIT: ${DB_DEFAULT_SELECT_LIMIT:-250}
+      DB_ROSTER_SELECT_LIMIT: ${DB_ROSTER_SELECT_LIMIT:-2000}
+      DB_MAX_SELECT_LIMIT: ${DB_MAX_SELECT_LIMIT:-2000}
+      DB_MAX_SELECT_LIMIT_ADMIN: ${DB_MAX_SELECT_LIMIT_ADMIN:-5000}
+      DB_MAX_OFFSET: ${DB_MAX_OFFSET:-25000}
+      DB_BATCH_MAX_ITEMS: ${DB_BATCH_MAX_ITEMS:-12}
+      DB_BATCH_MAX_TOTAL_ROWS: ${DB_BATCH_MAX_TOTAL_ROWS:-5000}
+      DB_GATEWAY_TIME_LIMIT_SECONDS: ${DB_GATEWAY_TIME_LIMIT_SECONDS:-60}
       RFID_RATE_LIMIT_PER_MINUTE: ${RFID_RATE_LIMIT_PER_MINUTE:-1200}
       RFID_TENANT_CACHE_TTL_SECONDS: ${RFID_TENANT_CACHE_TTL_SECONDS:-300}
       RFID_DEVICE_CACHE_TTL_SECONDS: ${RFID_DEVICE_CACHE_TTL_SECONDS:-60}
@@ -388,6 +445,7 @@ services:
       TENANT_DNS_CNAME_TARGET: ${TENANT_DNS_CNAME_TARGET:-}
       TENANT_RESERVED: ${TENANT_RESERVED:-www,app,api,admin,admin26}
       TENANT_EDGE_PROXY_SECRET: ${TENANT_EDGE_PROXY_SECRET:-}
+      TENANT_REQUIRE_EDGE_PROXY: ${TENANT_REQUIRE_EDGE_PROXY:-true}
       TENANT_EDGE_ORIGIN_HOST: ${TENANT_EDGE_ORIGIN_HOST:-}
 
       SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:?SUPER_ADMIN_EMAILS is required}
@@ -535,6 +593,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
@@ -545,8 +605,8 @@ services:
       APP_URL: ${APP_URL:?APP_URL is required}
 
       DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -657,6 +717,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
@@ -667,8 +729,8 @@ services:
       APP_URL: ${APP_URL:?APP_URL is required}
 
       DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -774,6 +836,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
       redis:
         condition: service_healthy
       mosquitto:
@@ -791,8 +855,8 @@ services:
       LOG_DAILY_DAYS: ${LOG_DAILY_DAYS:-7}
 
       DB_CONNECTION: pgsql
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -905,10 +969,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    environment:
+      TENANT_EDGE_PROXY_SECRET: ${TENANT_EDGE_PROXY_SECRET:?TENANT_EDGE_PROXY_SECRET is required}
     expose:
       - "80"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/api/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q --header=\"X-Sismu-Edge-Secret: $${TENANT_EDGE_PROXY_SECRET}\" -O /dev/null http://127.0.0.1/api/health || exit 1"]
       interval: 20s
       timeout: 5s
       retries: 10
@@ -930,6 +996,7 @@ services:
       CADDY_APP_HOSTS: ${CADDY_APP_HOSTS:-sismu.biz.id}
       CADDY_ROOT_DOMAIN: ${CADDY_ROOT_DOMAIN:-sismu.biz.id}
       CADDY_HTTPS_PORT_SUFFIX: ${CADDY_HTTPS_PORT_SUFFIX:-}
+      TENANT_EDGE_PROXY_SECRET: ${TENANT_EDGE_PROXY_SECRET:?TENANT_EDGE_PROXY_SECRET is required}
       RFID_MOSQUITTO_PUBLIC_HOST: ${RFID_MOSQUITTO_PUBLIC_HOST:-mqtt.sismu.biz.id}
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
@@ -949,6 +1016,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  pgbouncer_config:
   mosquitto_data:
   mosquitto_log:
   evolution_postgres_data:
