@@ -42,10 +42,8 @@ const MODE_OPTIONS = [
 ]
 
 const FORMAT_OPTIONS = [
-  { value: 'xlsx', label: 'Excel (.xlsx)' },
-  { value: 'json', label: 'JSON (.json)' },
-  { value: 'csv', label: 'CSV Ringkas (.csv)' },
-  { value: 'html', label: 'Laporan HTML (.html)' }
+  { value: 'json', label: 'JSON Restore (.json)' },
+  { value: 'xlsx', label: 'Excel Terstruktur (.xlsx)' }
 ]
 
 const PERIOD_OPTIONS = [
@@ -111,6 +109,27 @@ const toCellValue = (value) => {
     }
   }
   return value
+}
+
+const SENSITIVE_BACKUP_COLUMNS = [
+  'password', 'remember_token', 'access_token', 'refresh_token', 'api_key',
+  'secret', 'private_key', 'credential', 'authorization_code', 'recovery_code', 'otp'
+]
+
+const isSensitiveBackupColumn = (column) => {
+  const normalized = String(column || '').trim().toLowerCase()
+  return normalized === 'token' || normalized.endsWith('_token') || SENSITIVE_BACKUP_COLUMNS.some((part) => normalized.includes(part))
+}
+
+const toSpreadsheetCellValue = (value, column) => {
+  if (isSensitiveBackupColumn(column)) {
+    return value === null || value === undefined || value === '' ? '' : '[DISEMBUNYIKAN]'
+  }
+  const cellValue = toCellValue(value)
+  if (typeof cellValue === 'string' && /^[=+\-@]/.test(cellValue.trimStart())) {
+    return `'${cellValue}`
+  }
+  return cellValue
 }
 
 const trimPreviewText = (text) => {
@@ -325,6 +344,20 @@ const createWorkbookBuffer = async (payload) => {
   applyHeaderStyle(listSheet, 4)
   listSheet.views = [{ state: 'frozen', ySplit: 1 }]
 
+  const policySheet = workbook.addWorksheet(buildUniqueSheetName(usedSheetNames, 'Kebijakan Keamanan'))
+  policySheet.columns = [
+    { header: 'Kebijakan', key: 'policy', width: 32 },
+    { header: 'Penjelasan', key: 'description', width: 90 }
+  ]
+  policySheet.addRows([
+    { policy: 'Tujuan', description: 'Excel digunakan untuk audit dan pengelolaan manusia. Restore otomatis menggunakan file JSON.' },
+    { policy: 'Kolom sensitif', description: 'Password, token, secret, API key, credential, OTP, dan private key disamarkan.' },
+    { policy: 'Struktur', description: 'Seluruh nama tabel, kolom, jumlah baris, dan nilai non-rahasia tetap disertakan.' },
+    { policy: 'File storage', description: 'Isi file S3/R2/MinIO/Google Drive tidak digandakan; hanya metadata dan referensi URL.' }
+  ])
+  applyHeaderStyle(policySheet, 2)
+  policySheet.views = [{ state: 'frozen', ySplit: 1 }]
+
   tables.forEach((table) => {
     const rows = Array.isArray(table?.rows) ? table.rows : []
     const worksheet = workbook.addWorksheet(buildUniqueSheetName(usedSheetNames, table?.name || 'Data'))
@@ -342,7 +375,7 @@ const createWorkbookBuffer = async (payload) => {
     rows.forEach((row) => {
       const item = {}
       keys.forEach((key) => {
-        item[key] = toCellValue(row?.[key])
+        item[key] = toSpreadsheetCellValue(row?.[key], key)
       })
       worksheet.addRow(item)
     })
@@ -353,147 +386,6 @@ const createWorkbookBuffer = async (payload) => {
   })
 
   return workbook.xlsx.writeBuffer()
-}
-
-const encodeCsvValue = (value) => {
-  const text = String(toCellValue(value) ?? '')
-  if (text.includes(',') || text.includes('"') || text.includes('\n')) {
-    return `"${text.replace(/"/g, '""')}"`
-  }
-  return text
-}
-
-const createCsvContent = (payload) => {
-  const tables = Array.isArray(payload?.tables) ? payload.tables : []
-  const lines = []
-  const addLine = (cells = []) => {
-    lines.push(cells.map((cell) => encodeCsvValue(cell)).join(','))
-  }
-
-  addLine(['Ringkasan Backup'])
-  addLine(['Field', 'Nilai'])
-  addLine(['Tenant ID', payload?.tenant?.id || '-'])
-  addLine(['Nama Sekolah', payload?.tenant?.name || '-'])
-  addLine(['Mode', payload?.mode_label || payload?.mode || '-'])
-  addLine(['Periode', payload?.period?.label || '-'])
-  addLine(['Exported At', payload?.exported_at || '-'])
-  addLine(['Jumlah Tabel', toNumber(payload?.summary?.table_count)])
-  addLine(['Jumlah Baris', toNumber(payload?.summary?.total_rows)])
-  addLine([])
-
-  addLine(['Daftar Struktur Tabel'])
-  addLine(['No', 'Nama Tabel', 'Jumlah Kolom', 'Jumlah Baris'])
-  tables.forEach((table, index) => {
-    addLine([
-      index + 1,
-      table?.name || '-',
-      toNumber(table?.column_count || (Array.isArray(table?.columns) ? table.columns.length : 0)),
-      toNumber(table?.row_count || (Array.isArray(table?.rows) ? table.rows.length : 0))
-    ])
-  })
-  addLine([])
-
-  tables.forEach((table) => {
-    const rows = Array.isArray(table?.rows) ? table.rows : []
-    const columns = getTableColumns(table, rows)
-
-    addLine([`Tabel: ${table?.name || '-'}`])
-    if (!rows.length) {
-      addLine(['Tidak ada data'])
-      addLine([])
-      return
-    }
-
-    addLine(columns)
-    rows.forEach((row) => {
-      addLine(columns.map((key) => row?.[key]))
-    })
-    addLine([])
-  })
-
-  return lines.join('\n')
-}
-
-const escapeHtml = (value) => {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-const createHtmlContent = (payload) => {
-  const tables = Array.isArray(payload?.tables) ? payload.tables : []
-  const sections = tables
-    .map((table) => {
-      const rows = Array.isArray(table?.rows) ? table.rows : []
-      if (!rows.length) {
-        return `
-          <section class="section">
-            <h3>${escapeHtml(table?.name || '-')}</h3>
-            <p>Tidak ada data.</p>
-          </section>
-        `
-      }
-
-      const keys = getTableColumns(table, rows)
-
-      const header = keys.map((key) => `<th>${escapeHtml(key)}</th>`).join('')
-      const body = rows
-        .map((row) => `<tr>${keys.map((key) => `<td>${escapeHtml(toCellValue(row?.[key]))}</td>`).join('')}</tr>`)
-        .join('')
-
-      return `
-        <section class="section">
-          <h3>${escapeHtml(table?.name || '-')} <small>(${rows.length} baris)</small></h3>
-          <div class="table-wrap">
-            <table>
-              <thead><tr>${header}</tr></thead>
-              <tbody>${body}</tbody>
-            </table>
-          </div>
-        </section>
-      `
-    })
-    .join('\n')
-
-  return `<!doctype html>
-<html lang="id">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Backup ${escapeHtml(payload?.tenant?.name || '')}</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; color: #0f172a; background: #f8fafc; }
-    .card { background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 8px 16px; }
-    .label { color: #475569; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-    .value { font-weight: 600; }
-    .section { background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
-    .section h3 { margin: 0 0 8px; font-size: 16px; }
-    .table-wrap { overflow: auto; max-width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; }
-    table { border-collapse: collapse; width: 100%; font-size: 12px; }
-    th, td { border: 1px solid #e2e8f0; padding: 6px 8px; text-align: left; vertical-align: top; }
-    th { background: #e2e8f0; position: sticky; top: 0; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Backup Data Sekolah</h1>
-    <div class="grid">
-      <div><div class="label">Tenant</div><div class="value">${escapeHtml(payload?.tenant?.name || '-')}</div></div>
-      <div><div class="label">Tenant ID</div><div class="value">${escapeHtml(payload?.tenant?.id || '-')}</div></div>
-      <div><div class="label">Mode</div><div class="value">${escapeHtml(payload?.mode_label || payload?.mode || '-')}</div></div>
-      <div><div class="label">Periode</div><div class="value">${escapeHtml(payload?.period?.label || '-')}</div></div>
-      <div><div class="label">Jumlah Tabel</div><div class="value">${escapeHtml(payload?.summary?.table_count ?? '-')}</div></div>
-      <div><div class="label">Jumlah Baris</div><div class="value">${escapeHtml(payload?.summary?.total_rows ?? '-')}</div></div>
-      <div><div class="label">Exported At</div><div class="value">${escapeHtml(payload?.exported_at || '-')}</div></div>
-    </div>
-  </div>
-  ${sections}
-</body>
-</html>`
 }
 
 export default function BackupAdmin() {
@@ -688,7 +580,7 @@ export default function BackupAdmin() {
       }
       return data || null
     } catch (err) {
-      if (!silent) pushToast('error', err?.message || 'Gagal memuat jadwal backup bulanan')
+      if (!silent) pushToast('error', err?.message || 'Gagal memuat jadwal backup harian')
       return null
     } finally {
       setMonthlyLoading(false)
@@ -741,17 +633,13 @@ export default function BackupAdmin() {
 
   const handleSaveToGoogleDrive = async () => {
     if (driveSaving || loading || downloading) return
-    if (isSuperAdmin) {
-      pushToast('warning', 'Simpan manual ke Google Drive hanya tersedia untuk Admin Sekolah. Gunakan backup bulanan tenant atau unduh file backup.')
-      return
-    }
     setDriveSaving(true)
     try {
       if (periodType === 'date_range' && (!startDate || !endDate)) {
         throw new Error('Isi tanggal mulai dan tanggal selesai untuk backup rentang tanggal')
       }
 
-      const { data, error } = await supabase.admin.saveBackupToGoogleDrive({
+      const requestPayload = {
         mode,
         period_type: periodType,
         months: periodType === 'last_months' ? resolvedMonths || undefined : undefined,
@@ -759,12 +647,15 @@ export default function BackupAdmin() {
         semester: periodType === 'semester' ? semester : undefined,
         start_date: periodType === 'date_range' ? startDate : undefined,
         end_date: periodType === 'date_range' ? endDate : undefined
-      })
+      }
+      const { data, error } = isSuperAdmin
+        ? await supabase.super.saveTenantBackupToGoogleDrive(selectedTenantId, requestPayload)
+        : await supabase.admin.saveBackupToGoogleDrive(requestPayload)
       if (error) throw error
       setLastDriveBackup(data?.drive_file || null)
       await loadDriveStatus({ refresh: true, silent: true })
       await loadMonthlyStatus({ silent: true, refresh: true })
-      pushToast('success', 'Backup JSON berhasil disimpan ke Google Drive sekolah')
+      pushToast('success', 'Backup JSON restore dan Excel terstruktur berhasil disimpan ke Google Drive sekolah')
     } catch (err) {
       pushToast('error', err?.message || 'Gagal menyimpan backup ke Google Drive')
     } finally {
@@ -788,12 +679,6 @@ export default function BackupAdmin() {
       } else if (format === 'json') {
         const json = JSON.stringify(activePayload, null, 2)
         downloadBlob(new Blob([json], { type: 'application/json' }), `${baseName}.json`)
-      } else if (format === 'csv') {
-        const csv = createCsvContent(activePayload)
-        downloadBlob(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' }), `${baseName}.csv`)
-      } else if (format === 'html') {
-        const html = createHtmlContent(activePayload)
-        downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8;' }), `${baseName}.html`)
       }
 
       pushToast('success', 'Backup berhasil diunduh')
@@ -1106,14 +991,6 @@ export default function BackupAdmin() {
       return { text: trimPreviewText(JSON.stringify(payload, null, 2)), html: '' }
     }
 
-    if (format === 'csv') {
-      return { text: trimPreviewText(createCsvContent(payload)), html: '' }
-    }
-
-    if (format === 'html') {
-      return { text: '', html: createHtmlContent(payload) }
-    }
-
     return { text: '', html: '' }
   }, [payload, format])
 
@@ -1384,13 +1261,13 @@ export default function BackupAdmin() {
                 </div>
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-sm font-bold text-slate-900">Jadwal Backup Bulanan Google Drive</h3>
+                    <h3 className="text-sm font-bold text-slate-900">Jadwal Backup Harian Google Drive</h3>
                     <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
                       {monthlyStatus?.schedule?.runs_at_label || 'Otomatis 21:30 WIB, bertahap'}
                     </span>
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                    Sistem membuat backup lengkap setiap akhir bulan pada periode aktif. Hijau berarti sudah tersimpan, biru berarti ada data baru, dan hijau muda berarti hari itu sudah dicek tanpa aktivitas.
+                    Sistem membuat titik pemulihan JSON dan Excel setiap malam untuk bulan berjalan, lalu menyimpan arsipnya per bulan. Hijau berarti sudah tersimpan, biru berarti ada data baru, dan hijau muda berarti hari itu sudah dicek tanpa aktivitas.
                     {monthlyStatus?.schedule?.server_time_label ? ` Waktu server: ${monthlyStatus.schedule.server_time_label}.` : ''}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -1515,7 +1392,7 @@ export default function BackupAdmin() {
                 )
               }) : (
         <div className="col-span-full rounded-xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
-          {monthlyLoading ? 'Memuat jadwal backup bulanan...' : 'Jadwal backup bulanan belum tersedia.'}
+          {monthlyLoading ? 'Memuat jadwal backup harian...' : 'Jadwal backup harian belum tersedia.'}
         </div>
       )}
     </div>
@@ -1535,6 +1412,9 @@ export default function BackupAdmin() {
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-xs text-slate-500">
+                JSON digunakan untuk restore terverifikasi. Excel berisi struktur lengkap untuk pengelolaan, dengan nilai rahasia disamarkan.
+              </p>
             </div>
 
             {periodType === 'semester' ? (
@@ -1652,11 +1532,11 @@ export default function BackupAdmin() {
             <button
               type="button"
               onClick={handleSaveToGoogleDrive}
-              disabled={loading || downloading || driveSaving || !driveReady || isSuperAdmin}
+              disabled={loading || downloading || driveSaving || !driveReady || (isSuperAdmin && !selectedTenantId)}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
             >
               <UploadCloud className="h-4 w-4" />
-              {driveSaving ? 'Menyimpan ke Drive...' : (isSuperAdmin ? 'Simpan manual oleh Admin Sekolah' : 'Simpan JSON + Excel ke Google Drive')}
+              {driveSaving ? 'Menyimpan ke Drive...' : 'Simpan JSON + Excel ke Google Drive'}
             </button>
           </div>
 
@@ -1901,13 +1781,7 @@ export default function BackupAdmin() {
                   Preview Sesuai Format: {selectedFormatLabel}
                 </div>
 
-                {format === 'html' ? (
-                  <iframe
-                    title="Preview HTML Backup"
-                    srcDoc={formatPreview.html}
-                    className="w-full h-[460px] bg-white"
-                  />
-                ) : format === 'json' || format === 'csv' ? (
+                {format === 'json' ? (
                   <pre className="max-h-[460px] overflow-auto p-3 text-xs leading-5 bg-white text-slate-800 whitespace-pre-wrap">
                     {formatPreview.text || 'Tidak ada data preview.'}
                   </pre>

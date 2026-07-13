@@ -1,0 +1,76 @@
+# robots.txt
+User-agent: *
+Disallow: /admin/
+Disallow: /api/
+Disallow: /manager/
+
+Sitemap: https://sismu.biz.id/sitemap.xml
+
+# sitemap.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://sismu.biz.id/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://sismu.biz.id/app-home/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://sismu.biz.id/privacy-policy/</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://sismu.biz.id/terms/</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+</urlset>
+
+# MQTT TLS certificate handshake (no auth attempt)
+
+# subdomain quick health
+## admin26.sismu.biz.id
+103.191.63.170
+HTTP/2 200 
+accept-ranges: bytes
+alt-svc: h3=":443"; ma=2592000
+cache-control: no-store, no-cache, must-revalidate
+content-security-policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:
+content-type: text/html
+cross-origin-opener-policy: same-origin-allow-popups
+cross-origin-resource-policy: same-site
+date: Fri, 03 Jul 2026 13:22:50 GMT
+etag: "6a47a1d3-46a"
+last-modified: Fri, 03 Jul 2026 11:49:39 GMT
+permissions-policy: geolocation=(), camera=(), microphone=(), payment=(), usb=()
+referrer-policy: strict-origin-when-cross-origin
+server: nginx
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+vary: Accept-Encoding
+via: 1.1 Caddy
+x-content-type-options: nosniff
+## wa.sismu.biz.id
+103.191.63.170
+HTTP/2 404 
+alt-svc: h3=":443"; ma=2592000
+content-type: text/plain; charset=utf-8
+server: Caddy
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+content-length: 9
+date: Fri, 03 Jul 2026 13:22:51 GMT
+
+## mqtt.sismu.biz.id
+103.191.63.170
+HTTP/2 404 
+alt-svc: h3=":443"; ma=2592000
+content-type: text/plain; charset=utf-8
+server: Caddy
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+content-length: 9
+date: Fri, 03 Jul 2026 13:22:52 GMT
+

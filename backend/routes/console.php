@@ -43,6 +43,12 @@ Schedule::command('backup:monthly-google-drive')
     ->withoutOverlapping(30)
     ->onOneServer();
 
+Schedule::command('backup:protect-google-drive')
+    ->weeklyOn(1, '22:30')
+    ->timezone('Asia/Jakarta')
+    ->withoutOverlapping(60)
+    ->onOneServer();
+
 Schedule::command('google-drive:health-check --recover')
     ->dailyAt('21:15')
     ->timezone('Asia/Jakarta')

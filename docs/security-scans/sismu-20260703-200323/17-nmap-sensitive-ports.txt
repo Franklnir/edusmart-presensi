@@ -1,0 +1,11 @@
+# Nmap 7.99 scan initiated Fri Jul  3 20:23:02 2026 as: /usr/lib/nmap/nmap --privileged -Pn -n -sT -p 21,22,25,53,80,110,143,443,465,587,993,995,1883,2222,2375,2376,3000,3306,5432,5601,5672,6379,8000,8080,8443,8883,9000,9200,15672,27017 --max-retries 2 --host-timeout 120s -oN docs/security-scans/sismu-20260703-200323/17-nmap-sensitive-ports.txt sismu.biz.id
+Nmap scan report for sismu.biz.id (103.191.63.170)
+Host is up (0.0098s latency).
+Not shown: 26 filtered tcp ports (no-response)
+PORT     STATE SERVICE
+22/tcp   open  ssh
+80/tcp   open  http
+443/tcp  open  https
+8883/tcp open  secure-mqtt
+
+# Nmap done at Fri Jul  3 20:23:05 2026 -- 1 IP address (1 host up) scanned in 3.43 seconds

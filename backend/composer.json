@@ -11,6 +11,7 @@
         "laravel/horizon": "^5.47",
         "laravel/sanctum": "^4.3",
         "laravel/tinker": "^3.0",
+        "openspout/openspout": "^5.7",
         "php-mqtt/client": "^1.8"
     },
     "require-dev": {

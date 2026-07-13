@@ -17,7 +17,10 @@ class TenantBackupService
 {
     use HasTenantBackupLogic;
 
-    public function __construct(private readonly GoogleDriveService $googleDriveService) {}
+    public function __construct(
+        private readonly GoogleDriveService $googleDriveService,
+        private readonly BackupIntegrityService $backupIntegrityService
+    ) {}
 
     public function buildPayload(string $tenantId, array $input = [], string $userId = '', ?string $role = null): array
     {
@@ -58,7 +61,7 @@ class TenantBackupService
                 'total_rows' => $totalRows,
             ],
             'manifest' => [
-                'version' => 3,
+                'version' => 4,
                 'backup_type' => 'tenant_database',
                 'tenant_scoped' => true,
                 'contains_storage_files' => false,
@@ -79,14 +82,14 @@ class TenantBackupService
                 ],
             ],
             'tables' => $tables,
-            'formats_supported' => ['xlsx', 'json', 'csv', 'html'],
+            'formats_supported' => ['json', 'xlsx'],
             'generated_by' => [
                 'user_id' => $userId,
                 'role' => $role,
             ],
         ];
 
-        return $this->attachPayloadChecksum($payload);
+        return $this->backupIntegrityService->sign($payload);
     }
 
     public function savePayloadToGoogleDrive(string $tenantId, string $userId, array $payload, string $fileName = ''): array
@@ -159,7 +162,7 @@ class TenantBackupService
             'kind' => $runKind,
         ];
 
-        return $this->attachPayloadChecksum($payload);
+        return $this->backupIntegrityService->sign($payload);
     }
 
     public function saveMonthlyBackupToGoogleDrive(
@@ -193,10 +196,8 @@ class TenantBackupService
         }
 
         $fileName = $this->monthlyBackupFileName($tenantId, $month['value'], (bool) $record);
-        $runKind = $record ? 'monthly_delta_update' : 'initial_monthly_snapshot';
-        $deltaStartAt = $record && $lastBackupAt && $needsUpdate
-            ? $lastBackupAt->copy()->setTimezone('Asia/Jakarta')->subSecond()
-            : $window['month_start'];
+        $runKind = $record ? 'daily_cumulative_update' : 'initial_monthly_snapshot';
+        $deltaStartAt = $window['month_start'];
         $payload = $this->buildMonthlyPayload(
             $tenantId,
             $month['value'],
@@ -216,7 +217,7 @@ class TenantBackupService
             'effective_end_at' => $window['effective_end_at']->toIso8601String(),
             'stores_json_and_excel' => true,
         ];
-        $payload = $this->attachPayloadChecksum($payload);
+        $payload = $this->backupIntegrityService->sign($payload);
 
         return $this->savePayloadFormatsToGoogleDrive($tenantId, $userId, $payload, $fileName);
     }
@@ -489,12 +490,12 @@ class TenantBackupService
             }
 
             try {
-                $monthEnd = Carbon::parse((string) ($month['end_date'] ?? ''), 'Asia/Jakarta')->endOfDay();
+                $monthStart = Carbon::parse((string) ($month['start_date'] ?? ''), 'Asia/Jakarta')->startOfDay();
             } catch (\Throwable $e) {
                 continue;
             }
 
-            if ($monthEnd->lessThanOrEqualTo($now) || $monthEnd->isSameDay($now)) {
+            if ($monthStart->lessThanOrEqualTo($now)) {
                 $keys[] = $monthKey;
             }
         }
@@ -583,7 +584,7 @@ class TenantBackupService
                 'timezone' => 'Asia/Jakarta',
                 'runs_at' => (string) config('backup.monthly_auto_start_time', '21:30'),
                 'runs_at_label' => $this->monthlyAutoScheduleLabel(),
-                'rule' => 'Scheduler berjalan harian, mengejar bulan yang sudah due/terlewat, dan tenant diproses bertahap agar server dan Google Drive tidak menumpuk.',
+                'rule' => 'Scheduler membuat titik pemulihan kumulatif untuk bulan berjalan setiap hari, mengejar bulan terlewat, dan memproses tenant bertahap agar server serta Google Drive tidak menumpuk.',
                 'mode' => 'full',
                 'destination' => 'Google Drive sekolah',
                 'server_time' => $now->toIso8601String(),
@@ -626,7 +627,7 @@ class TenantBackupService
         $start = trim((string) config('backup.monthly_auto_start_time', '21:30')) ?: '21:30';
         $spacing = (int) config('backup.monthly_auto_tenant_spacing_minutes', 4);
 
-        return 'Setiap hari '.$start.' WIB, catch-up bulanan bertahap tiap '.$spacing.' menit per sekolah';
+        return 'Setiap hari '.$start.' WIB, titik pemulihan bertahap tiap '.$spacing.' menit per sekolah';
     }
 
     private function monthlyGoogleDriveStatus(string $tenantId, bool $refresh = false): array
@@ -1110,19 +1111,6 @@ class TenantBackupService
             'disconnected',
             'belum tersambung',
         ]);
-    }
-
-    private function attachPayloadChecksum(array $payload): array
-    {
-        unset($payload['manifest']['checksum']);
-        $payload['manifest']['checksum'] = [
-            'algorithm' => 'sha256',
-            'scope' => 'payload_without_checksum',
-            'generated_at' => now('Asia/Jakarta')->toIso8601String(),
-            'value' => hash('sha256', json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''),
-        ];
-
-        return $payload;
     }
 
     private function monthlyStatusCacheKey(string $tenantId, string $academicYear): string

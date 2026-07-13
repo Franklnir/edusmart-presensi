@@ -17,7 +17,7 @@ class MonthlyGoogleDriveBackupCommand extends Command
         {--catch-up : Proses semua bulan periode aktif yang terlewat atau punya data baru}
         {--spacing-minutes= : Jeda antar tenant saat dispatch queue}';
 
-    protected $description = 'Membuat backup database tenant lengkap ke Google Drive sekolah pada akhir bulan.';
+    protected $description = 'Membuat titik pemulihan harian kumulatif JSON dan XLSX ke Google Drive sekolah.';
 
     public function handle(TenantBackupService $tenantBackupService): int
     {

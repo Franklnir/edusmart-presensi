@@ -1003,3 +1003,11 @@ Implementasi 13 Juli 2026 menyelaraskan Quiz, Laporan Guru, Rapor Wali, ekspor, 
 - rekap wali dan detail siswa menggunakan sumber komponen yang sama dengan Laporan Mapel.
 
 Regression test membuktikan rapor Ganjil dan Genap dapat hidup berdampingan, mutation rapor arsip ditolak, spoof semester pada nilai manual ditolak, dan server menempatkan nilai manual normal ke periode aktif tenant.
+
+### 14.8 Panduan scope dan reset data
+
+Kontrak operasional pergantian semester, rollover tahun ajaran, reset non-destruktif, keputusan jadwal, snapshot katalog ekskul, keanggotaan ekskul, arsip, dan checklist QA telah dipisahkan ke dokumen berikut:
+
+`docs/PANDUAN_SCOPE_DAN_RESET_DATA_AKADEMIK.md`
+
+Dokumen tersebut menjadi rujukan operasional bagi pengembang dan AI/agent. Perubahan fitur periodik belum dianggap lengkap jika klasifikasi scope, backend guard, frontend context, pengujian, dan dokumentasi tidak diperbarui secara konsisten.

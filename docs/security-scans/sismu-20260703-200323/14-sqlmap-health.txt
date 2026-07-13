@@ -1,0 +1,36 @@
+        ___
+       __H__
+ ___ ___[)]_____ ___ ___  {1.10.6#stable}
+|_ -| . [']     | .'| . |
+|___|_  [,]_|_|_|__,|  _|
+      |_|V...       |_|   https://sqlmap.org
+
+[!] legal disclaimer: Usage of sqlmap for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program
+
+[*] starting @ 20:17:07 /2026-07-03/
+
+[20:17:07] [INFO] fetched random HTTP User-Agent header value 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15' from file '/usr/share/sqlmap/data/txt/user-agents.txt'
+[1/1] URL:
+GET https://sismu.biz.id/api/health?x=1
+do you want to test this URL? [Y/n/q]
+> Y
+[20:17:07] [INFO] testing URL 'https://sismu.biz.id/api/health?x=1'
+[20:17:07] [INFO] using '/home/irsyad/.local/share/sqlmap/output/results-07032026_0817pm.csv' as the CSV results file in multiple targets mode
+[20:17:07] [INFO] testing connection to the target URL
+[20:17:08] [INFO] checking if the target is protected by some kind of WAF/IPS
+[20:17:08] [CRITICAL] heuristics detected that the target is protected by some kind of WAF/IPS
+are you sure that you want to continue with further target testing? [Y/n] Y
+[20:17:08] [WARNING] please consider usage of tamper scripts (option '--tamper')
+[20:17:08] [INFO] testing if the target URL content is stable
+[20:17:09] [INFO] target URL content is stable
+[20:17:09] [INFO] testing if GET parameter 'x' is dynamic
+[20:17:09] [WARNING] GET parameter 'x' does not appear to be dynamic
+[20:17:09] [WARNING] heuristic (basic) test shows that GET parameter 'x' might not be injectable
+[20:17:09] [INFO] skipping GET parameter 'x'
+[20:17:09] [ERROR] all tested parameters do not appear to be injectable. Try to increase values for '--level'/'--risk' options if you wish to perform more tests. If you suspect that there is some kind of protection mechanism involved (e.g. WAF) maybe you could try to use option '--tamper' (e.g. '--tamper=space2comment'), skipping to the next target
+[20:17:09] [WARNING] HTTP error codes detected during run:
+403 (Forbidden) - 1 times
+[20:17:09] [INFO] you can find results of scanning in multiple targets mode inside the CSV file '/home/irsyad/.local/share/sqlmap/output/results-07032026_0817pm.csv'
+
+[*] ending @ 20:17:09 /2026-07-03/
+

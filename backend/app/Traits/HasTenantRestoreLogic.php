@@ -2,6 +2,7 @@
 
 namespace App\Traits;
 
+use App\Services\Backup\BackupIntegrityService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -32,12 +33,18 @@ trait HasTenantRestoreLogic
             return null;
         }
 
+        $integrity = app(BackupIntegrityService::class)->verify($raw);
+        if (($integrity['status'] ?? '') === 'invalid') {
+            return null;
+        }
+
         return [
             'tenant' => is_array($raw['tenant'] ?? null) ? $raw['tenant'] : null,
             'manifest' => is_array($raw['manifest'] ?? null) ? $raw['manifest'] : null,
             'mode' => isset($raw['mode']) ? (string) $raw['mode'] : null,
             'period' => is_array($raw['period'] ?? null) ? $raw['period'] : null,
             'tables' => $tables,
+            '_integrity' => $integrity,
         ];
     }
 
@@ -48,6 +55,14 @@ trait HasTenantRestoreLogic
         bool $truncateBeforeRestore = false,
         array $requestedTables = []
     ): array {
+        $integrity = is_array($backupPayload['_integrity'] ?? null)
+            ? $backupPayload['_integrity']
+            : ['valid' => false, 'status' => 'legacy_unverified', 'message' => 'Integritas backup belum diverifikasi.'];
+
+        if (! $dryRun && ! (bool) ($integrity['valid'] ?? false)) {
+            throw new \RuntimeException((string) ($integrity['message'] ?? 'Integritas file backup tidak valid.'));
+        }
+
         $allowedTables = array_values(array_unique(array_filter($this->resolveAllowedRestoreTables(), fn ($item) => is_string($item) && trim($item) !== '')));
         $allowedSet = array_fill_keys($allowedTables, true);
 
@@ -73,9 +88,13 @@ trait HasTenantRestoreLogic
             'skipped' => 0,
             'conflicts' => 0,
             'errors' => 0,
+            'integrity_status' => (string) ($integrity['status'] ?? 'unknown'),
         ];
 
         $warnings = [];
+        if (! (bool) ($integrity['valid'] ?? false)) {
+            $warnings[] = (string) ($integrity['message'] ?? 'Integritas file backup belum dapat diverifikasi.');
+        }
         $tableResults = [];
 
         $executor = function () use (
@@ -237,6 +256,7 @@ trait HasTenantRestoreLogic
 
         return [
             'summary' => $summary,
+            'integrity' => $integrity,
             'tables' => $tableResults,
             'warnings' => $warnings,
         ];

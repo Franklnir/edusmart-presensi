@@ -1,0 +1,13 @@
+# Nmap 7.99 scan initiated Fri Jul  3 20:03:48 2026 as: /usr/lib/nmap/nmap --privileged -Pn -n -sV -sT -p 22,80,443,8883 --version-light --max-retries 2 --host-timeout 120s -oN docs/security-scans/sismu-20260703-200323/03-nmap-service.txt sismu.biz.id
+Nmap scan report for sismu.biz.id (103.191.63.170)
+Host is up (0.0071s latency).
+
+PORT     STATE SERVICE  VERSION
+22/tcp   open  ssh      OpenSSH 10.0p2 Debian 7+deb13u4 (protocol 2.0)
+80/tcp   open  http     Caddy httpd
+443/tcp  open  ssl/http Caddy httpd
+8883/tcp open  ssl/mqtt
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+# Nmap done at Fri Jul  3 20:04:03 2026 -- 1 IP address (1 host up) scanned in 14.99 seconds
