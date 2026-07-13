@@ -28,7 +28,8 @@ Alur ideal yang direkomendasikan:
 4. Laravel memproses scan, mapping kartu ke siswa/guru, menjalankan absensi, lalu menyimpan audit event.
 5. Backend publish ACK/response ke topic response.
 6. Device menerima ACK/response dan memberi feedback buzzer.
-7. Jika MQTT belum tersambung, template baru hanya menyimpan 1 event tertunda di RAM agar tetap ringan.
+7. Jika MQTT/backend belum tersedia, template menyimpan hingga 16 event di LittleFS dan mengirim ulang dengan `event_id` yang sama sampai ACK diterima.
+8. Setelah PostgreSQL commit, event didorong ke Redis Stream untuk SSE Live Scan; SSE tetap melakukan catch-up dari PostgreSQL jika Redis gagal.
 
 Prinsip penting:
 - MQTT dipakai untuk cepat dan ringan.
@@ -42,6 +43,9 @@ Yang sudah siap di backend:
 - MQTT bridge tenant-aware
 - device registry (`rfid_devices`)
 - event log dedupe (`rfid_device_events`)
+- persistent MQTT session dan client ID stabil per tenant
+- reload konfigurasi per tenant tanpa restart bridge massal
+- Redis Stream untuk Live Scan dengan fallback PostgreSQL
 - auth/isolasi produksi lewat broker MQTT, TLS, username/password, dan ACL topic
 - endpoint HTTP legacy tetap tersedia jika nanti dibutuhkan lagi
 - command operasional register/list/rotate secret
@@ -69,6 +73,14 @@ RFID_MQTT_DEFAULT_TENANT_SLUG=
 RFID_MQTT_DEVICE_TENANT_MAP={}
 RFID_MQTT_MODE_SYNC_INTERVAL=20
 RFID_MQTT_RECONNECT_DELAY=5
+RFID_MQTT_AUTO_RECONNECT_MAX_ATTEMPTS=5
+RFID_MQTT_AUTO_RECONNECT_DELAY_MS=500
+RFID_MQTT_CONFIG_RELOAD_INTERVAL=60
+RFID_LIVE_EVENTS_REDIS_ENABLED=true
+RFID_LIVE_EVENTS_STREAM_MAX_LENGTH=1000
+RFID_LIVE_EVENTS_STREAM_TTL_SECONDS=86400
+RFID_LIVE_EVENTS_READ_BLOCK_MS=1000
+RFID_LIVE_EVENTS_DB_CATCHUP_SECONDS=5
 ```
 
 Catatan:
@@ -183,7 +195,7 @@ Format yang direkomendasikan:
   "card_uid": "A1B2C3D4",
   "mode": "auto",
   "transport": "mqtt",
-  "firmware_version": "2.0.0-mqtt-only",
+  "firmware_version": "2.1.0-mqtt-durable",
   "scanned_at": "2026-04-21T08:15:30+07:00",
   "tenant_slug": "sman1jombang"
 }
@@ -303,18 +315,21 @@ Endpoint HTTP masih tersedia untuk kompatibilitas alat lama dan debugging:
 Template Arduino MQTT-only tidak memakai endpoint ini. Untuk device baru, jalur yang dipakai cukup topic `scan`, `response`, dan `mode`.
 
 ## 9) Strategi Retry di Device MQTT-only
-Supaya firmware tetap ringan:
+Supaya event tidak hilang ketika WiFi, broker, atau backend sementara terganggu:
 
 1. Saat kartu di-scan, device membuat `event_id` unik.
 2. Device publish payload ke topic scan.
 3. Device menunggu response dengan `event_id` yang sama.
-4. Jika ACK belum datang, device retry publish beberapa kali dengan `event_id` yang sama.
-5. Jika tetap gagal, event dibatalkan dan operator bisa scan ulang.
+4. Jika ACK belum datang, device retry publish dengan `event_id` yang sama dan backoff sampai 60 detik.
+5. Event belum dihapus setelah batas retry; event tetap berada di LittleFS dan dipulihkan setelah restart/padam listrik.
+6. Setelah ACK sukses, duplicate, atau respons final non-5xx diterima, event dihapus dan antrean berikutnya diproses.
 
 Aturan aman:
 - jangan generate `event_id` baru saat retry
 - filter response berdasarkan `event_id`
-- satu event tertunda di RAM sudah cukup untuk reader gerbang/kelas yang ringan
+- jangan gunakan retained message untuk topic scan
+- kapasitas template adalah 16 event per alat; saat penuh, alat menolak scan baru dengan indikator error agar kehilangan data terlihat
+- `PubSubClient` menerbitkan scan pada QoS 0, sehingga jaminan at-least-once diperoleh dari LittleFS + ACK aplikasi + idempotency backend; subscribe response/mode tetap QoS 1
 
 ## 10) Enroll vs Absensi Normal
 ### Mode `enroll`
@@ -373,7 +388,7 @@ Sketch ESP8266/Arduino yang siap dipakai sebagai baseline sudah disediakan. Pane
 - koneksi TLS ke broker
 - topik publish dan subscribe
 - format payload di atas
-- retry MQTT ringan untuk 1 event tertunda
+- antrean LittleFS sampai 16 event dengan ACK/retry idempotent
 - baca mode dari topic retained
 
 File sketch MQTT-only yang siap dipakai ada di:

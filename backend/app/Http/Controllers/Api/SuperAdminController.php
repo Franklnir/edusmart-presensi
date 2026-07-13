@@ -4728,6 +4728,68 @@ class SuperAdminController extends ApiController
                     ['count' => $rfidErrorCount, 'window' => '15m', 'source' => 'rfid_device_events']
                 );
             }
+
+            $rfidLatencyQuery = DB::table('rfid_device_events')
+                ->whereNotNull('processed_at')
+                ->where('created_at', '>=', $now->copy()->subMinutes(15))
+                ->orderByDesc('id')
+                ->limit(1000);
+            if ($tenantId && $this->tableHasColumn('rfid_device_events', 'tenant_id')) {
+                $rfidLatencyQuery->where('tenant_id', $tenantId);
+            }
+            $rfidLatencies = $rfidLatencyQuery
+                ->get(['created_at', 'processed_at'])
+                ->map(function ($row) {
+                    try {
+                        return max(0, (int) round(
+                            Carbon::parse((string) $row->created_at)
+                                ->diffInMilliseconds(Carbon::parse((string) $row->processed_at))
+                        ));
+                    } catch (\Throwable $e) {
+                        return null;
+                    }
+                })
+                ->filter(fn ($value) => $value !== null)
+                ->sort()
+                ->values();
+            if ($rfidLatencies->count() >= 5) {
+                $p95Index = max(0, (int) ceil($rfidLatencies->count() * 0.95) - 1);
+                $p95Milliseconds = (int) $rfidLatencies->get($p95Index, 0);
+                if ($p95Milliseconds > 500) {
+                    $this->appendAuditAnomaly(
+                        $anomalies,
+                        'medium',
+                        'RFID_PROCESSING_LATENCY_HIGH',
+                        "Latency pemrosesan RFID p95 mencapai {$p95Milliseconds} ms dalam 15 menit.",
+                        'Periksa beban PostgreSQL/PgBouncer, status bridge MQTT, Redis, dan query absensi sebelum menambah kapasitas perangkat.',
+                        [
+                            'p95_ms' => $p95Milliseconds,
+                            'sample' => $rfidLatencies->count(),
+                            'target_ms' => 500,
+                            'window' => '15m',
+                            'source' => 'rfid_device_events',
+                        ]
+                    );
+                }
+            }
+
+            $stuckRfidQuery = DB::table('rfid_device_events')
+                ->whereNull('processed_at')
+                ->where('created_at', '<=', $now->copy()->subMinute());
+            if ($tenantId && $this->tableHasColumn('rfid_device_events', 'tenant_id')) {
+                $stuckRfidQuery->where('tenant_id', $tenantId);
+            }
+            $stuckRfidCount = (int) $stuckRfidQuery->count();
+            if ($stuckRfidCount > 0) {
+                $this->appendAuditAnomaly(
+                    $anomalies,
+                    'high',
+                    'RFID_EVENT_STUCK',
+                    "Ada {$stuckRfidCount} event RFID belum selesai diproses lebih dari satu menit.",
+                    'Periksa bridge dan database, lalu sinkronkan ulang event perangkat memakai event_id yang sama agar tidak membuat absensi ganda.',
+                    ['count' => $stuckRfidCount, 'threshold' => '1m', 'source' => 'rfid_device_events']
+                );
+            }
         }
 
         if ($this->hasTable('rfid_scans')) {
@@ -5021,7 +5083,7 @@ class SuperAdminController extends ApiController
             'device_id' => $deviceId,
             'device_name' => (string) ($template['device_name'] ?? ''),
             'device_secret' => (string) ($template['secret'] ?? ''),
-            'firmware_version' => '2.0.0-mqtt-only',
+            'firmware_version' => '2.1.0-mqtt-durable',
             'api_base_url' => rtrim((string) config('app.url', ''), '/'),
             'mqtt' => [
                 'host' => $mqttHost,
@@ -5049,6 +5111,7 @@ class SuperAdminController extends ApiController
             'notes' => [
                 'Template MQTT-only: setiap alat publish scan dan menerima response/mode lewat topic miliknya sendiri.',
                 'Backend tetap memutuskan absensi masuk/pulang, jadwal aktif, dan enroll UID per tenant.',
+                'Event disimpan di antrean LittleFS dan dikirim ulang dengan event_id yang sama sampai backend memberi ACK.',
                 'Tambahkan satu device_id untuk setiap ESP32/ESP8266 agar topic dan riwayat alat tidak saling konflik.',
             ],
         ];

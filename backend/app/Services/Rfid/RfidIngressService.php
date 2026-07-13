@@ -11,7 +11,8 @@ use Illuminate\Support\Str;
 class RfidIngressService
 {
     public function __construct(
-        private readonly RfidScanService $rfidScanService
+        private readonly RfidScanService $rfidScanService,
+        private readonly RfidLiveEventStreamService $rfidLiveEventStream,
     ) {}
 
     public function processScanByTenantSlug(
@@ -88,6 +89,7 @@ class RfidIngressService
         $result['data']['device_id'] = $result['data']['device_id'] ?? $deviceId;
 
         $this->finishEventRecord($eventRowId, $result);
+        $this->rfidLiveEventStream->publishPersistedEvent($eventRowId);
 
         if ($eventId !== '' && (int) ($result['status'] ?? 500) < 500) {
             $eventCacheKey = $this->eventCacheKey($tenantId, $deviceId, $eventId);
