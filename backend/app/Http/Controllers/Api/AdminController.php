@@ -940,7 +940,7 @@ class AdminController extends ApiController
             'source' => 'nullable|string|max:40',
         ]);
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $role = strtolower(trim((string) ($payload['role'] ?? '')));
@@ -953,10 +953,10 @@ class AdminController extends ApiController
 
         if ($email === '') {
             if ($role !== 'siswa') {
-                return response()->json(['error' => 'Email wajib diisi untuk akun guru atau admin'], 422);
+                return response()->json(['message' => 'Email wajib diisi untuk akun guru atau admin'], 422);
             }
             if ($nis === '') {
-                return response()->json(['error' => 'NIS wajib diisi jika email siswa kosong'], 422);
+                return response()->json(['message' => 'NIS wajib diisi jika email siswa kosong'], 422);
             }
             $email = $this->buildImportPlaceholderEmail($nis, $tenantId);
         } elseif (Str::endsWith($email, '@import.local')) {
@@ -990,7 +990,7 @@ class AdminController extends ApiController
             $existingRole = strtolower(trim((string) ($existingProfile->role ?? '')));
             $existingRole = $existingRole === 'teacher' ? 'guru' : $existingRole;
             if ($existingRole !== $role) {
-                return response()->json(['error' => 'Data ditemukan, tapi role akun berbeda'], 409);
+                return response()->json(['message' => 'Data ditemukan, tapi role akun berbeda'], 409);
             }
 
             if (
@@ -1000,7 +1000,7 @@ class AdminController extends ApiController
                     ->where('id', '!=', $existingProfile->id)
                     ->exists()
             ) {
-                return response()->json(['error' => 'Email sudah terdaftar di sekolah ini'], 409);
+                return response()->json(['message' => 'Email sudah terdaftar di sekolah ini'], 409);
             }
 
             if ($nis !== '' && Profile::query()
@@ -1009,7 +1009,7 @@ class AdminController extends ApiController
                 ->where('id', '!=', $existingProfile->id)
                 ->exists()
             ) {
-                return response()->json(['error' => 'NIS/NIP sudah terdaftar di sekolah ini'], 409);
+                return response()->json(['message' => 'NIS/NIP sudah terdaftar di sekolah ini'], 409);
             }
         } else {
             $existingUser = Profile::query()
@@ -1017,7 +1017,7 @@ class AdminController extends ApiController
                 ->whereRaw('lower(email) = ?', [$email])
                 ->first();
             if ($existingUser) {
-                return response()->json(['error' => 'Email sudah terdaftar di sekolah ini'], 409);
+                return response()->json(['message' => 'Email sudah terdaftar di sekolah ini'], 409);
             }
 
             if ($nis !== '') {
@@ -1026,12 +1026,12 @@ class AdminController extends ApiController
                     ->whereRaw('lower(nis) = ?', [strtolower($nis)])
                     ->first();
                 if ($existingNis) {
-                    return response()->json(['error' => 'NIS/NIP sudah terdaftar di sekolah ini'], 409);
+                    return response()->json(['message' => 'NIS/NIP sudah terdaftar di sekolah ini'], 409);
                 }
             }
 
             if (trim((string) ($payload['password'] ?? '')) === '') {
-                return response()->json(['error' => 'Password wajib diisi'], 422);
+                return response()->json(['message' => 'Password wajib diisi'], 422);
             }
         }
 
@@ -1544,12 +1544,12 @@ class AdminController extends ApiController
 
         $rows = $request->input('rows', []);
         if (! is_array($rows) || ! array_is_list($rows)) {
-            return response()->json(['error' => 'rows harus berupa array'], 422);
+            return response()->json(['message' => 'rows harus berupa array'], 422);
         }
 
         $maxRows = max(100, min(5000, (int) env('STUDENT_IMPORT_MAX_ROWS', 2000)));
         if (count($rows) > $maxRows) {
-            return response()->json(['error' => "Import maksimal {$maxRows} baris per batch"], 422);
+            return response()->json(['message' => "Import maksimal {$maxRows} baris per batch"], 422);
         }
 
         $source = strtolower(trim((string) $request->input('source', 'file')));
@@ -1929,7 +1929,7 @@ class AdminController extends ApiController
             $error = $preview['error'] ?? [];
 
             return response()->json([
-                'error' => $error['message'] ?? 'Periode akademik belum valid.',
+                'message' => $error['message'] ?? 'Periode akademik belum valid.',
                 'code' => $error['code'] ?? 'academic_period_invalid',
             ], (int) ($error['status'] ?? 422));
         }
@@ -2107,7 +2107,7 @@ class AdminController extends ApiController
         $lifecycleValidation = $this->academicPeriodLifecycle->validateActivation($tenantId, $settingsPayload);
         if ($lifecycleValidation !== null) {
             return response()->json([
-                'error' => $lifecycleValidation['message'],
+                'message' => $lifecycleValidation['message'],
                 'code' => $lifecycleValidation['code'],
             ], (int) $lifecycleValidation['status']);
         }
@@ -2123,7 +2123,7 @@ class AdminController extends ApiController
             && $impactConfirmed === false
         ) {
             return response()->json([
-                'error' => 'Pratinjau dampak wajib dikonfirmasi sebelum tanggal periode diubah.',
+                'message' => 'Pratinjau dampak wajib dikonfirmasi sebelum tanggal periode diubah.',
                 'code' => 'academic_period_impact_confirmation_required',
                 'data' => $impactPreview,
             ], 409);
@@ -2344,7 +2344,7 @@ class AdminController extends ApiController
             $error = json_decode($e->getMessage(), true);
             if (is_array($error)) {
                 return response()->json([
-                    'error' => $error['message'] ?? 'Periode akademik ditolak.',
+                    'message' => $error['message'] ?? 'Periode akademik ditolak.',
                     'code' => $error['code'] ?? 'academic_period_invalid',
                 ], (int) ($error['status'] ?? 409));
             }
@@ -2473,7 +2473,7 @@ class AdminController extends ApiController
         array $targetPeriod
     ) {
         return response()->json([
-            'error' => $message,
+            'message' => $message,
             'code' => 'academic_period_calendar_confirmation_required',
             'data' => [
                 'server_calendar' => [
@@ -2992,7 +2992,7 @@ class AdminController extends ApiController
             'role' => ['nullable', 'string', 'in:siswa,guru,teacher'],
         ]);
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $profile = DB::table('profiles')
@@ -3144,7 +3144,7 @@ class AdminController extends ApiController
             'nama' => ['required', 'string', 'max:120'],
         ]);
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $newName = preg_replace('/\s+/', ' ', trim((string) $request->input('nama', ''))) ?? '';
@@ -3280,7 +3280,7 @@ class AdminController extends ApiController
             'tanggal_lahir' => ['nullable', 'date'],
         ]);
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $profile = DB::table('profiles')
@@ -3453,7 +3453,7 @@ class AdminController extends ApiController
             'alamat' => ['sometimes', 'nullable', 'string', 'max:1000'],
         ]);
         if ($validator->fails()) {
-            return response()->json(['error' => $validator->errors()->first()], 422);
+            return response()->json(['message' => $validator->errors()->first()], 422);
         }
 
         $allowedKeys = ['nama', 'nis', 'jk', 'tanggal_lahir', 'agama', 'alamat'];
@@ -6482,24 +6482,24 @@ class AdminController extends ApiController
     {
         $nama = preg_replace('/\s+/', ' ', trim((string) ($row['nama'] ?? ''))) ?? '';
         if ($nama === '') {
-            return ['error' => 'Nama siswa wajib diisi'];
+            return ['message' => 'Nama siswa wajib diisi'];
         }
         if (mb_strlen($nama) > 120) {
-            return ['error' => 'Nama siswa terlalu panjang'];
+            return ['message' => 'Nama siswa terlalu panjang'];
         }
 
         $nis = $this->normalizeIdentifierCode($row['nis'] ?? '');
         $email = strtolower(trim((string) ($row['email'] ?? '')));
         if ($email !== '' && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            return ['error' => 'Format email tidak valid'];
+            return ['message' => 'Format email tidak valid'];
         }
         if ($nis === '' && $email === '') {
-            return ['error' => 'NIS atau email wajib diisi'];
+            return ['message' => 'NIS atau email wajib diisi'];
         }
 
         $classResult = $this->resolveStudentImportClass($tenantId, $row['kelas'] ?? $row['kelas_id'] ?? null);
         if (($classResult['id'] ?? '') === '') {
-            return ['error' => 'Kelas tidak ditemukan'];
+            return ['message' => 'Kelas tidak ditemukan'];
         }
 
         $status = $this->normalizeStudentImportStatus($row['status'] ?? null);

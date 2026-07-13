@@ -25,7 +25,7 @@ class BlockSuspiciousRequests
         $this->recordBlockedRequest($request, $reason);
 
         return response()->json([
-            'error' => 'Permintaan diblokir oleh proteksi keamanan.',
+            'message' => 'Permintaan diblokir oleh proteksi keamanan.',
         ], 403);
     }
 

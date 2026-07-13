@@ -46,7 +46,7 @@ const resolveRetryAfterSeconds = (result, fallbackMessage = '') => {
   const direct = Number(result?.retryAfter ?? result?.retry_after ?? result?.retry_after_seconds)
   if (Number.isFinite(direct) && direct > 0) return Math.ceil(direct)
 
-  const match = String(result?.error || fallbackMessage || '').match(/(?:dalam|tunggu)\s+(\d+)\s+detik/i)
+  const match = String(result?.error || (fallbackMessage || '')).match(/(?:dalam|tunggu)\s+(\d+)\s+detik/i)
   if (match) {
     const parsed = Number(match[1])
     if (Number.isFinite(parsed) && parsed > 0) return Math.ceil(parsed)

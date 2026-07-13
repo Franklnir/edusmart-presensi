@@ -282,7 +282,7 @@ export default function ASiswa() {
   }, [isGuru, kelasOptions])
 
   const kelasFilterValueSet = useMemo(
-    () => new Set(kelasFilterOptions.map(opt => String(opt.value ?? ''))),
+    () => new Set(kelasFilterOptions.map(opt => String(opt.value || ''))),
     [kelasFilterOptions]
   )
 
@@ -461,7 +461,7 @@ export default function ASiswa() {
         'Tanggal Lahir': item.tanggal_lahir || '',
         Agama: item.agama || '',
         Alamat: item.alamat || '',
-        'HP Siswa': item.no_hp_siswa || item.telp || '',
+        'HP Siswa': item.no_hp_siswa || (item.telp || ''),
         'HP Wali': item.no_hp_wali || '',
         Email: item.email || '',
         Status: item.status || 'active',

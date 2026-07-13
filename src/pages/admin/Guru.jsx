@@ -554,7 +554,7 @@ export default function AGuru() {
   }, [])
 
   const getImportExampleValues = (row) => (
-    GURU_IMPORT_EXAMPLE_COLUMNS.map(({ key }) => row[key] ?? '')
+    GURU_IMPORT_EXAMPLE_COLUMNS.map(({ key }) => row[key] || '')
   )
 
   const importExampleCopyText = useMemo(() => {
@@ -568,7 +568,7 @@ export default function AGuru() {
     return importExampleRows.map((row) => {
       const item = {}
       GURU_IMPORT_EXAMPLE_COLUMNS.forEach(({ key, label }) => {
-        item[label] = row[key] ?? ''
+        item[label] = row[key] || ''
       })
       return item
     })
@@ -921,7 +921,7 @@ export default function AGuru() {
         return
       }
 
-      const nipKey = normalized.nis.toLowerCase()
+      const nipKey = String(normalized.nis || '').toLowerCase()
       if (seenNip.has(nipKey)) {
         errors.push({
           row: normalized.__rowNum,
@@ -930,7 +930,7 @@ export default function AGuru() {
         return
       }
 
-      const emailKey = normalized.email.toLowerCase()
+      const emailKey = String(normalized.email || '').toLowerCase()
       if (seenEmail.has(emailKey)) {
         errors.push({
           row: normalized.__rowNum,
@@ -1501,7 +1501,7 @@ export default function AGuru() {
         Nama: item.nama || '',
         Email: item.email || '',
         Telp: item.telp || '',
-        Jabatan: item.jabatan || item.jabatanUtama || '',
+        Jabatan: item.jabatan || (item.jabatanUtama || ''),
         Mapel: (item.mapelList || []).join(', '),
         Kelas: (item.kelasList || []).join(', '),
         Status: item.status || 'active',
@@ -2617,7 +2617,7 @@ export default function AGuru() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {guru.map((g, index) => {
-                    const foto = g.photo_path || g.photo_url || g.foto_url || g.foto || ''
+                    const foto = g.photo_path || g.photo_url || g.foto_url || (g.foto || '')
                     const mapelPreview = listPreview(g.mapelList)
                     const kelasPreview = listPreview(g.kelasList)
                     const sourceMeta = getProfileSourceMeta(g.created_via)

@@ -400,7 +400,7 @@ class RfidApiTest extends TestCase
         ]);
 
         $response->assertStatus(403)
-            ->assertJsonPath('error', 'Tenant RFID tidak sesuai dengan sesi login');
+            ->assertJsonPath('message', 'Tenant RFID tidak sesuai dengan sesi login');
 
         $this->assertDatabaseHas('settings', [
             'tenant_id' => $otherTenant->id,

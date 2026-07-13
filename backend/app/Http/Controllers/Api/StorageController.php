@@ -194,7 +194,7 @@ class StorageController extends ApiController
                 'object_storage'
             );
             if ($quotaError) {
-                return response()->json(['error' => $quotaError], 422);
+                return response()->json(['message' => $quotaError], 422);
             }
 
             try {
@@ -203,7 +203,7 @@ class StorageController extends ApiController
                 $objectStorageRelayError = $e->getMessage();
 
                 return response()->json([
-                    'error' => 'Upload Neva Cloud S3 gagal: '.$this->shortError($objectStorageRelayError).'. File belum disimpan, silakan coba lagi.',
+                    'message' => 'Upload Neva Cloud S3 gagal: '.$this->shortError($objectStorageRelayError).'. File belum disimpan, silakan coba lagi.',
                     'code' => 'OBJECT_STORAGE_RELAY_FAILED',
                     'retryable' => true,
                 ], 422);
@@ -212,7 +212,7 @@ class StorageController extends ApiController
 
         if ($this->requiresObjectStorage($bucket)) {
             return response()->json([
-                'error' => 'Bucket '.$bucket.' wajib memakai Neva Cloud S3. File belum disimpan karena object storage belum siap untuk bucket ini.',
+                'message' => 'Bucket '.$bucket.' wajib memakai Neva Cloud S3. File belum disimpan karena object storage belum siap untuk bucket ini.',
                 'code' => 'OBJECT_STORAGE_REQUIRED',
                 'retryable' => true,
             ], 422);
@@ -248,14 +248,14 @@ class StorageController extends ApiController
             'local'
         );
         if ($quotaError) {
-            return response()->json(['error' => $quotaError], 422);
+            return response()->json(['message' => $quotaError], 422);
         }
 
         $storage = Storage::disk('local');
         $fullPath = $this->buildStoragePath($bucket, $path);
 
         if (! $upsert && $storage->exists($fullPath)) {
-            return response()->json(['error' => 'File sudah ada'], 409);
+            return response()->json(['message' => 'File sudah ada'], 409);
         }
 
         $stream = fopen($file->getRealPath(), 'rb');
@@ -446,7 +446,7 @@ class StorageController extends ApiController
             'object_storage'
         );
         if ($quotaError) {
-            return response()->json(['error' => $quotaError], 422);
+            return response()->json(['message' => $quotaError], 422);
         }
 
         $objectKey = $this->buildStoragePath($bucket, $path);
@@ -459,7 +459,7 @@ class StorageController extends ApiController
             );
         } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'Gagal membuat signed upload URL: '.$e->getMessage(),
+                'message' => 'Gagal membuat signed upload URL: '.$e->getMessage(),
             ], 422);
         }
 
@@ -522,7 +522,7 @@ class StorageController extends ApiController
             'object_storage'
         );
         if ($quotaError) {
-            return response()->json(['error' => $quotaError], 422);
+            return response()->json(['message' => $quotaError], 422);
         }
 
         $objectKey = trim((string) $request->input('object_key'));
@@ -534,7 +534,7 @@ class StorageController extends ApiController
             $verification = $this->objectStorageSigner->verifyUploadedObject($objectKey, $sizeBytes, $bucket);
         } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'Gagal memverifikasi file object storage: '.$e->getMessage(),
+                'message' => 'Gagal memverifikasi file object storage: '.$e->getMessage(),
                 'code' => 'OBJECT_STORAGE_VERIFY_FAILED',
                 'retryable' => true,
             ], 422);
@@ -542,7 +542,7 @@ class StorageController extends ApiController
 
         if (($verification['verified'] ?? false) && ! ($verification['exists'] ?? false)) {
             return response()->json([
-                'error' => 'File object storage belum ditemukan. Tunggu upload selesai lalu coba lagi.',
+                'message' => 'File object storage belum ditemukan. Tunggu upload selesai lalu coba lagi.',
                 'code' => 'OBJECT_STORAGE_NOT_READY',
                 'retryable' => true,
                 'attempts' => $verification['attempts'] ?? null,
@@ -552,7 +552,7 @@ class StorageController extends ApiController
 
         if (($verification['verified'] ?? false) && ! ($verification['size_matches'] ?? true)) {
             return response()->json([
-                'error' => 'Ukuran file object storage tidak sesuai metadata upload.',
+                'message' => 'Ukuran file object storage tidak sesuai metadata upload.',
                 'code' => 'OBJECT_STORAGE_SIZE_MISMATCH',
                 'retryable' => false,
                 'attempts' => $verification['attempts'] ?? null,
@@ -618,7 +618,7 @@ class StorageController extends ApiController
 
         if ($this->requiresObjectStorage($bucket)) {
             return response()->json([
-                'error' => 'Bucket '.$bucket.' wajib memakai Neva Cloud S3. Periksa konfigurasi object storage sebelum upload.',
+                'message' => 'Bucket '.$bucket.' wajib memakai Neva Cloud S3. Periksa konfigurasi object storage sebelum upload.',
             ], 422);
         }
 
@@ -670,7 +670,7 @@ class StorageController extends ApiController
                     );
                 } catch (\Throwable $e) {
                     return response()->json([
-                        'error' => 'Gagal menghapus file Google Drive: '.$e->getMessage(),
+                        'message' => 'Gagal menghapus file Google Drive: '.$e->getMessage(),
                     ], 422);
                 }
 
@@ -694,11 +694,11 @@ class StorageController extends ApiController
             if ($this->objectStorageEnabledForBucket($bucket)) {
                 try {
                     if (! $this->objectStorageSigner->deleteObject($fullPath, $bucket)) {
-                        return response()->json(['error' => 'Gagal menghapus file dari object storage'], 422);
+                        return response()->json(['message' => 'Gagal menghapus file dari object storage'], 422);
                     }
                 } catch (\Throwable $e) {
                     return response()->json([
-                        'error' => 'Gagal menghapus file object storage: '.$e->getMessage(),
+                        'message' => 'Gagal menghapus file object storage: '.$e->getMessage(),
                     ], 422);
                 }
             }
@@ -753,7 +753,7 @@ class StorageController extends ApiController
                 ]);
             } catch (\Throwable $e) {
                 return response()->json([
-                    'error' => 'Gagal membuat URL file object storage: '.$e->getMessage(),
+                    'message' => 'Gagal membuat URL file object storage: '.$e->getMessage(),
                 ], 422);
             }
         }
@@ -829,7 +829,7 @@ class StorageController extends ApiController
                     return redirect()->away($signed['url']);
                 } catch (\Throwable $e) {
                     return response()->json([
-                        'error' => 'Gagal membaca file object storage: '.$e->getMessage(),
+                        'message' => 'Gagal membaca file object storage: '.$e->getMessage(),
                     ], 422);
                 }
             }
@@ -881,7 +881,7 @@ class StorageController extends ApiController
                 ->get($signed['url']);
         } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'Gagal membaca file object storage: '.$e->getMessage(),
+                'message' => 'Gagal membaca file object storage: '.$e->getMessage(),
             ], 422);
         }
 
@@ -891,7 +891,7 @@ class StorageController extends ApiController
 
         if (! $objectResponse->successful()) {
             return response()->json([
-                'error' => 'Gagal membaca file object storage (HTTP '.$objectResponse->status().').',
+                'message' => 'Gagal membaca file object storage (HTTP '.$objectResponse->status().').',
             ], 422);
         }
 
@@ -958,7 +958,7 @@ class StorageController extends ApiController
             $file = $this->googleDriveService->downloadStoredFile($tenantId, $bucket, $url);
         } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'Gagal membaca file Google Drive: '.$e->getMessage(),
+                'message' => 'Gagal membaca file Google Drive: '.$e->getMessage(),
             ], 422);
         }
 
@@ -1410,7 +1410,7 @@ class StorageController extends ApiController
             : ($bucket === 'quiz-media' ? 'gambar quiz' : 'foto profil/logo');
 
         return response()->json([
-            'error' => sprintf(
+            'message' => sprintf(
                 'Ukuran %s maksimal %s. File saat ini %s.',
                 $bucketLabel,
                 $this->formatBytes($maxBytes),
@@ -1444,7 +1444,7 @@ class StorageController extends ApiController
             return null;
         }
         if (! $file) {
-            return response()->json(['error' => 'File gambar wajib diisi'], 422);
+            return response()->json(['message' => 'File gambar wajib diisi'], 422);
         }
 
         $ext = strtolower((string) $file->getClientOriginalExtension());
@@ -1453,11 +1453,11 @@ class StorageController extends ApiController
         $allowedMime = ['image/jpeg', 'image/png'];
 
         if (! in_array($ext, $allowedExt, true)) {
-            return response()->json(['error' => 'Format file quiz hanya JPG atau PNG'], 422);
+            return response()->json(['message' => 'Format file quiz hanya JPG atau PNG'], 422);
         }
 
         if ($mime !== '' && ! in_array($mime, $allowedMime, true)) {
-            return response()->json(['error' => 'File quiz harus berupa gambar JPG atau PNG'], 422);
+            return response()->json(['message' => 'File quiz harus berupa gambar JPG atau PNG'], 422);
         }
 
         return null;
@@ -1499,7 +1499,7 @@ class StorageController extends ApiController
         }
 
         return response()->json([
-            'error' => $messagePrefix.sprintf(
+            'message' => $messagePrefix.sprintf(
                 'Ukuran %s maksimal %s. File saat ini %s.',
                 $label,
                 $this->formatBytes($maxBytes),
@@ -1512,14 +1512,14 @@ class StorageController extends ApiController
     {
         $policy = self::UPLOAD_POLICY[$bucket] ?? null;
         if (! is_array($policy)) {
-            return response()->json(['error' => 'Kebijakan upload untuk bucket ini belum tersedia'], 422);
+            return response()->json(['message' => 'Kebijakan upload untuk bucket ini belum tersedia'], 422);
         }
 
         $maxBytes = (int) ($policy['max_bytes'] ?? 0);
         $fileBytes = (int) ($file->getSize() ?: 0);
         if ($maxBytes > 0 && $fileBytes > $maxBytes) {
             return response()->json([
-                'error' => sprintf(
+                'message' => sprintf(
                     'Ukuran file melebihi batas (%s). Maksimal %s.',
                     $this->formatBytes($fileBytes),
                     $this->formatBytes($maxBytes)
@@ -1529,17 +1529,17 @@ class StorageController extends ApiController
 
         $extension = $this->normalizeExtension($file);
         if ($extension === '' || in_array($extension, self::DANGEROUS_EXTENSIONS, true)) {
-            return response()->json(['error' => 'Ekstensi file tidak diizinkan'], 422);
+            return response()->json(['message' => 'Ekstensi file tidak diizinkan'], 422);
         }
 
         $allowedExtensions = array_map('strtolower', (array) ($policy['extensions'] ?? []));
         if (! empty($allowedExtensions) && ! in_array($extension, $allowedExtensions, true)) {
-            return response()->json(['error' => 'Ekstensi file tidak sesuai kebijakan bucket'], 422);
+            return response()->json(['message' => 'Ekstensi file tidak sesuai kebijakan bucket'], 422);
         }
 
         $mime = $this->normalizeMime($file);
         if ($mime === '') {
-            return response()->json(['error' => 'MIME type file tidak valid'], 422);
+            return response()->json(['message' => 'MIME type file tidak valid'], 422);
         }
         if ($mime === 'application/octet-stream') {
             $mimeFromExtension = $this->mimeForExtension($extension);
@@ -1550,7 +1550,7 @@ class StorageController extends ApiController
 
         $allowedMimes = array_map('strtolower', (array) ($policy['mimes'] ?? []));
         if (! empty($allowedMimes) && ! in_array($mime, $allowedMimes, true)) {
-            return response()->json(['error' => 'Tipe file tidak diizinkan'], 422);
+            return response()->json(['message' => 'Tipe file tidak diizinkan'], 422);
         }
 
         return null;
@@ -1564,13 +1564,13 @@ class StorageController extends ApiController
     ): ?JsonResponse {
         $policy = self::UPLOAD_POLICY[$bucket] ?? null;
         if (! is_array($policy)) {
-            return response()->json(['error' => 'Kebijakan upload untuk bucket ini belum tersedia'], 422);
+            return response()->json(['message' => 'Kebijakan upload untuk bucket ini belum tersedia'], 422);
         }
 
         $maxBytes = (int) ($policy['max_bytes'] ?? 0);
         if ($maxBytes > 0 && $fileBytes > $maxBytes) {
             return response()->json([
-                'error' => sprintf(
+                'message' => sprintf(
                     'Ukuran file melebihi batas (%s). Maksimal %s.',
                     $this->formatBytes($fileBytes),
                     $this->formatBytes($maxBytes)
@@ -1580,12 +1580,12 @@ class StorageController extends ApiController
 
         $extension = $this->extensionFromFileName($fileName);
         if ($extension === '' || in_array($extension, self::DANGEROUS_EXTENSIONS, true)) {
-            return response()->json(['error' => 'Ekstensi file tidak diizinkan'], 422);
+            return response()->json(['message' => 'Ekstensi file tidak diizinkan'], 422);
         }
 
         $allowedExtensions = array_map('strtolower', (array) ($policy['extensions'] ?? []));
         if (! empty($allowedExtensions) && ! in_array($extension, $allowedExtensions, true)) {
-            return response()->json(['error' => 'Ekstensi file tidak sesuai kebijakan bucket'], 422);
+            return response()->json(['message' => 'Ekstensi file tidak sesuai kebijakan bucket'], 422);
         }
 
         $mime = strtolower(trim($mime));
@@ -1593,7 +1593,7 @@ class StorageController extends ApiController
             $mime = $this->mimeForExtension($extension);
         }
         if ($mime === '') {
-            return response()->json(['error' => 'MIME type file tidak valid'], 422);
+            return response()->json(['message' => 'MIME type file tidak valid'], 422);
         }
         if ($mime === 'application/octet-stream') {
             $mimeFromExtension = $this->mimeForExtension($extension);
@@ -1604,7 +1604,7 @@ class StorageController extends ApiController
 
         $allowedMimes = array_map('strtolower', (array) ($policy['mimes'] ?? []));
         if (! empty($allowedMimes) && ! in_array($mime, $allowedMimes, true)) {
-            return response()->json(['error' => 'Tipe file tidak diizinkan'], 422);
+            return response()->json(['message' => 'Tipe file tidak diizinkan'], 422);
         }
 
         return null;
@@ -1636,7 +1636,7 @@ class StorageController extends ApiController
         }
 
         return response()->json([
-            'error' => sprintf(
+            'message' => sprintf(
                 'Ukuran %s maksimal %s. File saat ini %s.',
                 $label,
                 $this->formatBytes($maxBytes),
@@ -1664,7 +1664,7 @@ class StorageController extends ApiController
         }
 
         return response()->json([
-            'error' => sprintf(
+            'message' => sprintf(
                 'Ukuran gambar tugas maksimal %s. File saat ini %s.',
                 $this->formatBytes($maxBytes),
                 $this->formatBytes($fileBytes)

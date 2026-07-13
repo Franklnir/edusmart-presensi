@@ -208,7 +208,7 @@ class DbSecurityTest extends TestCase
         ]);
 
         $badFilter->assertStatus(422);
-        $badFilter->assertJsonPath('error', 'Kolom filter tidak diizinkan');
+        $badFilter->assertJsonPath('message', 'Kolom filter tidak diizinkan');
 
         $badOrder = $this->actingAs($user)->postJson('/api/db', [
             'table' => 'profiles',
@@ -219,7 +219,7 @@ class DbSecurityTest extends TestCase
         ]);
 
         $badOrder->assertStatus(422);
-        $badOrder->assertJsonPath('error', 'Kolom order tidak diizinkan');
+        $badOrder->assertJsonPath('message', 'Kolom order tidak diizinkan');
     }
 
     public function test_db_batch_runs_selects_with_existing_policy(): void
@@ -431,7 +431,7 @@ class DbSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonPath('error', 'Tugas tidak diizinkan');
+        $response->assertJsonPath('message', 'Tugas tidak diizinkan');
     }
 
     public function test_siswa_can_insert_tugas_jawaban_for_own_class(): void
@@ -763,7 +763,7 @@ class DbSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonPath('error', 'Tugas belum dimulai');
+        $response->assertJsonPath('message', 'Tugas belum dimulai');
     }
 
     public function test_siswa_cannot_insert_tugas_jawaban_after_deadline(): void
@@ -792,7 +792,7 @@ class DbSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonPath('error', 'Deadline tugas sudah lewat');
+        $response->assertJsonPath('message', 'Deadline tugas sudah lewat');
     }
 
     public function test_siswa_cannot_update_or_delete_graded_tugas_jawaban(): void
@@ -832,7 +832,7 @@ class DbSecurityTest extends TestCase
         ]);
 
         $update->assertStatus(422);
-        $update->assertJsonPath('error', 'Jawaban yang sudah dinilai tidak boleh diubah');
+        $update->assertJsonPath('message', 'Jawaban yang sudah dinilai tidak boleh diubah');
 
         $delete = $this->actingAs($user)->postJson('/api/db', [
             'table' => 'tugas_jawaban',
@@ -843,7 +843,7 @@ class DbSecurityTest extends TestCase
         ]);
 
         $delete->assertStatus(422);
-        $delete->assertJsonPath('error', 'Jawaban yang sudah dinilai tidak boleh diubah');
+        $delete->assertJsonPath('message', 'Jawaban yang sudah dinilai tidak boleh diubah');
     }
 
     public function test_siswa_can_select_absensi_settings_for_own_class(): void
@@ -925,7 +925,7 @@ class DbSecurityTest extends TestCase
             ]);
 
             $response->assertForbidden();
-            $response->assertJsonPath('error', 'Absen mandiri belum diizinkan guru.');
+            $response->assertJsonPath('message', 'Absen mandiri belum diizinkan guru.');
 
             $this->assertDatabaseMissing('absensi', [
                 'tenant_id' => $tenantId,
@@ -1103,7 +1103,7 @@ class DbSecurityTest extends TestCase
 
             $response->assertForbidden();
             $response->assertJsonPath(
-                'error',
+                'message',
                 'Perubahan absensi siswa wajib melalui sesi absen mandiri atau QR.'
             );
         }
@@ -1135,7 +1135,7 @@ class DbSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonPath('error', 'Waktu mulai tidak boleh di masa lalu');
+        $response->assertJsonPath('message', 'Waktu mulai tidak boleh di masa lalu');
     }
 
     public function test_guru_cannot_update_tugas_deadline_to_past(): void
@@ -1167,7 +1167,7 @@ class DbSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonPath('error', 'Deadline tidak boleh di masa lalu');
+        $response->assertJsonPath('message', 'Deadline tidak boleh di masa lalu');
     }
 
     public function test_guru_cannot_delete_tugas_that_already_has_graded_submission(): void
@@ -1206,7 +1206,7 @@ class DbSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonPath('error', 'Tugas yang sudah memiliki nilai tidak boleh dihapus');
+        $response->assertJsonPath('message', 'Tugas yang sudah memiliki nilai tidak boleh dihapus');
     }
 
     public function test_admin_can_insert_sertifikat_template_with_array_fields_payload(): void
@@ -1388,7 +1388,7 @@ class DbSecurityTest extends TestCase
         ]);
 
         $archiveAttempt->assertStatus(409);
-        $archiveAttempt->assertJsonPath('code', 'academic_period_locked');
+        $archiveAttempt->assertJsonPath('code', 'ACADEMIC_PERIOD_LOCKED');
     }
 
     private function defaultTenantId(): string

@@ -61,7 +61,7 @@ class ClassHistoryController extends ApiController
                 .trim($names.$remaining).'. Pindahkan siswa terlebih dahulu.';
 
             return response()->json([
-                'error' => $message,
+                'message' => $message,
                 'code' => 'class_has_students',
                 'student_count' => $studentCount,
                 'student_names' => $studentNames->all(),
@@ -74,7 +74,7 @@ class ClassHistoryController extends ApiController
                 $this->whereTenant($classQuery, 'kelas', $tenantId);
                 $class = $classQuery->first();
                 if (! $class) {
-                    abort(response()->json(['error' => 'Kelas tidak ditemukan'], 404));
+                    abort(response()->json(['message' => 'Kelas tidak ditemukan'], 404));
                 }
 
                 $snapshot = [
@@ -137,7 +137,7 @@ class ClassHistoryController extends ApiController
             $sqlState = (string) ($exception->errorInfo[0] ?? '');
             if ($sqlState === '23503') {
                 return response()->json([
-                    'error' => 'Tidak bisa hapus: kelas masih dipakai data terkait. Pindahkan atau bersihkan data yang masih terhubung ke kelas ini terlebih dahulu.',
+                    'message' => 'Tidak bisa hapus: kelas masih dipakai data terkait. Pindahkan atau bersihkan data yang masih terhubung ke kelas ini terlebih dahulu.',
                     'code' => 'class_has_related_records',
                 ], 409);
             }

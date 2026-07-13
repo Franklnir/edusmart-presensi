@@ -70,7 +70,7 @@ class TenantDomainManagementTest extends TestCase
 
         $this->getJson('http://asing.grupsekolah.id/api/health')
             ->assertStatus(404)
-            ->assertJsonPath('error', 'Host tenant belum terdaftar. Tambahkan domain ini dari panel super admin terlebih dahulu.');
+            ->assertJsonPath('message', 'Host tenant belum terdaftar. Tambahkan domain ini dari panel super admin terlebih dahulu.');
     }
 
     public function test_auth_me_does_not_expose_super_admin_access_on_tenant_host(): void
@@ -130,7 +130,7 @@ class TenantDomainManagementTest extends TestCase
                 'admin_password' => 'Admin26Strong!234',
             ])
             ->assertStatus(422)
-            ->assertJsonPath('error', 'Subdomain tidak bisa digunakan');
+            ->assertJsonPath('message', 'Subdomain tidak bisa digunakan');
     }
 
     public function test_super_admin_create_tenant_returns_created_admin_without_primary_admin_metadata(): void
@@ -255,7 +255,7 @@ class TenantDomainManagementTest extends TestCase
 
         $this->get('http://nginx/api/internal/tls/authorize?secret=test-secret&domain=asing.edusmart.test')
             ->assertStatus(403)
-            ->assertJsonPath('error', 'Domain belum terdaftar untuk auto TLS.');
+            ->assertJsonPath('message', 'Domain belum terdaftar untuk auto TLS.');
     }
 
     public function test_tls_ask_endpoint_rejects_invalid_secret(): void
@@ -270,7 +270,7 @@ class TenantDomainManagementTest extends TestCase
 
         $this->get('http://nginx/api/internal/tls/authorize?secret=salah&domain=bali.edusmart.test')
             ->assertStatus(403)
-            ->assertJsonPath('error', 'Permintaan TLS tidak valid.');
+            ->assertJsonPath('message', 'Permintaan TLS tidak valid.');
     }
 
     public function test_super_admin_tenant_detail_prepares_stable_rfid_device_but_requires_tenant_mqtt_config(): void
@@ -659,7 +659,7 @@ class TenantDomainManagementTest extends TestCase
                 'mode_topic_template' => 'edusmart/{tenant}/rfid/{device}/mode',
             ])
             ->assertStatus(422)
-            ->assertJsonPath('error', 'Topik MQTT RFID tidak boleh mengandung spasi. Gunakan minus untuk pemisah, misalnya gerbang-2.');
+            ->assertJsonPath('message', 'Topik MQTT RFID tidak boleh mengandung spasi. Gunakan minus untuk pemisah, misalnya gerbang-2.');
     }
 
     public function test_tenant_mqtt_config_rejects_scan_topic_conflict_on_same_host(): void
@@ -694,7 +694,7 @@ class TenantDomainManagementTest extends TestCase
             ->actingAs($superAdmin)
             ->patchJson("http://admin.edusmart.test/api/super/tenants/{$jawaTenantId}/rfid-mqtt", $payload)
             ->assertStatus(422)
-            ->assertJsonPath('error', 'Topik scan MQTT rfid/scan sudah dipakai oleh tenant SMA Bali pada host/port yang sama.');
+            ->assertJsonPath('message', 'Topik scan MQTT rfid/scan sudah dipakai oleh tenant SMA Bali pada host/port yang sama.');
     }
 
     public function test_super_admin_monitoring_includes_queue_snapshot(): void

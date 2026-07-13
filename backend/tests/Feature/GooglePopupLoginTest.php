@@ -88,7 +88,7 @@ class GooglePopupLoginTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonPath(
-            'error',
+            'message',
             'Email Google tidak sesuai dengan email akun. Gunakan akun Google dengan email yang sama.'
         );
     }
@@ -234,7 +234,7 @@ class GooglePopupLoginTest extends TestCase
             ->getJson('/api/auth/google/popup-context?origin=https%3A%2F%2Fevil.example.com&mode=login');
 
         $response->assertStatus(422);
-        $response->assertJsonPath('error', 'Origin login Google tidak diizinkan.');
+        $response->assertJsonPath('message', 'Origin login Google tidak diizinkan.');
     }
 
     private function defaultTenantId(): string

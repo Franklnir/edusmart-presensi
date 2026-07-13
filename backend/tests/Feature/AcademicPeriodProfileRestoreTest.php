@@ -592,7 +592,7 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         ]));
 
         $response->assertStatus(409)
-            ->assertJsonPath('error', 'Perubahan tahun ajaran harus dijalankan melalui rollover otomatis dari Pengaturan Akademik.');
+            ->assertJsonPath('message', 'Perubahan tahun ajaran harus dijalankan melalui rollover otomatis dari Pengaturan Akademik.');
 
         $this->assertDatabaseHas('settings', [
             'tenant_id' => $tenantId,
@@ -690,7 +690,7 @@ class AcademicPeriodProfileRestoreTest extends TestCase
         $this->postJson('/api/admin/academic-period/restore-roster', ['apply' => false])
             ->assertStatus(422)
             ->assertJsonPath(
-                'error',
+                'message',
                 'Snapshot roster siswa untuk periode 2025/2026 belum tersedia. Tidak ada data aman untuk dipulihkan.'
             );
 

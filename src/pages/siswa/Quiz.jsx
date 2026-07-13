@@ -147,7 +147,7 @@ const writeEssayDraftToStorage = (userId, quizId, submissionId, questionId, valu
   try {
     const drafts = readEssayDraftsFromStorage(userId, quizId, submissionId)
     drafts[String(questionId)] = {
-      value: String(value ?? ''),
+      value: String(value || ''),
       revision: Number(revision || 0),
       updatedAt: Date.now()
     }
@@ -296,7 +296,7 @@ const getTextEditableElement = (target) => {
   const tagName = String(editable.tagName || '').toLowerCase()
   if (tagName === 'textarea') return editable
   if (tagName === 'input') {
-    const type = String(editable.getAttribute('type') || editable.type || '').toLowerCase()
+    const type = String(editable.getAttribute('type') || (editable.type || '')).toLowerCase()
     return TEXT_EDITABLE_INPUT_TYPES.has(type) ? editable : null
   }
   return editable.isContentEditable ? editable : null
@@ -1309,7 +1309,7 @@ export default function SiswaQuiz() {
     const current = essayDraftMetaRef.current[key] || {}
     const revision = Number(current.revision || 0) + 1
     essayDraftMetaRef.current[key] = {
-      value: String(value ?? ''),
+      value: String(value || ''),
       revision,
       updatedAt: Date.now(),
       savedAt: Number(current.savedAt || 0)
@@ -1322,7 +1322,7 @@ export default function SiswaQuiz() {
     const current = essayDraftMetaRef.current[key]
     if (!current) return
     if (Number(current.revision || 0) !== Number(revision || 0)) return
-    if (String(current.value ?? '') !== String(value ?? '')) return
+    if (String(current.value || '') !== String(value || '')) return
     essayDraftMetaRef.current[key] = {
       ...current,
       savedAt: Date.now()
@@ -1334,8 +1334,8 @@ export default function SiswaQuiz() {
     const current = essayDraftMetaRef.current[key]
     if (!current) return false
 
-    const draftValue = String(current.value ?? '')
-    const normalizedServerValue = String(serverValue ?? '')
+    const draftValue = String(current.value || '')
+    const normalizedServerValue = String(serverValue || '')
     const hasPendingTimer = Boolean(essaySaveTimersRef.current[questionId] || essaySaveTimersRef.current[key])
     const recentlyEdited = Date.now() - Number(current.updatedAt || 0) < 15000
 
@@ -1347,7 +1347,7 @@ export default function SiswaQuiz() {
     Object.entries(questionTypeById || {}).forEach(([questionId, questionType]) => {
       if (normalizeQuestionType(questionType) !== 'essay') return
       if (!shouldKeepEssayDraft(questionId, serverAnswers?.[questionId])) return
-      next[questionId] = String(essayDraftMetaRef.current[String(questionId)]?.value ?? '')
+      next[questionId] = String(essayDraftMetaRef.current[String(questionId)]?.value || '')
     })
     return next
   }
@@ -1568,7 +1568,7 @@ export default function SiswaQuiz() {
           if (!questionTypeById[questionId] || !row || typeof row !== 'object') return
           const questionType = questionTypeById[questionId]
           answerMap[questionId] = questionType === 'essay'
-            ? String(row.raw_value ?? row.essay_answer ?? '')
+            ? String(row.raw_value || row.essay_answer || '')
             : row.option_id
           pendingAnswersRef.current[questionId] = row
         })
@@ -1577,15 +1577,15 @@ export default function SiswaQuiz() {
         Object.entries(storedEssayDrafts).forEach(([questionId, draft]) => {
           if (normalizeQuestionType(questionTypeById[questionId]) !== 'essay') return
           if (!draft || typeof draft !== 'object') return
-          const draftValue = String(draft.value ?? '')
+          const draftValue = String(draft.value || '')
           const draftUpdatedAt = parseStoredDraftTime(draft.updatedAt)
           const serverUpdatedAt = (() => {
             const row = answerRowMap[questionId] || {}
-            const raw = row.updated_at || row.saved_at || row.created_at || ''
+            const raw = row.updated_at || row.saved_at || (row.created_at || '')
             const parsed = raw ? Date.parse(raw) : 0
             return Number.isFinite(parsed) ? parsed : 0
           })()
-          const serverValue = String(answerMap[questionId] ?? '')
+          const serverValue = String(answerMap[questionId] || '')
           const shouldUseDraft = draftValue !== serverValue && (
             draftUpdatedAt >= serverUpdatedAt
             || !serverValue
@@ -1793,7 +1793,7 @@ export default function SiswaQuiz() {
       )
       rowsToSend.forEach((row) => {
         const questionId = String(row.question_id || '')
-        const savedAnswerId = answerIdByQuestion[questionId] || row.id || ''
+        const savedAnswerId = answerIdByQuestion[questionId] || (row.id || '')
         if (savedAnswerId) {
           setAnswerIds((prev) => ({ ...prev, [questionId]: savedAnswerId }))
         }
@@ -1921,7 +1921,7 @@ export default function SiswaQuiz() {
       delete essaySaveTimersRef.current[questionId]
     }
     const currentDraft = essayDraftMetaRef.current[String(questionId || '')]
-    const revision = currentDraft && String(currentDraft.value ?? '') === String(value ?? '')
+    const revision = currentDraft && String(currentDraft.value || '') === String(value || '')
       ? Number(currentDraft.revision || 0)
       : rememberEssayDraft(questionId, value)
     if (selectedQuiz?.id && activeSubmissionId) {

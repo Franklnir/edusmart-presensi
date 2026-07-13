@@ -131,12 +131,20 @@ class DbController extends ApiController
         $table = $request->input('table');
         $action = $request->input('action', 'select');
 
+        if (! is_string($table) || trim($table) === '') {
+            return $this->deny('Parameter table wajib diisi dan harus berupa string.', 400, 'DB_INVALID_TABLE');
+        }
+
+        if (! is_string($action) || trim($action) === '') {
+            return $this->deny('Parameter action wajib diisi dan harus berupa string.', 400, 'DB_INVALID_ACTION');
+        }
+
         if (! $this->dbTableRegistry->isAllowed($table)) {
-            return $this->deny('Table tidak diizinkan', 400);
+            return $this->deny('Table tidak diizinkan', 400, 'DB_TABLE_NOT_ALLOWED');
         }
 
         if (! in_array($action, ['select', 'insert', 'update', 'delete', 'upsert'], true)) {
-            return $this->deny('Aksi tidak diizinkan', 400);
+            return $this->deny('Aksi tidak diizinkan', 400, 'DB_ACTION_NOT_ALLOWED');
         }
 
         $validationError = $this->validateDbRequestShape($request);
@@ -151,7 +159,7 @@ class DbController extends ApiController
         $tenantScoped = $this->dbTableRegistry->isTenantScoped($table);
 
         if (! $user && ! ($action === 'select' && $table === 'settings')) {
-            return response()->json(['error' => 'Unauthenticated'], 401);
+            return $this->deny('Unauthenticated', 401, 'UNAUTHENTICATED');
         }
 
         $payload = $request->input('payload');
@@ -176,10 +184,11 @@ class DbController extends ApiController
                 $tenantId
             );
             if (! ($mutationGuard['allowed'] ?? false)) {
-                return response()->json([
-                    'error' => $mutationGuard['message'] ?? 'Perubahan periode ditolak.',
-                    'code' => $mutationGuard['code'] ?? 'academic_period_locked',
-                ], (int) ($mutationGuard['status'] ?? 409));
+                return $this->deny(
+                    $mutationGuard['message'] ?? 'Perubahan periode ditolak.',
+                    (int) ($mutationGuard['status'] ?? 409),
+                    strtoupper($mutationGuard['code'] ?? 'ACADEMIC_PERIOD_LOCKED')
+                );
             }
             $this->academicMutationContext = $mutationGuard['context'] ?? null;
         }

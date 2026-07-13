@@ -52,6 +52,6 @@ class TrustedEdgeProxyTest extends TestCase
 
         $this->getJson('/api/internal/tls/authorize?secret=wrong&domain=school.example.test')
             ->assertForbidden()
-            ->assertJsonPath('error', 'Permintaan TLS tidak valid.');
+            ->assertJsonPath('message', 'Permintaan TLS tidak valid.');
     }
 }

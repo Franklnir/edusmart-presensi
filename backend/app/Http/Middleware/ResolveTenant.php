@@ -32,7 +32,7 @@ class ResolveTenant
             } else {
                 $tenant = $this->tenantDomainService->resolveTenantForHost($host);
                 if (! $tenant) {
-                    return response()->json(['error' => 'Host tenant belum terdaftar. Tambahkan domain ini dari panel super admin terlebih dahulu.'], 404);
+                    return response()->json(['message' => 'Host tenant belum terdaftar. Tambahkan domain ini dari panel super admin terlebih dahulu.'], 404);
                 }
 
                 $slug = (string) ($tenant->slug ?? '');
@@ -45,7 +45,7 @@ class ResolveTenant
 
         $tenant = DB::table('tenants')->where('slug', $slug)->first();
         if (! $tenant) {
-            return response()->json(['error' => 'Tenant tidak ditemukan'], 404);
+            return response()->json(['message' => 'Tenant tidak ditemukan'], 404);
         }
 
         $isAdminHost = $this->tenantDomainService->isAdminHost($host);
@@ -55,7 +55,7 @@ class ResolveTenant
             && $this->isTenantBlocked((string) ($tenant->status ?? 'active'))
         ) {
             return response()->json([
-                'error' => 'Tenant saat ini tidak aktif. Hubungi super admin untuk aktivasi ulang.',
+                'message' => 'Tenant saat ini tidak aktif. Hubungi super admin untuk aktivasi ulang.',
                 'tenant_status' => $tenant->status,
             ], 423);
         }

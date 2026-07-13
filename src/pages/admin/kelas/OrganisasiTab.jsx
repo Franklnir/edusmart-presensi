@@ -235,7 +235,7 @@ export default function OrganisasiTab({
               return {
                 ...row,
                 nama: siswa.nama || row.nama,
-                kelas: siswa.kelas || row.kelas || ''
+                kelas: siswa.kelas || (row.kelas || '')
               }
             })
             .filter(Boolean)

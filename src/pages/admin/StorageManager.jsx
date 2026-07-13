@@ -345,7 +345,7 @@ function StorageManager() {
         ...existing,
         label: label || existing.label,
         bytes: Number(meta.bytes ?? existing.bytes ?? 0),
-        bytes_label: meta.bytes_label || existing.bytes_label || '',
+        bytes_label: meta.bytes_label || (existing.bytes_label || ''),
         files: Number(meta.files ?? existing.files ?? 0)
       })
     }
@@ -553,7 +553,7 @@ function StorageManager() {
     setSyncingObjectStorage(true)
     try {
       const payload = {
-        bucket: options.bucket ?? cleanupForm.bucket ?? '',
+        bucket: options.bucket || cleanupForm.bucket || '',
         max_pages: isSuperAdmin ? 10 : 5
       }
       const api = isSuperAdmin

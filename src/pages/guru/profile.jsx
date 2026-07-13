@@ -47,7 +47,7 @@ function addCacheBuster(url) {
 }
 
 function displayValue(value, fallback = '-') {
-  const text = String(value ?? '').trim()
+  const text = String(value || '').trim()
   return text || fallback
 }
 
@@ -444,7 +444,7 @@ export default function ProfileGuru() {
         tanggal_lahir: profile.tanggal_lahir || ''
       })
 
-      const stored = profile.photo_path || profile.photo_url || ''
+      const stored = profile.photo_path || (profile.photo_url || '')
       if (!stored) {
         setPhotoKey('')
         setPreviewUrl('')

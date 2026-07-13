@@ -31,6 +31,10 @@ class ConcealDbGatewayFromGuests
             return true;
         }
 
+        if ($request->hasCookie(config('session.cookie')) || $request->hasCookie('XSRF-TOKEN') || $request->hasCookie('edusmart_session')) {
+            return true;
+        }
+
         return false;
     }
 }

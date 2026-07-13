@@ -27,7 +27,7 @@ class SecurityRequestBlockingTest extends TestCase
             ]);
 
         $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Permintaan diblokir oleh proteksi keamanan.');
+        $response->assertJsonPath('message', 'Permintaan diblokir oleh proteksi keamanan.');
 
         $this->assertSame(1, DB::table('audit_log')
             ->where('table_name', 'security_events')
@@ -45,7 +45,7 @@ class SecurityRequestBlockingTest extends TestCase
             ->getJson('/api/health');
 
         $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Permintaan diblokir oleh proteksi keamanan.');
+        $response->assertJsonPath('message', 'Permintaan diblokir oleh proteksi keamanan.');
     }
 
     public function test_normal_api_request_is_not_blocked(): void
@@ -197,7 +197,7 @@ class SecurityRequestBlockingTest extends TestCase
                 'card_uid' => 'AABBCCDD',
                 'mode' => 'auto',
                 'source' => 'mqtt',
-                'status' => 'error',
+                'status' => 'message',
                 'response_code' => 422,
                 'created_at' => now(),
                 'updated_at' => now(),

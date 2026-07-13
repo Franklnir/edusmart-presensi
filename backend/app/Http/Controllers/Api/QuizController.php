@@ -42,7 +42,7 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $page = max(1, (int) $request->query('page', 1));
@@ -267,14 +267,14 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $quiz = $this->quizTenantQuery($tenantId)
             ->where('id', $quizId)
             ->first();
         if (! $quiz) {
-            return response()->json(['error' => 'Quiz tidak ditemukan'], 404);
+            return response()->json(['message' => 'Quiz tidak ditemukan'], 404);
         }
 
         if ($this->isGuru($request) && ! $this->isAdmin($request) && (string) $quiz->guru_id !== (string) $request->user()?->id) {
@@ -392,7 +392,7 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $sourceQuizId = trim((string) $request->input('source_quiz_id', ''));
@@ -416,7 +416,7 @@ class QuizController extends ApiController
 
         if ($sourceQuizId === '' || $targetKelasId === '' || $targetMapel === '') {
             return response()->json([
-                'error' => 'source_quiz_id, target_kelas_id, dan target_mapel wajib diisi',
+                'message' => 'source_quiz_id, target_kelas_id, dan target_mapel wajib diisi',
             ], 422);
         }
 
@@ -433,7 +433,7 @@ class QuizController extends ApiController
         }
 
         if (! $this->quizTargetClassExists($tenantId, $targetKelasId)) {
-            return response()->json(['error' => 'Kelas tujuan tidak ditemukan'], 422);
+            return response()->json(['message' => 'Kelas tujuan tidak ditemukan'], 422);
         }
 
         if ($this->isGuru($request) && ! $this->isAdmin($request)) {
@@ -446,11 +446,11 @@ class QuizController extends ApiController
             $startsAt = $this->parseQuizDate($sourceQuiz->starts_at ?? null, $sourceQuiz);
             $endsAt = $this->parseQuizDate($sourceQuiz->deadline_at ?? null, $sourceQuiz);
             if (! $startsAt || ! $endsAt) {
-                return response()->json(['error' => 'Jadwal sumber belum lengkap, tidak bisa disalin'], 422);
+                return response()->json(['message' => 'Jadwal sumber belum lengkap, tidak bisa disalin'], 422);
             }
             $periodError = $this->validateQuizTimelineWithinActivePeriod($tenantId, $startsAt, $endsAt, $sourceQuiz);
             if ($periodError !== null) {
-                return response()->json(['error' => $periodError], 422);
+                return response()->json(['message' => $periodError], 422);
             }
         }
 
@@ -600,7 +600,7 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $payload = $request->only(['quiz_id', 'submission_id', 'answers']);
@@ -609,7 +609,7 @@ class QuizController extends ApiController
         $answers = $payload['answers'] ?? [];
 
         if ($quizId === '') {
-            return response()->json(['error' => 'quiz_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id wajib diisi'], 422);
         }
 
         $user = $request->user();
@@ -657,7 +657,7 @@ class QuizController extends ApiController
 
         $answersStored = false;
         if ($answers !== null && ! is_array($answers)) {
-            return response()->json(['error' => 'Format jawaban tidak valid'], 422);
+            return response()->json(['message' => 'Format jawaban tidak valid'], 422);
         }
 
         if ($submission && is_array($answers) && count($answers)) {
@@ -683,7 +683,7 @@ class QuizController extends ApiController
                 ]);
             }
 
-            return response()->json(['error' => $availability['message']], $availability['code']);
+            return response()->json(['message' => $availability['message']], $availability['code']);
         }
 
         if (! $submission) {
@@ -713,7 +713,7 @@ class QuizController extends ApiController
 
         $result = $this->finalizeQuizSubmissionSafely($tenantId, $submission, $now, 'finished');
         if (! $result) {
-            return response()->json(['error' => 'Gagal menyelesaikan quiz'], 500);
+            return response()->json(['message' => 'Gagal menyelesaikan quiz'], 500);
         }
 
         return response()->json([
@@ -734,12 +734,12 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $quizId = trim((string) $request->input('quiz_id', ''));
         if ($quizId === '') {
-            return response()->json(['error' => 'quiz_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id wajib diisi'], 422);
         }
 
         $resolved = $this->resolveStudentQuiz($request, $tenantId, $quizId, $request->input('client_meta'));
@@ -751,7 +751,7 @@ class QuizController extends ApiController
         $now = $this->quizNow($quiz);
         $availability = $this->quizAvailabilityForStudent($quiz, $now);
         if (! $availability['ok']) {
-            return response()->json(['error' => $availability['message']], $availability['code']);
+            return response()->json(['message' => $availability['message']], $availability['code']);
         }
         $strictSecurityResponse = $this->denyIfStrictFullscreenMissing($quiz, $request->input('client_meta'));
         if ($strictSecurityResponse !== null) {
@@ -803,14 +803,14 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $quizId = trim((string) $request->input('quiz_id', ''));
         $submissionId = trim((string) $request->input('submission_id', ''));
         $questionId = trim((string) $request->input('question_id', ''));
         if ($quizId === '' || $submissionId === '' || $questionId === '') {
-            return response()->json(['error' => 'quiz_id, submission_id, dan question_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id, submission_id, dan question_id wajib diisi'], 422);
         }
 
         $resolved = $this->resolveStudentQuiz($request, $tenantId, $quizId, $request->input('client_meta'));
@@ -827,10 +827,10 @@ class QuizController extends ApiController
             ->where('tenant_id', $tenantId)
             ->first();
         if (! $submission) {
-            return response()->json(['error' => 'Attempt quiz tidak ditemukan'], 404);
+            return response()->json(['message' => 'Attempt quiz tidak ditemukan'], 404);
         }
         if ((string) ($submission->status ?? '') === 'finished') {
-            return response()->json(['error' => 'Quiz sudah selesai, jawaban tidak bisa diubah'], 422);
+            return response()->json(['message' => 'Quiz sudah selesai, jawaban tidak bisa diubah'], 422);
         }
         $sessionResponse = $this->ensureSubmissionDeviceSession($request, $tenantId, $submission, $request->input('client_meta'), $now);
         if ($sessionResponse !== null) {
@@ -843,7 +843,7 @@ class QuizController extends ApiController
                 $this->scoringService->finalizeSubmission($tenantId, $submissionId, $now, 'finished');
             }
 
-            return response()->json(['error' => $availability['message']], $availability['code']);
+            return response()->json(['message' => $availability['message']], $availability['code']);
         }
 
         $saved = $this->storeSubmissionAnswer(
@@ -857,7 +857,7 @@ class QuizController extends ApiController
             $request->input('id')
         );
         if (! $saved['ok']) {
-            return response()->json(['error' => $saved['message']], $saved['code']);
+            return response()->json(['message' => $saved['message']], $saved['code']);
         }
 
         if (Schema::hasColumn('quiz_submissions', 'last_saved_at')) {
@@ -889,20 +889,20 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $quizId = trim((string) $request->input('quiz_id', ''));
         $submissionId = trim((string) $request->input('submission_id', ''));
         $answers = $request->input('answers', []);
         if ($quizId === '' || $submissionId === '') {
-            return response()->json(['error' => 'quiz_id dan submission_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id dan submission_id wajib diisi'], 422);
         }
         if (! is_array($answers) || count($answers) === 0) {
-            return response()->json(['error' => 'Jawaban batch wajib berupa array yang tidak kosong'], 422);
+            return response()->json(['message' => 'Jawaban batch wajib berupa array yang tidak kosong'], 422);
         }
         if (count($answers) > 100) {
-            return response()->json(['error' => 'Maksimal 100 jawaban dalam satu batch'], 422);
+            return response()->json(['message' => 'Maksimal 100 jawaban dalam satu batch'], 422);
         }
 
         $resolved = $this->resolveStudentQuiz($request, $tenantId, $quizId, $request->input('client_meta'));
@@ -919,10 +919,10 @@ class QuizController extends ApiController
             ->where('tenant_id', $tenantId)
             ->first();
         if (! $submission) {
-            return response()->json(['error' => 'Attempt quiz tidak ditemukan'], 404);
+            return response()->json(['message' => 'Attempt quiz tidak ditemukan'], 404);
         }
         if ((string) ($submission->status ?? '') === 'finished') {
-            return response()->json(['error' => 'Quiz sudah selesai, jawaban tidak bisa diubah'], 422);
+            return response()->json(['message' => 'Quiz sudah selesai, jawaban tidak bisa diubah'], 422);
         }
 
         $sessionResponse = $this->ensureSubmissionDeviceSession($request, $tenantId, $submission, $request->input('client_meta'), $now);
@@ -936,12 +936,12 @@ class QuizController extends ApiController
                 $this->scoringService->finalizeSubmission($tenantId, $submissionId, $now, 'finished');
             }
 
-            return response()->json(['error' => $availability['message']], $availability['code']);
+            return response()->json(['message' => $availability['message']], $availability['code']);
         }
 
         $stored = $this->storeSubmissionAnswersBatch($tenantId, $quizId, $submissionId, $answers, $now);
         if (! $stored['ok']) {
-            return response()->json(['error' => $stored['message']], $stored['code']);
+            return response()->json(['message' => $stored['message']], $stored['code']);
         }
 
         return response()->json([
@@ -963,7 +963,7 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
         if (! Schema::hasTable('quiz_violation_logs')) {
             return response()->json(['data' => ['skipped' => true]]);
@@ -972,7 +972,7 @@ class QuizController extends ApiController
         $quizId = trim((string) $request->input('quiz_id', ''));
         $submissionId = trim((string) $request->input('submission_id', ''));
         if ($quizId === '' || $submissionId === '') {
-            return response()->json(['error' => 'quiz_id dan submission_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id dan submission_id wajib diisi'], 422);
         }
 
         $submission = DB::table('quiz_submissions')
@@ -982,7 +982,7 @@ class QuizController extends ApiController
             ->where('tenant_id', $tenantId)
             ->first();
         if (! $submission) {
-            return response()->json(['error' => 'Attempt quiz tidak ditemukan'], 404);
+            return response()->json(['message' => 'Attempt quiz tidak ditemukan'], 404);
         }
         $sessionResponse = $this->ensureSubmissionDeviceSession($request, $tenantId, $submission, $request->input('client_meta'), $this->quizNow());
         if ($sessionResponse !== null) {
@@ -1086,12 +1086,12 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $quizId = trim((string) $request->input('quiz_id', ''));
         if ($quizId === '') {
-            return response()->json(['error' => 'quiz_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id wajib diisi'], 422);
         }
 
         $quiz = $this->resolveQuizForTeacherAction($request, $tenantId, $quizId);
@@ -1115,20 +1115,20 @@ class QuizController extends ApiController
             foreach ($restrictedKeys as $key) {
                 if ($request->has($key)) {
                     return response()->json([
-                        'error' => 'Quiz sedang dikerjakan siswa. Keamanan dan pengaturan non-waktu tidak bisa diubah.',
+                        'message' => 'Quiz sedang dikerjakan siswa. Keamanan dan pengaturan non-waktu tidak bisa diubah.',
                     ], 409);
                 }
             }
             if ($request->has('activate') && ! $activate) {
                 return response()->json([
-                    'error' => 'Quiz sedang dikerjakan siswa. Gunakan Tutup Quiz jika ingin mengakhiri attempt.',
+                    'message' => 'Quiz sedang dikerjakan siswa. Gunakan Tutup Quiz jika ingin mengakhiri attempt.',
                 ], 409);
             }
         }
         if ($activate && ! $this->boolValue($quiz->is_active ?? false)) {
             $activationError = $this->validateQuizCanBeActivated($tenantId, $quiz, $now);
             if ($activationError !== null) {
-                return response()->json(['error' => $activationError], 422);
+                return response()->json(['message' => $activationError], 422);
             }
         }
         $updates = [
@@ -1154,27 +1154,27 @@ class QuizController extends ApiController
             } elseif (is_numeric($maxAttempts) && (int) $maxAttempts >= 1 && (int) $maxAttempts <= 20) {
                 $updates['max_attempts'] = (int) $maxAttempts;
             } else {
-                return response()->json(['error' => 'Batas percobaan harus 1 sampai 20'], 422);
+                return response()->json(['message' => 'Batas percobaan harus 1 sampai 20'], 422);
             }
         }
         if (Schema::hasColumn('quizzes', 'security_mode') && $request->has('security_mode')) {
             $mode = strtolower(trim((string) $request->input('security_mode', 'standard')));
             if (! in_array($mode, ['standard', 'strict'], true)) {
-                return response()->json(['error' => 'Mode keamanan quiz tidak valid'], 422);
+                return response()->json(['message' => 'Mode keamanan quiz tidak valid'], 422);
             }
             $updates['security_mode'] = $mode;
         }
         if (Schema::hasColumn('quizzes', 'access_device') && $request->has('access_device')) {
             $accessDevice = $this->normalizeQuizAccessDevice($request->input('access_device'));
             if ($accessDevice === null) {
-                return response()->json(['error' => 'Akses perangkat quiz tidak valid'], 422);
+                return response()->json(['message' => 'Akses perangkat quiz tidak valid'], 422);
             }
             $updates['access_device'] = $accessDevice;
         }
         if (Schema::hasColumn('quizzes', 'timezone') && $request->has('timezone')) {
             $timezone = trim((string) $request->input('timezone', self::DEFAULT_QUIZ_TIMEZONE));
             if (! $this->isValidTimezone($timezone)) {
-                return response()->json(['error' => 'Timezone quiz tidak valid'], 422);
+                return response()->json(['message' => 'Timezone quiz tidak valid'], 422);
             }
             $updates['timezone'] = $timezone;
         }
@@ -1212,12 +1212,12 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $quizId = trim((string) $request->input('quiz_id', ''));
         if ($quizId === '') {
-            return response()->json(['error' => 'quiz_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id wajib diisi'], 422);
         }
 
         $quiz = $this->resolveQuizForTeacherAction($request, $tenantId, $quizId);
@@ -1230,17 +1230,17 @@ class QuizController extends ApiController
             ->when(Schema::hasColumn('quiz_questions', 'tenant_id'), fn ($query) => $query->where('tenant_id', $tenantId))
             ->count();
         if ($questionCount < 1) {
-            return response()->json(['error' => 'Tambahkan minimal 1 soal sebelum mengatur jadwal'], 422);
+            return response()->json(['message' => 'Tambahkan minimal 1 soal sebelum mengatur jadwal'], 422);
         }
 
         $settingsError = $this->validateQuizRequiredSettingsForSchedule($quiz);
         if ($settingsError !== null) {
-            return response()->json(['error' => $settingsError], 422);
+            return response()->json(['message' => $settingsError], 422);
         }
 
         $timezone = trim((string) $request->input('timezone', $this->quizTimezone($quiz)));
         if (! $this->isValidTimezone($timezone)) {
-            return response()->json(['error' => 'Timezone quiz tidak valid'], 422);
+            return response()->json(['message' => 'Timezone quiz tidak valid'], 422);
         }
         $quizForDates = clone $quiz;
         $quizForDates->timezone = $timezone;
@@ -1249,7 +1249,7 @@ class QuizController extends ApiController
 
         $startsAt = $this->parseQuizDate($request->input('starts_at'), $quizForDates);
         if (! $startsAt) {
-            return response()->json(['error' => 'Tanggal mulai wajib diisi'], 422);
+            return response()->json(['message' => 'Tanggal mulai wajib diisi'], 422);
         }
 
         $existingStart = $this->parseQuizDate($quiz->starts_at ?? null, $quizForDates);
@@ -1257,41 +1257,41 @@ class QuizController extends ApiController
         if ($this->quizHasOngoingSubmissions($tenantId, $quizId)) {
             if ($hasStartChanged) {
                 return response()->json([
-                    'error' => 'Tidak boleh mengubah jadwal saat ada siswa sedang mengerjakan quiz. Tunggu hingga semua selesai.',
+                    'message' => 'Tidak boleh mengubah jadwal saat ada siswa sedang mengerjakan quiz. Tunggu hingga semua selesai.',
                 ], 409);
             }
             $existingDeadline = $this->parseQuizDate($quiz->deadline_at ?? null, $quizForDates);
             $hasDeadlineChanged = ! $existingDeadline || $existingDeadline->getTimestamp() !== $deadlineAt->getTimestamp();
             if ($hasDeadlineChanged) {
                 return response()->json([
-                    'error' => 'Tidak boleh mengubah jadwal saat ada siswa sedang mengerjakan quiz. Tunggu hingga semua selesai.',
+                    'message' => 'Tidak boleh mengubah jadwal saat ada siswa sedang mengerjakan quiz. Tunggu hingga semua selesai.',
                 ], 409);
             }
         }
         if ((! $this->boolValue($quiz->is_active ?? false) || $hasStartChanged) && $startsAt->lt($nowMinute)) {
-            return response()->json(['error' => 'Tanggal mulai quiz tidak boleh di masa lalu'], 422);
+            return response()->json(['message' => 'Tanggal mulai quiz tidak boleh di masa lalu'], 422);
         }
 
         $deadlineAt = $this->parseQuizDate($request->input('deadline_at'), $quizForDates);
         if (! $deadlineAt) {
-            return response()->json(['error' => 'Tanggal selesai wajib diisi'], 422);
+            return response()->json(['message' => 'Tanggal selesai wajib diisi'], 422);
         }
         if (! $deadlineAt->gt($startsAt)) {
-            return response()->json(['error' => 'Tanggal selesai harus setelah tanggal mulai'], 422);
+            return response()->json(['message' => 'Tanggal selesai harus setelah tanggal mulai'], 422);
         }
         if ($deadlineAt->lt($nowMinute)) {
-            return response()->json(['error' => 'Tanggal selesai quiz tidak boleh di masa lalu'], 422);
+            return response()->json(['message' => 'Tanggal selesai quiz tidak boleh di masa lalu'], 422);
         }
 
         $periodError = $this->validateQuizTimelineWithinActivePeriod($tenantId, $startsAt, $deadlineAt, $quiz);
         if ($periodError !== null) {
-            return response()->json(['error' => $periodError], 422);
+            return response()->json(['message' => $periodError], 422);
         }
 
         $mode = $this->quizMode($quiz);
         $durationMinutes = (int) ceil(($deadlineAt->getTimestamp() - $startsAt->getTimestamp()) / 60);
         if ($mode !== 'regular' && $durationMinutes < 10) {
-            return response()->json(['error' => 'Durasi quiz ujian minimal 10 menit'], 422);
+            return response()->json(['message' => 'Durasi quiz ujian minimal 10 menit'], 422);
         }
 
         $updates = [
@@ -1349,12 +1349,12 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $quizId = trim((string) $request->input('quiz_id', ''));
         if ($quizId === '') {
-            return response()->json(['error' => 'quiz_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id wajib diisi'], 422);
         }
 
         $quiz = $this->resolveQuizForTeacherAction($request, $tenantId, $quizId);
@@ -1415,7 +1415,7 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $freezeResponse = $this->denyIfNilaiFrozen($request, 'Perubahan nilai quiz');
@@ -1430,19 +1430,19 @@ class QuizController extends ApiController
         $essayScoreRaw = $request->input('essay_score');
 
         if ($quizId === '' || $questionId === '' || $essayScoreRaw === null || $essayScoreRaw === '') {
-            return response()->json(['error' => 'quiz_id, question_id, dan essay_score wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id, question_id, dan essay_score wajib diisi'], 422);
         }
 
         if ($submissionId === '' && $siswaId === '') {
-            return response()->json(['error' => 'submission_id atau siswa_id wajib diisi'], 422);
+            return response()->json(['message' => 'submission_id atau siswa_id wajib diisi'], 422);
         }
 
         if (! is_numeric($essayScoreRaw)) {
-            return response()->json(['error' => 'Nilai esai harus berupa angka'], 422);
+            return response()->json(['message' => 'Nilai esai harus berupa angka'], 422);
         }
         $essayScoreNumber = (float) $essayScoreRaw;
         if (! is_finite($essayScoreNumber) || floor($essayScoreNumber) !== $essayScoreNumber) {
-            return response()->json(['error' => 'Nilai esai harus bilangan bulat'], 422);
+            return response()->json(['message' => 'Nilai esai harus bilangan bulat'], 422);
         }
         $essayScore = (int) $essayScoreNumber;
 
@@ -1463,10 +1463,10 @@ class QuizController extends ApiController
         $submission = $submissionQuery->first();
 
         if (! $submission) {
-            return response()->json(['error' => 'Submission siswa tidak ditemukan'], 404);
+            return response()->json(['message' => 'Submission siswa tidak ditemukan'], 404);
         }
         if ((string) ($submission->status ?? '') !== 'finished') {
-            return response()->json(['error' => 'Esai hanya bisa dikoreksi setelah siswa menyelesaikan quiz'], 422);
+            return response()->json(['message' => 'Esai hanya bisa dikoreksi setelah siswa menyelesaikan quiz'], 422);
         }
 
         $question = DB::table('quiz_questions')
@@ -1475,17 +1475,17 @@ class QuizController extends ApiController
             ->where('tenant_id', $tenantId)
             ->first(['id', 'poin', 'question_type']);
         if (! $question) {
-            return response()->json(['error' => 'Soal quiz tidak ditemukan'], 404);
+            return response()->json(['message' => 'Soal quiz tidak ditemukan'], 404);
         }
 
         $questionType = $this->normalizeQuestionType($question->question_type ?? null);
         if ($questionType !== 'essay') {
-            return response()->json(['error' => 'Soal ini bukan tipe esai'], 422);
+            return response()->json(['message' => 'Soal ini bukan tipe esai'], 422);
         }
 
         $maxPoint = max(0, (int) ($question->poin ?? 0));
         if ($essayScore < 0 || $essayScore > $maxPoint) {
-            return response()->json(['error' => "Nilai esai harus 0 sampai {$maxPoint}"], 422);
+            return response()->json(['message' => "Nilai esai harus 0 sampai {$maxPoint}"], 422);
         }
 
         $answer = DB::table('quiz_answers')
@@ -1495,12 +1495,12 @@ class QuizController extends ApiController
             ->first(['id', 'essay_answer', 'essay_score', 'poin']);
 
         if (! $answer) {
-            return response()->json(['error' => 'Jawaban esai siswa belum tersedia'], 422);
+            return response()->json(['message' => 'Jawaban esai siswa belum tersedia'], 422);
         }
 
         $hasEssayAnswer = trim((string) ($answer->essay_answer ?? '')) !== '';
         if (! $hasEssayAnswer && $essayScore > 0) {
-            return response()->json(['error' => 'Jawaban esai kosong, nilai harus 0'], 422);
+            return response()->json(['message' => 'Jawaban esai kosong, nilai harus 0'], 422);
         }
         $now = now();
         $oldAnswerData = [
@@ -1622,12 +1622,12 @@ class QuizController extends ApiController
         }
 
         if (! Schema::hasColumn('quiz_submissions', 'essay_review_completed_at')) {
-            return response()->json(['error' => 'Fitur selesai koreksi belum tersedia. Jalankan migrasi terbaru.'], 422);
+            return response()->json(['message' => 'Fitur selesai koreksi belum tersedia. Jalankan migrasi terbaru.'], 422);
         }
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $freezeResponse = $this->denyIfNilaiFrozen($request, 'Finalisasi koreksi nilai quiz');
@@ -1640,10 +1640,10 @@ class QuizController extends ApiController
         $siswaId = trim((string) $request->input('siswa_id', ''));
 
         if ($quizId === '') {
-            return response()->json(['error' => 'quiz_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id wajib diisi'], 422);
         }
         if ($submissionId === '' && $siswaId === '') {
-            return response()->json(['error' => 'submission_id atau siswa_id wajib diisi'], 422);
+            return response()->json(['message' => 'submission_id atau siswa_id wajib diisi'], 422);
         }
 
         $quiz = $this->resolveQuizForRetake($request, $tenantId, $quizId);
@@ -1663,10 +1663,10 @@ class QuizController extends ApiController
         $submission = $submissionQuery->first();
 
         if (! $submission) {
-            return response()->json(['error' => 'Submission siswa tidak ditemukan'], 404);
+            return response()->json(['message' => 'Submission siswa tidak ditemukan'], 404);
         }
         if ((string) ($submission->status ?? '') !== 'finished') {
-            return response()->json(['error' => 'Koreksi esai hanya untuk submission yang sudah selesai'], 422);
+            return response()->json(['message' => 'Koreksi esai hanya untuk submission yang sudah selesai'], 422);
         }
 
         $essayQuestionIds = DB::table('quiz_questions')
@@ -1678,7 +1678,7 @@ class QuizController extends ApiController
             ->all();
 
         if (empty($essayQuestionIds)) {
-            return response()->json(['error' => 'Quiz ini tidak memiliki soal esai'], 422);
+            return response()->json(['message' => 'Quiz ini tidak memiliki soal esai'], 422);
         }
 
         $answerRows = DB::table('quiz_answers')
@@ -1698,7 +1698,7 @@ class QuizController extends ApiController
             }
         }
         if ($pendingCount > 0) {
-            return response()->json(['error' => "Masih ada {$pendingCount} jawaban esai yang belum dinilai"], 422);
+            return response()->json(['message' => "Masih ada {$pendingCount} jawaban esai yang belum dinilai"], 422);
         }
 
         $oldSubmissionData = [
@@ -1774,7 +1774,7 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $freezeResponse = $this->denyIfNilaiFrozen($request, 'Reset/retake nilai quiz');
@@ -1787,10 +1787,10 @@ class QuizController extends ApiController
         $confirmed = (bool) $request->boolean('confirmed', false);
 
         if ($quizId === '' || $siswaId === '') {
-            return response()->json(['error' => 'quiz_id dan siswa_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id dan siswa_id wajib diisi'], 422);
         }
         if (! $confirmed) {
-            return response()->json(['error' => 'Konfirmasi ulang quiz wajib disetujui'], 422);
+            return response()->json(['message' => 'Konfirmasi ulang quiz wajib disetujui'], 422);
         }
 
         $quiz = $this->resolveQuizForRetake($request, $tenantId, $quizId);
@@ -1805,7 +1805,7 @@ class QuizController extends ApiController
             ->first();
 
         if (! $submission) {
-            return response()->json(['error' => 'Siswa belum memiliki attempt quiz'], 404);
+            return response()->json(['message' => 'Siswa belum memiliki attempt quiz'], 404);
         }
 
         $siswa = DB::table('profiles')
@@ -1814,7 +1814,7 @@ class QuizController extends ApiController
             ->first(['id', 'nama', 'role']);
 
         if (! $siswa || strtolower((string) ($siswa->role ?? '')) !== 'siswa') {
-            return response()->json(['error' => 'Data siswa tidak valid'], 422);
+            return response()->json(['message' => 'Data siswa tidak valid'], 422);
         }
 
         $answerRows = DB::table('quiz_answers')
@@ -1925,12 +1925,12 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $quizId = trim((string) $request->query('quiz_id', ''));
         if ($quizId === '') {
-            return response()->json(['error' => 'quiz_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id wajib diisi'], 422);
         }
 
         $quiz = $this->resolveQuizForRetake($request, $tenantId, $quizId);
@@ -1977,7 +1977,7 @@ class QuizController extends ApiController
 
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $freezeResponse = $this->denyIfNilaiFrozen($request, 'Pemulihan nilai quiz');
@@ -1989,7 +1989,7 @@ class QuizController extends ApiController
         $siswaId = trim((string) $request->input('siswa_id', ''));
 
         if ($quizId === '' || $siswaId === '') {
-            return response()->json(['error' => 'quiz_id dan siswa_id wajib diisi'], 422);
+            return response()->json(['message' => 'quiz_id dan siswa_id wajib diisi'], 422);
         }
 
         $quiz = $this->resolveQuizForRetake($request, $tenantId, $quizId);
@@ -2003,7 +2003,7 @@ class QuizController extends ApiController
             ->first(['id', 'nama', 'role']);
 
         if (! $siswa || strtolower((string) ($siswa->role ?? '')) !== 'siswa') {
-            return response()->json(['error' => 'Data siswa tidak valid'], 422);
+            return response()->json(['message' => 'Data siswa tidak valid'], 422);
         }
 
         $latestLog = DB::table('quiz_retake_logs')
@@ -2022,10 +2022,10 @@ class QuizController extends ApiController
             ]);
 
         if (! $latestLog) {
-            return response()->json(['error' => 'Riwayat nilai sebelum ulang tidak ditemukan'], 404);
+            return response()->json(['message' => 'Riwayat nilai sebelum ulang tidak ditemukan'], 404);
         }
         if ($latestLog->previous_score === null) {
-            return response()->json(['error' => 'Nilai sebelum ulang belum tersedia untuk dipulihkan'], 422);
+            return response()->json(['message' => 'Nilai sebelum ulang belum tersedia untuk dipulihkan'], 422);
         }
 
         $existingSubmission = DB::table('quiz_submissions')
@@ -2044,7 +2044,7 @@ class QuizController extends ApiController
             ]);
 
         if ($existingSubmission && strtolower(trim((string) ($existingSubmission->status ?? ''))) === 'ongoing') {
-            return response()->json(['error' => 'Siswa sedang mengerjakan quiz. Selesaikan atau reset dulu sebelum memulihkan nilai lama'], 422);
+            return response()->json(['message' => 'Siswa sedang mengerjakan quiz. Selesaikan atau reset dulu sebelum memulihkan nilai lama'], 422);
         }
 
         $now = now();
@@ -2307,7 +2307,7 @@ class QuizController extends ApiController
         if (! $quiz) {
             return [
                 'quiz' => null,
-                'response' => response()->json(['error' => 'Quiz tidak ditemukan'], 404),
+                'response' => response()->json(['message' => 'Quiz tidak ditemukan'], 404),
             ];
         }
 
@@ -2791,7 +2791,7 @@ class QuizController extends ApiController
 
             if ($lockedStillActive) {
                 return response()->json([
-                    'error' => 'Quiz ini sedang aktif di perangkat lain. Lanjutkan dari perangkat pertama atau minta guru mereset attempt.',
+                    'message' => 'Quiz ini sedang aktif di perangkat lain. Lanjutkan dari perangkat pertama atau minta guru mereset attempt.',
                     'code' => 'quiz_device_session_locked',
                     'locked_last_seen_at' => $lockedLastSeenAt?->toISOString(),
                     'retry_after_seconds' => max(1, self::DEVICE_SESSION_STALE_SECONDS - $lockedLastSeenAt->diffInSeconds($now, false)),
@@ -2871,7 +2871,7 @@ class QuizController extends ApiController
             : 'Quiz ini hanya dapat dikerjakan melalui web/browser.';
 
         return response()->json([
-            'error' => $message,
+            'message' => $message,
             'code' => 'quiz_device_not_allowed',
             'allowed_device' => $allowed,
             'client_device' => $clientDevice,
@@ -3051,7 +3051,7 @@ class QuizController extends ApiController
 
         $code = trim((string) ($accessCode ?? ''));
         if ($code === '' || ! Hash::check($code, $hash)) {
-            return response()->json(['error' => 'Kode akses quiz tidak valid'], 403);
+            return response()->json(['message' => 'Kode akses quiz tidak valid'], 403);
         }
 
         return null;
@@ -3075,7 +3075,7 @@ class QuizController extends ApiController
 
             if (! $secureScreen) {
                 return response()->json([
-                    'error' => 'Mode strict di aplikasi mobile wajib mengaktifkan proteksi layar sebelum quiz dimulai.',
+                    'message' => 'Mode strict di aplikasi mobile wajib mengaktifkan proteksi layar sebelum quiz dimulai.',
                 ], 403);
             }
 
@@ -3091,7 +3091,7 @@ class QuizController extends ApiController
 
         if (! $fullscreen) {
             return response()->json([
-                'error' => 'Mode strict wajib fullscreen sebelum quiz dimulai.',
+                'message' => 'Mode strict wajib fullscreen sebelum quiz dimulai.',
             ], 403);
         }
 
@@ -3105,7 +3105,7 @@ class QuizController extends ApiController
         if ($maxAttempts !== null && $attemptNo > $maxAttempts) {
             return [
                 'submission' => null,
-                'response' => response()->json(['error' => 'Batas percobaan quiz sudah habis'], 403),
+                'response' => response()->json(['message' => 'Batas percobaan quiz sudah habis'], 403),
             ];
         }
         $strictSecurityResponse = $this->denyIfStrictFullscreenMissing($quiz, $clientMeta);
@@ -3440,7 +3440,7 @@ class QuizController extends ApiController
     {
         $stored = $this->storeSubmissionAnswersBatch($tenantId, $quizId, $submissionId, $answers, $now);
         if (! $stored['ok']) {
-            return response()->json(['error' => $stored['message']], $stored['code']);
+            return response()->json(['message' => $stored['message']], $stored['code']);
         }
 
         return null;

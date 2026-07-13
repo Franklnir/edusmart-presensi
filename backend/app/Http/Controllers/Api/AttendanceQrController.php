@@ -262,7 +262,7 @@ class AttendanceQrController extends ApiController
             return response()->json([
                 'success' => false,
                 'reason' => 'already_attended',
-                'error' => 'Anda sudah absen untuk mata pelajaran ini.',
+                'message' => 'Anda sudah absen untuk mata pelajaran ini.',
                 'data' => $this->attendancePayload($profile, $jadwal, $existingAt, (int) $result['existing']->id),
             ], 409);
         }
@@ -554,7 +554,7 @@ class AttendanceQrController extends ApiController
             return response()->json([
                 'success' => false,
                 'reason' => 'already_attended',
-                'error' => 'Anda sudah absen untuk mata pelajaran ini.',
+                'message' => 'Anda sudah absen untuk mata pelajaran ini.',
                 'data' => $this->attendancePayload($profile, $jadwal, $existingAt, (int) $existing->id),
             ], 409);
         }
@@ -693,7 +693,7 @@ class AttendanceQrController extends ApiController
         $payload = [
             'success' => false,
             'reason' => $reason,
-            'error' => $message,
+            'message' => $message,
         ];
 
         if ($data !== null) {

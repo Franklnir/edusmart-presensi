@@ -13,7 +13,7 @@ class EnsureSuperAdminAccess
     {
         $user = $request->user();
         if (! $user || ! $this->isSuperAdminIdentity((string) ($user->id ?? ''))) {
-            return response()->json(['error' => 'Akses super admin ditolak'], 403);
+            return response()->json(['message' => 'Akses super admin ditolak'], 403);
         }
 
         return $next($request);

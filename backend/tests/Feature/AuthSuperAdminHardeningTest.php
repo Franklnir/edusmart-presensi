@@ -41,7 +41,7 @@ class AuthSuperAdminHardeningTest extends TestCase
         ]);
 
         $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Email ini tidak bisa digunakan untuk registrasi');
+        $response->assertJsonPath('message', 'Email ini tidak bisa digunakan untuk registrasi');
     }
 
     public function test_update_account_rejects_reserved_super_admin_email(): void
@@ -58,7 +58,7 @@ class AuthSuperAdminHardeningTest extends TestCase
         ]);
 
         $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Email ini tidak bisa digunakan');
+        $response->assertJsonPath('message', 'Email ini tidak bisa digunakan');
     }
 
     public function test_tenant_mismatch_not_bypassed_by_super_admin_email_fallback(): void
@@ -84,7 +84,7 @@ class AuthSuperAdminHardeningTest extends TestCase
         ]);
 
         $response->assertStatus(403);
-        $response->assertJsonPath('error', 'Akses tenant ditolak');
+        $response->assertJsonPath('message', 'Akses tenant ditolak');
     }
 
     public function test_forgot_password_rejects_super_admin_email(): void
@@ -195,7 +195,7 @@ class AuthSuperAdminHardeningTest extends TestCase
             ]);
 
         $wrongTenantPassword->assertStatus(401);
-        $wrongTenantPassword->assertJsonPath('error', 'Email/NIS atau password salah.');
+        $wrongTenantPassword->assertJsonPath('message', 'Email/NIS atau password salah.');
     }
 
     public function test_root_domain_cannot_be_used_for_public_auth_login(): void
@@ -341,7 +341,7 @@ class AuthSuperAdminHardeningTest extends TestCase
             ]);
 
         $response->assertStatus(400);
-        $response->assertJsonPath('error', 'Token reset tidak valid, sudah kedaluwarsa, atau akun tidak memenuhi syarat untuk reset mandiri.');
+        $response->assertJsonPath('message', 'Token reset tidak valid, sudah kedaluwarsa, atau akun tidak memenuhi syarat untuk reset mandiri.');
     }
 
     private function defaultTenantId(): string

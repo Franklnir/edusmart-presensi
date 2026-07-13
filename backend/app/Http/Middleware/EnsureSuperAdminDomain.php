@@ -21,7 +21,7 @@ class EnsureSuperAdminDomain
         }
 
         return response()->json([
-            'error' => $this->tenantDomainService->adminHostMessage(),
+            'message' => $this->tenantDomainService->adminHostMessage(),
         ], 403);
     }
 

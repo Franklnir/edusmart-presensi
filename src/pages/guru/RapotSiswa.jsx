@@ -101,7 +101,7 @@ export default function RapotSiswa() {
     [selectedContext, waliHistoryOptions]
   )
   const selectedKelas = selectedHistory?.kelasId || ''
-  const tahunPelajaran = selectedHistory?.tahunPelajaran || activeTahunPelajaran || ''
+  const tahunPelajaran = selectedHistory?.tahunPelajaran || (activeTahunPelajaran || '')
   const assessmentLabels = useMemo(
     () => getAcademicAssessmentLabels(selectedSemester),
     [selectedSemester]
@@ -146,7 +146,7 @@ export default function RapotSiswa() {
       nomor: row.nomor,
       mapel: row.mapel,
       kkm: row.kkm ?? 75,
-      nilai: row.nilai ?? '',
+      nilai: row.nilai || '',
       keterangan: row.keterangan || '',
       source: row.source || null,
       sent_at: row.sent_at || null,
@@ -759,8 +759,8 @@ export default function RapotSiswa() {
         const excelRow = worksheet.addRow([
           index + 1,
           row.mapel || '',
-          row.kkm ?? '',
-          row.nilai ?? '',
+          row.kkm || '',
+          row.nilai || '',
           getPredikat(row.nilai, row.kkm) || '',
           row.keterangan || ''
         ])
@@ -773,7 +773,7 @@ export default function RapotSiswa() {
       worksheet.columns.forEach((column) => {
         let maxLength = 12
         column.eachCell({ includeEmpty: true }, (cell) => {
-          maxLength = Math.max(maxLength, String(cell.value ?? '').length + 2)
+          maxLength = Math.max(maxLength, String(cell.value || '').length + 2)
         })
         column.width = Math.min(Math.max(maxLength, 12), 42)
       })
@@ -1019,7 +1019,7 @@ export default function RapotSiswa() {
                             min="0"
                             max="100"
                             step="0.01"
-                            value={row.kkm ?? ''}
+                            value={row.kkm || ''}
                             disabled={isViewingArchiveRapot}
                             onChange={(event) => updateRow(row.id, 'kkm', event.target.value)}
                             className={`${inputClass} text-center`}

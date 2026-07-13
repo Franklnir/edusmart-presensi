@@ -388,7 +388,7 @@ class WhatsAppController extends ApiController
                     'central' => $this->whatsAppIntegrationService->usesCentralProvider(),
                     'public_url' => null,
                 ],
-                'error' => 'Tenant pusat WhatsApp belum dikonfigurasi.',
+                'message' => 'Tenant pusat WhatsApp belum dikonfigurasi.',
             ];
         }
 
@@ -407,7 +407,7 @@ class WhatsAppController extends ApiController
                     'central' => $this->whatsAppIntegrationService->usesCentralProvider(),
                     'public_url' => null,
                 ],
-                'error' => $this->gatewayErrorMessage($e),
+                'message' => $this->gatewayErrorMessage($e),
             ];
         }
     }

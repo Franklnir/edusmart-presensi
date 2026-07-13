@@ -42,7 +42,7 @@ class StorageSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonPath('error', 'Ekstensi file tidak diizinkan');
+        $response->assertJsonPath('message', 'Ekstensi file tidak diizinkan');
     }
 
     public function test_assignment_pdf_upload_is_limited_to_three_mb_when_drive_is_not_ready(): void
@@ -58,7 +58,7 @@ class StorageSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $this->assertStringContainsString('maksimal 3 MB', (string) $response->json('error'));
+        $this->assertStringContainsString('maksimal 3 MB', (string) $response->json('message'));
     }
 
     public function test_assignment_presentation_upload_is_limited_to_five_mb_when_drive_is_not_ready(): void
@@ -78,7 +78,7 @@ class StorageSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $this->assertStringContainsString('maksimal 5 MB', (string) $response->json('error'));
+        $this->assertStringContainsString('maksimal 5 MB', (string) $response->json('message'));
     }
 
     public function test_assignment_direct_upload_returns_presigned_object_storage_url_when_enabled(): void
@@ -422,7 +422,7 @@ class StorageSecurityTest extends TestCase
         $response->assertStatus(422);
         $response->assertJsonPath('code', 'OBJECT_STORAGE_NOT_READY');
         $response->assertJsonPath('retryable', true);
-        $this->assertStringContainsString('belum ditemukan', (string) $response->json('error'));
+        $this->assertStringContainsString('belum ditemukan', (string) $response->json('message'));
     }
 
     public function test_confirm_direct_upload_waits_for_eventually_available_object_storage_file(): void
@@ -513,7 +513,7 @@ class StorageSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(422);
-        $this->assertStringContainsString('gambar tugas maksimal', (string) $response->json('error'));
+        $this->assertStringContainsString('gambar tugas maksimal', (string) $response->json('message'));
     }
 
     public function test_quiz_media_upload_requires_object_storage_even_when_google_drive_is_connected(): void

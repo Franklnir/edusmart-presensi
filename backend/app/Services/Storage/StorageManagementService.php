@@ -588,7 +588,7 @@ class StorageManagementService
                         'tenant_id' => $tenantId,
                         'logical_bucket' => $logicalBucket,
                         'physical_bucket' => $physicalBucket,
-                        'error' => $error,
+                        'message' => $error,
                     ]);
                     break;
                 }
@@ -636,7 +636,7 @@ class StorageManagementService
                 'untracked_files' => $bucketUntrackedFiles,
                 'pages' => $pages,
                 'truncated' => $truncated,
-                'error' => $error,
+                'message' => $error,
                 'scanned_at' => now()->toIso8601String(),
             ];
 
@@ -1987,7 +1987,7 @@ class StorageManagementService
                 Log::warning('storage_manager_capacity_check_failed', [
                     'tenant_id' => $tenantId,
                     'provider' => $provider,
-                    'error' => $this->shortError($e->getMessage()),
+                    'message' => $this->shortError($e->getMessage()),
                 ]);
 
                 return;
@@ -2364,7 +2364,7 @@ class StorageManagementService
             Log::warning('storage_manager_section_failed', [
                 ...$context,
                 'section' => $section,
-                'error' => $this->shortError($e->getMessage()),
+                'message' => $this->shortError($e->getMessage()),
             ]);
 
             return $fallback;

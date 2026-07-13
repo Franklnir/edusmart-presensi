@@ -546,7 +546,7 @@ class MobileController extends ApiController
             return response()->json([
                 'success' => false,
                 'reason' => 'already_attended',
-                'error' => 'Siswa sudah tercatat absensi untuk mata pelajaran ini hari ini.',
+                'message' => 'Siswa sudah tercatat absensi untuk mata pelajaran ini hari ini.',
                 'data' => [
                     'absensi_id' => (int) $existing->id,
                     'status' => (string) ($existing->status ?? ''),
@@ -593,7 +593,7 @@ class MobileController extends ApiController
                 return response()->json([
                     'success' => false,
                     'reason' => 'already_attended',
-                    'error' => 'Siswa sudah tercatat absensi (duplikat).',
+                    'message' => 'Siswa sudah tercatat absensi (duplikat).',
                 ], 409);
             }
 

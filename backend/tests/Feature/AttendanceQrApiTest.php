@@ -94,7 +94,7 @@ class AttendanceQrApiTest extends TestCase
         $scanResponse->assertStatus(422)
             ->assertJsonPath('success', false)
             ->assertJsonPath('reason', 'class_ended')
-            ->assertJsonPath('error', 'Jam pelajaran sudah selesai. Absensi QR ditutup.');
+            ->assertJsonPath('message', 'Jam pelajaran sudah selesai. Absensi QR ditutup.');
 
         $this->assertDatabaseMissing('absensi', [
             'uid' => $siswa->id,

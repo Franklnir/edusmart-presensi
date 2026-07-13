@@ -13,16 +13,16 @@ class PresenceController extends ApiController
     {
         $user = $this->user($request);
         if (! $user) {
-            return response()->json(['error' => 'Unauthenticated'], 401);
+            return response()->json(['message' => 'Unauthenticated'], 401);
         }
         $tenantId = $this->tenantId($request);
         if (! $tenantId) {
-            return response()->json(['error' => 'Tenant tidak valid'], 400);
+            return response()->json(['message' => 'Tenant tidak valid'], 400);
         }
 
         $deviceId = trim((string) $request->input('device_id', ''));
         if ($deviceId === '') {
-            return response()->json(['error' => 'device_id wajib diisi'], 422);
+            return response()->json(['message' => 'device_id wajib diisi'], 422);
         }
 
         $activity = filter_var($request->input('activity', false), FILTER_VALIDATE_BOOLEAN);
