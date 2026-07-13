@@ -628,6 +628,21 @@ export const hitungRataBerbobot = (components = []) => {
   return round2(totalNilaiBobot / totalBobot)
 }
 
+export const hitungTotalPoinBerbobot = (components = []) => {
+  let totalPoin = 0
+  let hasValue = false
+
+  components.forEach((component) => {
+    const nilai = toNumberOrNull(component?.nilai)
+    const bobot = toNumberOrNull(component?.bobot)
+    if (nilai == null || bobot == null || bobot <= 0) return
+    totalPoin += nilai * bobot / 100
+    hasValue = true
+  })
+
+  return hasValue ? round2(totalPoin) : null
+}
+
 export const hitungNilaiMapelBerbobot = ({
   rataTugasMapel,
   rataQuizRegulerMapel,
@@ -646,7 +661,7 @@ export const hitungNilaiMapelBerbobot = ({
   const nilaiAkhirSemester = activeBobotMapel.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL
     ? nilaiUasManual
     : rataQuizUasMapel
-  return hitungRataBerbobot([
+  return hitungTotalPoinBerbobot([
     { nilai: rataTugasMapel, bobot: activeBobotMapel.bobot_tugas_pr },
     { nilai: rataQuizRegulerMapel, bobot: activeBobotMapel.bobot_quiz_reguler },
     { nilai: nilaiTengahSemester, bobot: activeBobotMapel.bobot_quiz_uts },

@@ -256,7 +256,7 @@ class ReportController extends ApiController
     private function quizSummary(string $tenantId, Request $request, string $kelas, string $mapel, array $period): array
     {
         $query = $this->tenantQuery('quizzes', $tenantId)
-            ->select($this->existingColumns('quizzes', ['id', 'guru_id', 'kelas_id', 'mapel', 'nama', 'starts_at', 'deadline_at', 'penilaian', 'mode', 'is_live', 'is_active', 'created_at', 'updated_at']))
+            ->select($this->existingColumns('quizzes', ['id', 'guru_id', 'kelas_id', 'mapel', 'nama', 'starts_at', 'deadline_at', 'penilaian', 'mode', 'is_live', 'is_active', 'tahun_ajaran', 'semester', 'created_at', 'updated_at']))
             ->where('kelas_id', $kelas)
             ->where('mapel', $mapel)
             ->whereBetween('created_at', [$period['start_at'], $period['end_at']])
@@ -674,15 +674,19 @@ class ReportController extends ApiController
     private function applyAcademicFilters($query, string $table, Request $request): void
     {
         $tahunAjaran = trim((string) $request->query('tahun_ajaran', ''));
+        $semester = AcademicPeriod::normalizeSemester($request->query('semester'));
 
         if ($tahunAjaran !== '' && Schema::hasColumn($table, 'tahun_ajaran')) {
             $query->where('tahun_ajaran', $tahunAjaran);
         }
 
-        // Semester filter intentionally omitted for report queries.
-        // Tugas and quizzes are scoped by tahun_ajaran + date range already;
-        // adding semester makes values disappear when records were created
-        // before semester was consistently populated.
+        if ($semester !== null && Schema::hasColumn($table, 'semester')) {
+            $query->where(function ($scope) use ($semester) {
+                $scope->where('semester', $semester)
+                    ->orWhereNull('semester')
+                    ->orWhere('semester', '');
+            });
+        }
     }
 
     private function scopeReportAcademicYear($query, string $table, Request $request, string $tenantId): void

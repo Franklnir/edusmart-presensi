@@ -128,8 +128,8 @@ const getQuizSpecialLabel = (quiz, fallbackSemester = '') => {
   return ''
 }
 
-const getQuizColumnLabel = (quiz, index) => {
-  const specialLabel = getQuizSpecialLabel(quiz)
+const getQuizColumnLabel = (quiz, index, fallbackSemester = '') => {
+  const specialLabel = getQuizSpecialLabel(quiz, fallbackSemester)
   return specialLabel ? `Q${index + 1} ${specialLabel}` : `Q${index + 1}`
 }
 
@@ -313,6 +313,9 @@ export default function LaporanRekap() {
     () => getAcademicAssessmentLabels(selectedSemester || reportPeriod.semester),
     [reportPeriod.semester, selectedSemester]
   )
+  const mapelRapotTargetLabel = mapelRapotTargetType === 'uas'
+    ? assessmentLabels.final.short
+    : assessmentLabels.midterm.short
   const selectedMapelWeightPeriodKey = `${selectedTahunAjaran || ''}|${selectedSemester || ''}`
   const selectedPeriodStartYear = getAcademicYearStartValue(selectedTahunAjaran)
   const activePeriodStartYear = getAcademicYearStartValue(activeAcademicPeriod?.tahunAjaran)
@@ -4677,7 +4680,7 @@ export default function LaporanRekap() {
                 [`${mapelReportData.bobot.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Kertas' : 'Quiz'} ${assessmentLabels.midterm.short} (${mapelReportData.bobot.bobot_quiz_uts}%)`, mapelReportData.bobot.sumber_uts === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Input manual' : mapelReportData.totals.quizUts],
                 [`${mapelReportData.bobot.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Kertas' : 'Quiz'} ${assessmentLabels.final.short} (${mapelReportData.bobot.bobot_quiz_uas}%)`, mapelReportData.bobot.sumber_uas === MAPEL_ASSESSMENT_SOURCE_MANUAL ? 'Input manual' : mapelReportData.totals.quizUas],
                 [`${getMapelManualComponentLabel(mapelReportData.bobot)} (${mapelReportData.sisaBobot}%)`, mapelReportData.sisaBobot > 0 ? 'Input manual' : 'Tidak dipakai'],
-                [`Terkirim ke Rapot ${String(mapelReportData.targetType || '').toUpperCase()}`, mapelReportData.rows.filter((row) => row.sentToWali).length]
+                [`Terkirim ke Rapot ${mapelReportData.targetType === 'uas' ? assessmentLabels.final.short : assessmentLabels.midterm.short}`, mapelReportData.rows.filter((row) => row.sentToWali).length]
               ].map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <div className="text-xs font-semibold text-slate-500">{label}</div>
@@ -4861,7 +4864,7 @@ export default function LaporanRekap() {
                               onClick={() => handleSendMapelToWali([row])}
                               className="w-full min-w-[92px] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
                             >
-                              {row.sentToWali ? `Kirim Ulang ${String(mapelRapotTargetType).toUpperCase()}` : `Kirim ${String(mapelRapotTargetType).toUpperCase()}`}
+                              {row.sentToWali ? `Kirim Ulang ${mapelRapotTargetLabel}` : `Kirim ${mapelRapotTargetLabel}`}
                             </button>
                           </div>
                         </td>
@@ -5371,7 +5374,7 @@ export default function LaporanRekap() {
                     <th className="px-4 py-3 w-10">No</th>
                     <th className="px-4 py-3 min-w-[200px]">Nama</th>
                     {quizData.quizzes.map((q, i) => {
-                      const specialLabel = getQuizSpecialLabel(q)
+                      const specialLabel = getQuizSpecialLabel(q, selectedSemester || reportPeriod.semester)
                       const isSpecialQuiz = Boolean(specialLabel)
                       return (
                         <th
@@ -5381,9 +5384,9 @@ export default function LaporanRekap() {
                               ? 'bg-orange-100 text-orange-800'
                               : ''
                           }`}
-                          title={q.nama || getQuizColumnLabel(q, i)}
+                          title={q.nama || getQuizColumnLabel(q, i, selectedSemester || reportPeriod.semester)}
                         >
-                          <span className="block">{getQuizColumnLabel(q, i)}</span>
+                          <span className="block">{getQuizColumnLabel(q, i, selectedSemester || reportPeriod.semester)}</span>
                           <span className={`block mt-0.5 text-[10px] leading-tight font-medium normal-case tracking-normal ${
                             isSpecialQuiz ? 'text-orange-700' : 'text-slate-500'
                           }`}>
@@ -5413,7 +5416,7 @@ export default function LaporanRekap() {
                       <td className="px-4 py-2 font-medium">{s.nama}</td>
                       {quizData.quizzes.map((q) => {
                         const nilaiSiswa = s.nilaiQuiz[q.id]?.nilai
-                        const isSpecialQuiz = Boolean(getQuizSpecialLabel(q))
+                        const isSpecialQuiz = Boolean(getQuizSpecialLabel(q, selectedSemester || reportPeriod.semester))
                         const isNilaiRendah =
                           nilaiSiswa !== null &&
                           nilaiSiswa !== undefined &&

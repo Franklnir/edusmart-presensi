@@ -2622,7 +2622,7 @@ export default function GuruQuiz() {
                       <div className="min-w-0">
                         <div className="truncate text-base font-semibold text-slate-900">{q.nama}</div>
                         <div className="mt-1 text-xs text-slate-500">
-                          {getModeLabel(q)} • Akses {getAccessDeviceLabel(q.access_device)}
+                          {getModeLabel(q, termPeriod.semester)} • Akses {getAccessDeviceLabel(q.access_device)}
                         </div>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
@@ -2685,7 +2685,7 @@ export default function GuruQuiz() {
                     <div>
                       <h3 className="text-lg font-bold text-slate-900">{selectedQuiz.nama}</h3>
                       <p className="text-sm text-slate-500">
-                        {getModeLabel(selectedQuiz)} • Akses {getAccessDeviceLabel(selectedQuiz.access_device)}
+                        {getModeLabel(selectedQuiz, termPeriod.semester)} • Akses {getAccessDeviceLabel(selectedQuiz.access_device)}
                       </p>
                     </div>
                   </div>
