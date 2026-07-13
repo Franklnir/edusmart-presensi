@@ -36,7 +36,7 @@ jobs:
           cache: npm
 
       - name: Install frontend deps
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Frontend security audit (high)
         run: npm run security:audit
