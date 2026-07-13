@@ -31,6 +31,8 @@ return [
         'socket_timeout' => (int) env('RFID_MQTT_SOCKET_TIMEOUT', 5),
         'keep_alive' => (int) env('RFID_MQTT_KEEP_ALIVE', 20),
         'reconnect_delay_seconds' => (int) env('RFID_MQTT_RECONNECT_DELAY', 5),
+        'auto_reconnect_max_attempts' => max(1, (int) env('RFID_MQTT_AUTO_RECONNECT_MAX_ATTEMPTS', 5)),
+        'auto_reconnect_delay_milliseconds' => max(100, (int) env('RFID_MQTT_AUTO_RECONNECT_DELAY_MS', 500)),
         'mode_sync_interval_seconds' => (int) env('RFID_MQTT_MODE_SYNC_INTERVAL', 20),
         'config_reload_interval_seconds' => (int) env('RFID_MQTT_CONFIG_RELOAD_INTERVAL', 60),
         'max_payload_bytes' => max(512, min(65536, (int) env('RFID_MQTT_MAX_PAYLOAD_BYTES', 8192))),
@@ -47,6 +49,16 @@ return [
 
         'default_tenant_slug' => env('RFID_MQTT_DEFAULT_TENANT_SLUG', ''),
         'device_tenant_map' => env('RFID_MQTT_DEVICE_TENANT_MAP', '{}'),
+    ],
+
+    'live_events' => [
+        'redis_enabled' => filter_var(env('RFID_LIVE_EVENTS_REDIS_ENABLED', env('APP_ENV') === 'production'), FILTER_VALIDATE_BOOL),
+        'redis_connection' => env('RFID_LIVE_EVENTS_REDIS_CONNECTION', 'default'),
+        'stream_prefix' => env('RFID_LIVE_EVENTS_STREAM_PREFIX', 'rfid:live'),
+        'stream_max_length' => max(100, min(10000, (int) env('RFID_LIVE_EVENTS_STREAM_MAX_LENGTH', 1000))),
+        'stream_ttl_seconds' => max(300, (int) env('RFID_LIVE_EVENTS_STREAM_TTL_SECONDS', 86400)),
+        'read_block_milliseconds' => max(100, min(5000, (int) env('RFID_LIVE_EVENTS_READ_BLOCK_MS', 1000))),
+        'database_catchup_seconds' => max(1, min(30, (int) env('RFID_LIVE_EVENTS_DB_CATCHUP_SECONDS', 5))),
     ],
 
     'mosquitto' => [

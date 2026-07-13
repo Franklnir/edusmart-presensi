@@ -219,6 +219,7 @@ const buildRfidArduinoTemplateSource = (boardType = 'esp8266') => {
     .replace('#define LED_PIN      LED_BUILTIN', '#define LED_PIN      2')
     .replace('#define BUZZER_PIN   D2', '#define BUZZER_PIN   4')
     .replace('BearSSL::WiFiClientSecure mqttSecureClient;', 'WiFiClientSecure mqttSecureClient;')
+    .replace(/ESP\.getChipId\(\)/g, '(uint32_t)(ESP.getEfuseMac() & 0xFFFFFFFF)')
 }
 
 const buildTenantRfidArduinoCode = (template, wifi = {}) => {
@@ -230,7 +231,7 @@ const buildTenantRfidArduinoCode = (template, wifi = {}) => {
   source = replaceCStringConst(source, 'WIFI_PASS', wifi?.password || 'YOUR_WIFI_PASSWORD')
   source = replaceCStringConst(source, 'TENANT_SLUG', template?.tenant_slug || '')
   source = replaceCStringConst(source, 'DEVICE_ID', template?.device_id || '')
-  source = replaceCStringConst(source, 'FIRMWARE_VERSION', template?.firmware_version || '2.0.0-mqtt-only')
+  source = replaceCStringConst(source, 'FIRMWARE_VERSION', template?.firmware_version || '2.1.0-mqtt-durable')
   source = replaceCStringConst(source, 'MQTT_HOST', template?.mqtt?.host || '')
   source = replaceNumberConst(source, 'MQTT_PORT', template?.mqtt?.port || 8883)
   source = replaceCStringConst(source, 'MQTT_USER', template?.mqtt?.username || '')

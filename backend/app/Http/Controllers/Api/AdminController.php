@@ -15,6 +15,7 @@ use App\Services\Academic\ExtracurricularPeriodService;
 use App\Services\Admin\AdminPageCacheService;
 use App\Services\Rfid\RfidDeviceService;
 use App\Services\Rfid\RfidIngressService;
+use App\Services\Rfid\RfidLiveEventStreamService;
 use App\Support\AcademicPeriod;
 use App\Support\AcademicScopeRegistry;
 use Illuminate\Http\Request;
@@ -511,10 +512,13 @@ class AdminController extends ApiController
                 ->max('id');
         }
 
-        return response()->stream(function () use ($tenantId, $cursor) {
+        $liveEvents = app(RfidLiveEventStreamService::class);
+
+        return response()->stream(function () use ($tenantId, $cursor, $liveEvents) {
             $lastId = $cursor;
             $startedAt = microtime(true);
             $lastPingAt = 0.0;
+            $lastDatabaseCatchupAt = 0.0;
 
             echo "event: ready\n";
             echo 'data: '.json_encode(['cursor' => $lastId, 'server_time' => now()->toIso8601String()])."\n\n";
@@ -522,16 +526,17 @@ class AdminController extends ApiController
             flush();
 
             while (! connection_aborted() && (microtime(true) - $startedAt) < 55) {
-                $rows = $this->latestRfidEventRows($tenantId, $lastId);
+                $stream = $liveEvents->readAfter($tenantId, $lastId);
+                $events = $stream['events'] ?? [];
 
-                foreach ($rows as $row) {
-                    $lastId = max($lastId, (int) $row->id);
+                foreach ($events as $payload) {
+                    $lastId = max($lastId, (int) ($payload['id'] ?? 0));
                     echo "event: scan\n";
                     echo 'id: '.$lastId."\n";
-                    echo 'data: '.json_encode($this->formatRfidEventPayload($row), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n\n";
+                    echo 'data: '.json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n\n";
                 }
 
-                if ($rows->isNotEmpty()) {
+                if ($events !== []) {
                     @ob_flush();
                     flush();
 
@@ -539,6 +544,24 @@ class AdminController extends ApiController
                 }
 
                 $now = microtime(true);
+                $catchupInterval = (int) config('rfid.live_events.database_catchup_seconds', 5);
+                if (! ($stream['available'] ?? false) || ($now - $lastDatabaseCatchupAt) >= $catchupInterval) {
+                    $lastDatabaseCatchupAt = $now;
+                    $rows = $this->latestRfidEventRows($tenantId, $lastId);
+                    foreach ($rows as $row) {
+                        $lastId = max($lastId, (int) $row->id);
+                        echo "event: scan\n";
+                        echo 'id: '.$lastId."\n";
+                        echo 'data: '.json_encode($liveEvents->formatPayload($row), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n\n";
+                    }
+                    if ($rows->isNotEmpty()) {
+                        @ob_flush();
+                        flush();
+
+                        continue;
+                    }
+                }
+
                 if (($now - $lastPingAt) >= 15) {
                     $lastPingAt = $now;
                     echo "event: ping\n";
@@ -547,7 +570,9 @@ class AdminController extends ApiController
                     flush();
                 }
 
-                usleep(250000);
+                if (! ($stream['available'] ?? false)) {
+                    usleep(250000);
+                }
             }
         }, 200, $this->eventStreamHeaders());
     }
@@ -854,37 +879,6 @@ class AdminController extends ApiController
             ->orderBy('id')
             ->limit(25)
             ->get();
-    }
-
-    private function formatRfidEventPayload(object $row): array
-    {
-        $response = json_decode((string) ($row->response_payload ?? ''), true);
-        if (! is_array($response)) {
-            $response = [];
-        }
-
-        return [
-            'id' => (int) $row->id,
-            'event_id' => $row->event_id ?? null,
-            'device_id' => $row->device_id ?? null,
-            'card_uid' => $row->card_uid ?? ($response['card_uid'] ?? null),
-            'mode' => $row->mode ?? ($response['mode'] ?? null),
-            'source' => $row->source ?? null,
-            'status' => $row->status ?? null,
-            'response_code' => $row->response_code ?? null,
-            'success' => (bool) ($response['success'] ?? false),
-            'reason' => $response['reason'] ?? null,
-            'message' => $response['message'] ?? null,
-            'nama' => $response['nama'] ?? null,
-            'kelas' => $response['kelas'] ?? null,
-            'mapel' => $response['mapel'] ?? null,
-            'waktu_absen' => $response['waktu_absen'] ?? ($response['waktu'] ?? null),
-            'absen_id' => $response['absen_id'] ?? null,
-            'response' => $response,
-            'scanned_at' => $row->scanned_at ?? null,
-            'processed_at' => $row->processed_at ?? null,
-            'created_at' => $row->created_at ?? null,
-        ];
     }
 
     private function eventStreamHeaders(): array

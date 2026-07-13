@@ -5,7 +5,8 @@
   - ESP8266 hanya membaca kartu dan publish event scan ke MQTT.
   - Laravel menjadi otak sistem untuk mode masuk/pulang, jadwal aktif,
     validasi kartu, enroll UID, audit log, dan response.
-  - Tidak ada HTTP fallback, heartbeat HTTP, atau queue file lokal.
+  - Event disimpan ke antrean LittleFS sampai backend memberi ACK.
+  - Tidak ada HTTP fallback atau heartbeat HTTP.
 
   Alur backend:
   - Mode "manual": scan masuk/pulang mengikuti jam manual di pengaturan.
@@ -26,6 +27,7 @@
 #include <SPI.h>
 #include <Adafruit_PN532.h>
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 #include <time.h>
 
 /* ================== KONFIGURASI WIFI ================== */
@@ -35,7 +37,7 @@ const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
 /* ================== IDENTITAS TENANT & DEVICE ================== */
 const char* TENANT_SLUG = "sman1jombang";
 const char* DEVICE_ID = "gerbang-utara-01";
-const char* FIRMWARE_VERSION = "2.0.0-mqtt-only";
+const char* FIRMWARE_VERSION = "2.1.0-mqtt-durable";
 
 /* ================== KONFIGURASI MOSQUITTO MQTT ================== */
 const char* MQTT_HOST = "mqtt.sismu.biz.id";
@@ -46,7 +48,7 @@ const bool MQTT_USE_TLS = true;
 
 // Generator Super Admin mengisi false untuk broker production dengan public CA.
 // Jangan ubah ke true kecuali sedang mengetes broker self-signed di jaringan lokal.
-const bool MQTT_TLS_INSECURE = true;
+const bool MQTT_TLS_INSECURE = false;
 
 // ISRG Root X1 (Let's Encrypt). Dipakai saat MQTT_TLS_INSECURE=false.
 static const char MQTT_CA_CERT[] PROGMEM = R"EOF(
@@ -103,9 +105,14 @@ const unsigned long WIFI_RETRY_INTERVAL_MS = 10000;
 const unsigned long WIFI_CONNECT_TIMEOUT_MS = 20000;
 const unsigned long MQTT_RETRY_INTERVAL_MS = 5000;
 const unsigned long MQTT_ACK_TIMEOUT_MS = 7000;
+const unsigned long MQTT_MAX_RETRY_BACKOFF_MS = 60000;
 const unsigned long NTP_RESYNC_INTERVAL_MS = 3600000;
 const unsigned long SCAN_COOLDOWN_MS = 3500;
 const uint8_t MQTT_PUBLISH_RETRY_LIMIT = 3;
+const uint8_t EVENT_QUEUE_CAPACITY = 16;
+const char* EVENT_QUEUE_FILE = "/rfid-events.jsonl";
+const char* EVENT_QUEUE_TEMP_FILE = "/rfid-events.tmp";
+const char* EVENT_QUEUE_BACKUP_FILE = "/rfid-events.bak";
 const long TZ_OFFSET_SECONDS = 7 * 3600;
 const char* NTP_SERVER_1 = "pool.ntp.org";
 const char* NTP_SERVER_2 = "time.google.com";
@@ -132,17 +139,19 @@ uint32_t eventCounter = 0;
 String currentMode = "auto";
 
 struct PendingEvent {
-  bool active;
   String eventId;
   String cardUid;
   String mode;
   String scannedAt;
   String payload;
   uint8_t attempts;
+  uint8_t retryCycles;
   unsigned long lastPublishAt;
 };
 
-PendingEvent pendingEvent = { false, "", "", "auto", "", "", 0, 0 };
+PendingEvent eventQueue[EVENT_QUEUE_CAPACITY];
+uint8_t eventQueueSize = 0;
+bool queueStorageReady = false;
 
 /* ================== BEEPER ================== */
 void beepRaw(int durationMs) {
@@ -273,7 +282,13 @@ String generateEventId() {
   }
 
   char suffix[18];
-  snprintf(suffix, sizeof(suffix), "%04lu", (unsigned long) (eventCounter % 10000UL));
+  snprintf(
+    suffix,
+    sizeof(suffix),
+    "%04lu-%04lx",
+    (unsigned long) (eventCounter % 10000UL),
+    (unsigned long) random(0x10000)
+  );
   return "scan-" + sanitizeToken(String(DEVICE_ID)) + "-" + String(stamp) + "-" + String(suffix);
 }
 
@@ -387,7 +402,7 @@ void handleModeMessage(const String& message) {
 
 /* ================== MQTT ================== */
 String buildMqttClientId() {
-  return "rfid-" + String(ESP.getChipId(), HEX) + "-" + String(random(0xffff), HEX);
+  return "rfid-" + sanitizeToken(String(TENANT_SLUG)) + "-" + String(ESP.getChipId(), HEX);
 }
 
 String configuredTopic(const char* configuredTopic, const String& fallback) {
@@ -464,18 +479,150 @@ bool responseCanClosePending(bool success, bool duplicate, int httpStatus) {
     return true;
   }
 
-  return httpStatus > 0 && httpStatus < 500;
+  if (httpStatus == 408 || httpStatus == 425 || httpStatus == 429) {
+    return false;
+  }
+
+  return httpStatus >= 400 && httpStatus < 500;
 }
 
-void resetPendingEvent() {
-  pendingEvent.active = false;
-  pendingEvent.eventId = "";
-  pendingEvent.cardUid = "";
-  pendingEvent.mode = "auto";
-  pendingEvent.scannedAt = "";
-  pendingEvent.payload = "";
-  pendingEvent.attempts = 0;
-  pendingEvent.lastPublishAt = 0;
+PendingEvent* currentPendingEvent() {
+  return eventQueueSize > 0 ? &eventQueue[0] : nullptr;
+}
+
+void clearEvent(PendingEvent& event) {
+  event.eventId = "";
+  event.cardUid = "";
+  event.mode = "auto";
+  event.scannedAt = "";
+  event.payload = "";
+  event.attempts = 0;
+  event.retryCycles = 0;
+  event.lastPublishAt = 0;
+}
+
+bool persistEventQueue() {
+  if (!queueStorageReady) {
+    return false;
+  }
+
+  File file = LittleFS.open(EVENT_QUEUE_TEMP_FILE, "w");
+  if (!file) {
+    Serial.println("[QUEUE] Gagal membuka file sementara.");
+    return false;
+  }
+
+  for (uint8_t i = 0; i < eventQueueSize; i++) {
+    StaticJsonDocument<1024> doc;
+    doc["event_id"] = eventQueue[i].eventId;
+    doc["card_uid"] = eventQueue[i].cardUid;
+    doc["mode"] = eventQueue[i].mode;
+    doc["scanned_at"] = eventQueue[i].scannedAt;
+    doc["payload"] = eventQueue[i].payload;
+    serializeJson(doc, file);
+    file.println();
+  }
+
+  file.flush();
+  file.close();
+  LittleFS.remove(EVENT_QUEUE_BACKUP_FILE);
+  if (LittleFS.exists(EVENT_QUEUE_FILE) && !LittleFS.rename(EVENT_QUEUE_FILE, EVENT_QUEUE_BACKUP_FILE)) {
+    Serial.println("[QUEUE] Gagal membuat backup antrean.");
+    LittleFS.remove(EVENT_QUEUE_TEMP_FILE);
+    return false;
+  }
+  if (!LittleFS.rename(EVENT_QUEUE_TEMP_FILE, EVENT_QUEUE_FILE)) {
+    Serial.println("[QUEUE] Gagal mengganti file antrean.");
+    if (LittleFS.exists(EVENT_QUEUE_BACKUP_FILE)) {
+      LittleFS.rename(EVENT_QUEUE_BACKUP_FILE, EVENT_QUEUE_FILE);
+    }
+    return false;
+  }
+  LittleFS.remove(EVENT_QUEUE_BACKUP_FILE);
+
+  return true;
+}
+
+void loadEventQueue() {
+  queueStorageReady = LittleFS.begin();
+  if (!queueStorageReady) {
+    Serial.println("[QUEUE] LittleFS tidak tersedia; scan hanya bertahan di RAM.");
+    return;
+  }
+
+  if (!LittleFS.exists(EVENT_QUEUE_FILE)) {
+    if (LittleFS.exists(EVENT_QUEUE_BACKUP_FILE)) {
+      LittleFS.rename(EVENT_QUEUE_BACKUP_FILE, EVENT_QUEUE_FILE);
+      Serial.println("[QUEUE] Antrean dipulihkan dari backup transaksi.");
+    } else if (LittleFS.exists(EVENT_QUEUE_TEMP_FILE)) {
+      LittleFS.rename(EVENT_QUEUE_TEMP_FILE, EVENT_QUEUE_FILE);
+      Serial.println("[QUEUE] Antrean dipulihkan dari file sementara.");
+    } else {
+      Serial.println("[QUEUE] Antrean persisten kosong.");
+      return;
+    }
+  }
+
+  File file = LittleFS.open(EVENT_QUEUE_FILE, "r");
+  while (file && file.available() && eventQueueSize < EVENT_QUEUE_CAPACITY) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) {
+      continue;
+    }
+
+    StaticJsonDocument<1024> doc;
+    if (deserializeJson(doc, line) != DeserializationError::Ok) {
+      Serial.println("[QUEUE] Baris rusak dilewati.");
+      continue;
+    }
+
+    PendingEvent& event = eventQueue[eventQueueSize];
+    clearEvent(event);
+    event.eventId = jsonString(doc["event_id"]);
+    event.cardUid = jsonString(doc["card_uid"]);
+    event.mode = normalizeModeValue(jsonString(doc["mode"], "auto"));
+    event.scannedAt = jsonString(doc["scanned_at"]);
+    event.payload = jsonString(doc["payload"]);
+    if (event.eventId.length() > 0 && event.payload.length() > 0) {
+      eventQueueSize++;
+    }
+  }
+  file.close();
+  Serial.printf("[QUEUE] Memulihkan %u event.\n", eventQueueSize);
+}
+
+bool enqueueEvent(const PendingEvent& event) {
+  if (eventQueueSize >= EVENT_QUEUE_CAPACITY) {
+    return false;
+  }
+
+  eventQueue[eventQueueSize] = event;
+  eventQueueSize++;
+  if (queueStorageReady && !persistEventQueue()) {
+    eventQueueSize--;
+    clearEvent(eventQueue[eventQueueSize]);
+    Serial.println("[QUEUE] Event ditolak karena gagal disimpan ke LittleFS.");
+    return false;
+  }
+  Serial.printf("[QUEUE] Event tersimpan. pending=%u/%u\n", eventQueueSize, EVENT_QUEUE_CAPACITY);
+  return true;
+}
+
+void removeCurrentEvent() {
+  if (eventQueueSize == 0) {
+    return;
+  }
+
+  clearEvent(eventQueue[0]);
+  for (uint8_t i = 1; i < eventQueueSize; i++) {
+    eventQueue[i - 1] = eventQueue[i];
+  }
+  eventQueueSize--;
+  if (eventQueueSize < EVENT_QUEUE_CAPACITY) {
+    clearEvent(eventQueue[eventQueueSize]);
+  }
+  persistEventQueue();
 }
 
 void handleResponseFeedback(bool success, const String& reason) {
@@ -528,7 +675,8 @@ void handleResponseMessage(const String& message) {
     return;
   }
 
-  if (!pendingEvent.active || eventId != pendingEvent.eventId) {
+  PendingEvent* pendingEvent = currentPendingEvent();
+  if (pendingEvent == nullptr || eventId != pendingEvent->eventId) {
     return;
   }
 
@@ -539,7 +687,7 @@ void handleResponseMessage(const String& message) {
 
   Serial.printf(
     "[RESP] event=%s success=%d duplicate=%d reason=%s nama=%s kelas=%s mapel=%s status=%s\n",
-    pendingEvent.eventId.c_str(),
+    pendingEvent->eventId.c_str(),
     success,
     duplicate,
     reason.c_str(),
@@ -553,7 +701,7 @@ void handleResponseMessage(const String& message) {
   handleResponseFeedback(success || duplicate, reason);
 
   if (closePending) {
-    resetPendingEvent();
+    removeCurrentEvent();
   }
 }
 
@@ -591,7 +739,16 @@ void connectMqttIfNeeded() {
   String clientId = buildMqttClientId();
 
   Serial.printf("[MQTT] Connecting as %s ... ", clientId.c_str());
-  bool connected = mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASS);
+  bool connected = mqttClient.connect(
+    clientId.c_str(),
+    MQTT_USER,
+    MQTT_PASS,
+    nullptr,
+    0,
+    false,
+    nullptr,
+    false
+  );
   if (!connected) {
     int state = mqttClient.state();
     Serial.printf("failed rc=%d (%s)\n", state, mqttStateText(state));
@@ -627,31 +784,33 @@ String buildScanPayload(const String& eventId, const String& cardUid, const Stri
 }
 
 bool publishPendingEvent() {
-  if (!pendingEvent.active || !mqttClient.connected()) {
+  PendingEvent* pendingEvent = currentPendingEvent();
+  if (pendingEvent == nullptr || !mqttClient.connected()) {
     return false;
   }
 
-  bool ok = mqttClient.publish(topicScan.c_str(), pendingEvent.payload.c_str(), false);
+  bool ok = mqttClient.publish(topicScan.c_str(), pendingEvent->payload.c_str(), false);
   if (!ok) {
     Serial.println("[MQTT] Publish gagal.");
     return false;
   }
 
-  pendingEvent.attempts++;
-  pendingEvent.lastPublishAt = millis();
+  pendingEvent->attempts++;
+  pendingEvent->lastPublishAt = millis();
   Serial.printf(
     "[MQTT] Published event=%s uid=%s mode=%s attempt=%u\n",
-    pendingEvent.eventId.c_str(),
-    pendingEvent.cardUid.c_str(),
-    pendingEvent.mode.c_str(),
-    pendingEvent.attempts
+    pendingEvent->eventId.c_str(),
+    pendingEvent->cardUid.c_str(),
+    pendingEvent->mode.c_str(),
+    pendingEvent->attempts
   );
 
   return true;
 }
 
-void retryOrDropPendingIfNeeded() {
-  if (!pendingEvent.active) {
+void retryPendingIfNeeded() {
+  PendingEvent* pendingEvent = currentPendingEvent();
+  if (pendingEvent == nullptr) {
     return;
   }
 
@@ -659,23 +818,36 @@ void retryOrDropPendingIfNeeded() {
     return;
   }
 
-  if (pendingEvent.attempts == 0) {
+  if (pendingEvent->attempts == 0) {
+    unsigned long backoff = min(
+      MQTT_MAX_RETRY_BACKOFF_MS,
+      MQTT_ACK_TIMEOUT_MS * (unsigned long) max(1, (int) pendingEvent->retryCycles)
+    );
+    if (pendingEvent->lastPublishAt > 0 && (millis() - pendingEvent->lastPublishAt) < backoff) {
+      return;
+    }
     publishPendingEvent();
     return;
   }
 
-  if ((millis() - pendingEvent.lastPublishAt) <= MQTT_ACK_TIMEOUT_MS) {
+  if ((millis() - pendingEvent->lastPublishAt) <= MQTT_ACK_TIMEOUT_MS) {
     return;
   }
 
-  if (pendingEvent.attempts < MQTT_PUBLISH_RETRY_LIMIT) {
-    Serial.printf("[MQTT] ACK timeout. Retry event=%s\n", pendingEvent.eventId.c_str());
+  if (pendingEvent->attempts < MQTT_PUBLISH_RETRY_LIMIT) {
+    Serial.printf("[MQTT] ACK timeout. Retry event=%s\n", pendingEvent->eventId.c_str());
     publishPendingEvent();
     return;
   }
 
-  Serial.printf("[MQTT] Event dibatalkan setelah %u percobaan: %s\n", pendingEvent.attempts, pendingEvent.eventId.c_str());
-  resetPendingEvent();
+  pendingEvent->retryCycles = min(255, (int) pendingEvent->retryCycles + 1);
+  pendingEvent->attempts = 0;
+  pendingEvent->lastPublishAt = millis();
+  Serial.printf(
+    "[MQTT] Backend belum memberi ACK; event tetap disimpan: %s (siklus=%u)\n",
+    pendingEvent->eventId.c_str(),
+    pendingEvent->retryCycles
+  );
   sfxError();
 }
 
@@ -699,28 +871,27 @@ void handleScannedCard(const String& cardUid) {
   Serial.printf("[NFC] card_uid=%s mode=%s\n", cardUid.c_str(), currentMode.c_str());
   sfxCardDetected();
 
-  if (pendingEvent.active) {
-    Serial.println("[NFC] Masih menunggu response scan sebelumnya.");
-    sfxWarning();
+  PendingEvent event;
+  clearEvent(event);
+  event.eventId = generateEventId();
+  event.cardUid = cardUid;
+  event.mode = normalizeModeValue(currentMode);
+  event.scannedAt = currentIsoTimestamp();
+  event.payload = buildScanPayload(
+    event.eventId,
+    event.cardUid,
+    event.mode,
+    event.scannedAt
+  );
+
+  if (!enqueueEvent(event)) {
+    Serial.println("[QUEUE] Penuh; scan baru tidak dapat disimpan.");
+    sfxDenied();
     return;
   }
 
-  pendingEvent.active = true;
-  pendingEvent.eventId = generateEventId();
-  pendingEvent.cardUid = cardUid;
-  pendingEvent.mode = normalizeModeValue(currentMode);
-  pendingEvent.scannedAt = currentIsoTimestamp();
-  pendingEvent.payload = buildScanPayload(
-    pendingEvent.eventId,
-    pendingEvent.cardUid,
-    pendingEvent.mode,
-    pendingEvent.scannedAt
-  );
-  pendingEvent.attempts = 0;
-  pendingEvent.lastPublishAt = 0;
-
-  if (!publishPendingEvent()) {
-    Serial.println("[MQTT] Scan disimpan sementara di RAM sampai MQTT tersambung.");
+  if (eventQueueSize == 1 && !publishPendingEvent()) {
+    Serial.println("[MQTT] Scan tersimpan di LittleFS sampai MQTT tersambung.");
   }
 }
 
@@ -752,6 +923,7 @@ void setup() {
   Serial.printf("tenant=%s device=%s firmware=%s\n", TENANT_SLUG, DEVICE_ID, FIRMWARE_VERSION);
   Serial.printf("scan=%s\nresponse=%s\nmode=%s\n", topicScan.c_str(), topicResponse.c_str(), topicMode.c_str());
   printConfigWarnings();
+  loadEventQueue();
 
   sfxStartup();
   configureSecureClient();
@@ -785,7 +957,7 @@ void loop() {
     mqttClient.loop();
   }
 
-  retryOrDropPendingIfNeeded();
+  retryPendingIfNeeded();
 
   if (hasLastUid && (millis() - lastScanTime > SCAN_COOLDOWN_MS)) {
     hasLastUid = false;
