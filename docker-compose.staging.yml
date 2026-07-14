@@ -1,0 +1,253 @@
+name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}
+
+x-logging: &staging-logging
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "3"
+
+x-app-environment: &staging-app-environment
+  APP_ENV: staging
+  APP_DEBUG: "false"
+  APP_KEY: ${APP_KEY:?APP_KEY is required}
+  APP_RELEASE_SHA: ${RELEASE_SHA:?RELEASE_SHA is required}
+  APP_URL: https://${STAGING_BACKEND_HOST:?STAGING_BACKEND_HOST is required}
+  FRONTEND_URL: https://${STAGING_FRONTEND_HOST:?STAGING_FRONTEND_HOST is required}
+  LOG_CHANNEL: stderr
+  LOG_LEVEL: info
+  WAIT_FOR_DB: "true"
+  RUN_MIGRATIONS: "false"
+
+  DB_CONNECTION: pgsql
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+  DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+  DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+  DB_SSLMODE: disable
+
+  CACHE_STORE: redis
+  QUEUE_CONNECTION: redis
+  SESSION_DRIVER: redis
+  SESSION_CONNECTION: default
+  REDIS_CLIENT: phpredis
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+  REDIS_DB: "0"
+  REDIS_CACHE_DB: "1"
+  REDIS_PREFIX: ${REDIS_PREFIX:?REDIS_PREFIX is required}
+  CACHE_PREFIX: ${CACHE_PREFIX:?CACHE_PREFIX is required}
+  HORIZON_PREFIX: ${HORIZON_PREFIX:?HORIZON_PREFIX is required}
+  REDIS_QUEUE: staging-default
+
+  MAIL_MAILER: log
+  GOOGLE_AUTH_ENABLED: "false"
+  GOOGLE_DRIVE_ENABLED: "false"
+  WHATSAPP_CENTRAL_ENABLED: "false"
+  RFID_MQTT_BRIDGE_ENABLED: "false"
+  RFID_MOSQUITTO_ENABLED: "false"
+  RFID_LIVE_EVENTS_REDIS_ENABLED: "false"
+
+  TENANT_ROOT_DOMAIN: ${STAGING_TENANT_ROOT_DOMAIN:?STAGING_TENANT_ROOT_DOMAIN is required}
+  TENANT_DEFAULT_SLUG: ${STAGING_DEFAULT_TENANT_SLUG:-tenant-a}
+  TENANT_ADMIN_HOSTS: ${STAGING_BACKEND_HOST:?STAGING_BACKEND_HOST is required}
+  TENANT_ALLOW_ROOT_FOR_SUPER_ADMIN: "false"
+  TENANT_ALLOW_HEADER_OVERRIDE: "false"
+  TENANT_EDGE_PROXY_SECRET: ${TENANT_EDGE_PROXY_SECRET:?TENANT_EDGE_PROXY_SECRET is required}
+  TENANT_REQUIRE_EDGE_PROXY: "true"
+  SANCTUM_STATEFUL_DOMAINS: ${STAGING_FRONTEND_HOST:?STAGING_FRONTEND_HOST is required}
+  SESSION_DOMAIN: ${STAGING_SESSION_DOMAIN:-}
+  SESSION_SECURE_COOKIE: "true"
+  SESSION_HTTP_ONLY: "true"
+  SESSION_SAME_SITE: lax
+  CORS_ALLOWED_ORIGINS: https://${STAGING_FRONTEND_HOST:?STAGING_FRONTEND_HOST is required}
+  CORS_ALLOWED_ORIGIN_PATTERNS: ""
+
+  API_V2_UPLOADS_ENABLED: ${API_V2_UPLOADS_ENABLED:-false}
+  API_V2_UPLOAD_PROVIDER: s3-compatible
+  APP_OBJECT_STORAGE_ENABLED: "true"
+  APP_DIRECT_UPLOAD_BROWSER_ENABLED: "true"
+  APP_DIRECT_UPLOAD_VERIFY_OBJECTS: "true"
+  APP_DIRECT_UPLOAD_BUCKETS: assignments
+  APP_OBJECT_STORAGE_ACCESS_KEY_ID: ${STAGING_STORAGE_ACCESS_KEY:?STAGING_STORAGE_ACCESS_KEY is required}
+  APP_OBJECT_STORAGE_SECRET_ACCESS_KEY: ${STAGING_STORAGE_SECRET_KEY:?STAGING_STORAGE_SECRET_KEY is required}
+  APP_OBJECT_STORAGE_REGION: ${STAGING_STORAGE_REGION:-us-east-1}
+  APP_OBJECT_STORAGE_BUCKET: ${STAGING_STORAGE_BUCKET:?STAGING_STORAGE_BUCKET is required}
+  APP_OBJECT_STORAGE_BUCKET_ASSIGNMENTS: ${STAGING_STORAGE_BUCKET:?STAGING_STORAGE_BUCKET is required}
+  APP_OBJECT_STORAGE_ENDPOINT: https://${STAGING_STORAGE_HOST:?STAGING_STORAGE_HOST is required}
+  APP_OBJECT_STORAGE_USE_PATH_STYLE_ENDPOINT: "true"
+
+  STAGING_ISOLATION_ACK: "true"
+  STAGING_EXPECTED_FRONTEND_HOST: ${STAGING_FRONTEND_HOST:?STAGING_FRONTEND_HOST is required}
+  STAGING_EXPECTED_BACKEND_HOST: ${STAGING_BACKEND_HOST:?STAGING_BACKEND_HOST is required}
+  STAGING_EXPECTED_STORAGE_HOST: ${STAGING_STORAGE_HOST:?STAGING_STORAGE_HOST is required}
+  STAGING_EXPECTED_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+  STAGING_EXPECTED_REDIS_PREFIX: "edusmart:staging:"
+  STAGING_EXPECTED_STORAGE_BUCKET: ${STAGING_STORAGE_BUCKET:?STAGING_STORAGE_BUCKET is required}
+  STAGING_TEST_PASSWORD: ${STAGING_TEST_PASSWORD:?STAGING_TEST_PASSWORD is required}
+
+services:
+  postgres:
+    image: ${STAGING_POSTGRES_IMAGE:?STAGING_POSTGRES_IMAGE is required}
+    restart: unless-stopped
+    logging: *staging-logging
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:?DB_DATABASE is required}
+      POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [staging_internal]
+
+  redis:
+    image: ${STAGING_REDIS_IMAGE:?STAGING_REDIS_IMAGE is required}
+    restart: unless-stopped
+    logging: *staging-logging
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    networks: [staging_internal]
+
+  minio:
+    image: ${STAGING_MINIO_IMAGE:?STAGING_MINIO_IMAGE is required}
+    restart: unless-stopped
+    logging: *staging-logging
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STAGING_STORAGE_ACCESS_KEY:?STAGING_STORAGE_ACCESS_KEY is required}
+      MINIO_ROOT_PASSWORD: ${STAGING_STORAGE_SECRET_KEY:?STAGING_STORAGE_SECRET_KEY is required}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [staging_internal]
+
+  storage-init:
+    image: ${STAGING_MINIO_MC_IMAGE:?STAGING_MINIO_MC_IMAGE is required}
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      STAGING_STORAGE_ACCESS_KEY: ${STAGING_STORAGE_ACCESS_KEY:?STAGING_STORAGE_ACCESS_KEY is required}
+      STAGING_STORAGE_SECRET_KEY: ${STAGING_STORAGE_SECRET_KEY:?STAGING_STORAGE_SECRET_KEY is required}
+      STAGING_STORAGE_BUCKET: ${STAGING_STORAGE_BUCKET:?STAGING_STORAGE_BUCKET is required}
+      STAGING_FRONTEND_ORIGIN: https://${STAGING_FRONTEND_HOST:?STAGING_FRONTEND_HOST is required}
+      STAGING_STORAGE_RETENTION_DAYS: ${STAGING_STORAGE_RETENTION_DAYS:-14}
+    volumes:
+      - ./deploy/staging/init-storage.sh:/opt/edusmart/init-storage.sh:ro
+    entrypoint: ["/bin/sh", "/opt/edusmart/init-storage.sh"]
+    networks: [staging_internal]
+
+  backend:
+    image: ${EDUSMART_BACKEND_IMAGE:?EDUSMART_BACKEND_IMAGE is required}
+    restart: unless-stopped
+    logging: *staging-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *staging-app-environment
+      APP_ROLE: web
+    expose: ["9000"]
+    healthcheck:
+      test: ["CMD-SHELL", "php -r 'exit(extension_loaded(\"zip\") && extension_loaded(\"pdo_pgsql\") && extension_loaded(\"redis\") ? 0 : 1);'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [staging_internal]
+
+  worker:
+    image: ${EDUSMART_BACKEND_IMAGE:?EDUSMART_BACKEND_IMAGE is required}
+    restart: unless-stopped
+    logging: *staging-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      <<: *staging-app-environment
+      APP_ROLE: worker
+    command: ["php", "artisan", "queue:work", "redis", "--queue=staging-default", "--sleep=1", "--tries=3", "--timeout=120"]
+    networks: [staging_internal]
+
+  scheduler:
+    image: ${EDUSMART_BACKEND_IMAGE:?EDUSMART_BACKEND_IMAGE is required}
+    restart: unless-stopped
+    logging: *staging-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      <<: *staging-app-environment
+      APP_ROLE: scheduler
+    command: ["php", "artisan", "schedule:work"]
+    networks: [staging_internal]
+
+  nginx:
+    image: ${EDUSMART_NGINX_IMAGE:?EDUSMART_NGINX_IMAGE is required}
+    restart: unless-stopped
+    logging: *staging-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    expose: ["80"]
+    networks: [staging_internal]
+
+  caddy:
+    image: ${EDUSMART_CADDY_IMAGE:?EDUSMART_CADDY_IMAGE is required}
+    restart: unless-stopped
+    logging: *staging-logging
+    depends_on:
+      nginx:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    environment:
+      STAGING_ACME_EMAIL: ${STAGING_ACME_EMAIL:?STAGING_ACME_EMAIL is required}
+      STAGING_BACKEND_HOST: ${STAGING_BACKEND_HOST:?STAGING_BACKEND_HOST is required}
+      STAGING_STORAGE_HOST: ${STAGING_STORAGE_HOST:?STAGING_STORAGE_HOST is required}
+      TENANT_EDGE_PROXY_SECRET: ${TENANT_EDGE_PROXY_SECRET:?TENANT_EDGE_PROXY_SECRET is required}
+    volumes:
+      - ./deploy/staging/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "${STAGING_HTTP_PORT:-80}:80"
+      - "${STAGING_HTTPS_PORT:-443}:443"
+    networks: [staging_internal]
+
+networks:
+  staging_internal:
+    name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}_internal
+
+volumes:
+  postgres_data:
+    name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}_postgres_data
+  redis_data:
+    name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}_redis_data
+  minio_data:
+    name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}_minio_data
+  caddy_data:
+    name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}_caddy_data
+  caddy_config:
+    name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}_caddy_config

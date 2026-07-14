@@ -1,5 +1,8 @@
 FROM php:8.4-fpm-alpine
 
+ARG APP_RELEASE_SHA=unknown
+ENV APP_RELEASE_SHA=${APP_RELEASE_SHA}
+
 RUN apk add --no-cache \
     bash \
     curl \

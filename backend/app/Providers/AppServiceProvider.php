@@ -15,6 +15,7 @@ use App\Policies\AttachmentPolicy;
 use App\Policies\ProfilePolicy;
 use App\Policies\TugasJawabanPolicy;
 use App\Policies\TugasPolicy;
+use App\Services\StagingIsolationGuard;
 use App\Services\Storage\LocalFakeUploadStorageProvider;
 use App\Services\Storage\S3CompatibleUploadStorageProvider;
 use App\Support\Tenancy\TenantContext;
@@ -52,6 +53,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $this->app->make(StagingIsolationGuard::class)->assertSafe();
+
         $clampInt = static fn (string $key, int $default, int $min, int $max): int => max(
             $min,
             min($max, (int) env($key, $default))

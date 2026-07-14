@@ -2,6 +2,8 @@
 
 return [
 
+    'release_sha' => env('APP_RELEASE_SHA', 'unknown'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Name

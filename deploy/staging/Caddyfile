@@ -1,0 +1,26 @@
+{
+    email {$STAGING_ACME_EMAIL}
+    admin off
+}
+
+{$STAGING_BACKEND_HOST} {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+    reverse_proxy nginx:80 {
+        header_up X-Sismu-Edge-Secret {$TENANT_EDGE_PROXY_SECRET}
+    }
+}
+
+{$STAGING_STORAGE_HOST} {
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+    }
+    reverse_proxy minio:9000
+}

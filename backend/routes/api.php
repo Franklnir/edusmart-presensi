@@ -30,7 +30,10 @@ use App\Http\Middleware\ResolveTenant;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', function () {
-    return ['status' => 'ok'];
+    return [
+        'status' => 'ok',
+        'release_sha' => (string) config('app.release_sha', 'unknown'),
+    ];
 });
 
 Route::get('/internal/tls/authorize', [InfrastructureController::class, 'authorizeTlsDomain'])
