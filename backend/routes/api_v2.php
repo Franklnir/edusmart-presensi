@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V2\AssignmentController;
+use App\Http\Controllers\Api\V2\AttachmentController;
 use App\Http\Controllers\Api\V2\AttendanceController;
 use App\Http\Controllers\Api\V2\AttendanceRequestController;
 use App\Http\Controllers\Api\V2\ClassController;
@@ -48,4 +49,7 @@ Route::middleware('throttle:api')->group(function () {
     Route::get('uploads/{session}', [UploadController::class, 'show'])->name('uploads.show');
     Route::post('uploads/{session}/complete', [UploadController::class, 'complete'])->name('uploads.complete');
     Route::delete('uploads/{session}', [UploadController::class, 'destroy'])->name('uploads.destroy');
+    Route::get('attachments/{attachment}', [AttachmentController::class, 'show'])->name('attachments.show');
+    Route::get('attachments/{attachment}/download', [AttachmentController::class, 'download'])->name('attachments.download');
+    Route::delete('attachments/{attachment}', [AttachmentController::class, 'destroy'])->name('attachments.destroy');
 });

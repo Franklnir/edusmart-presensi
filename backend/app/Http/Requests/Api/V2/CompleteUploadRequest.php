@@ -23,7 +23,7 @@ class CompleteUploadRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // No body needed for completion, but maybe metadata
+            'idempotency_key' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

@@ -55,6 +55,11 @@ Schedule::command('google-drive:health-check --recover')
     ->withoutOverlapping(30)
     ->onOneServer();
 
+Schedule::command('uploads:cleanup')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping(15)
+    ->onOneServer();
+
 Artisan::command('backup:verify-monthly {--tenant=} {--month=}', function () {
     /** @var TenantBackupService $service */
     $service = app(TenantBackupService::class);

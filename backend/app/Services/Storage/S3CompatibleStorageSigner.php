@@ -52,13 +52,21 @@ class S3CompatibleStorageSigner
         return max(60, min(3600, $expires));
     }
 
-    public function presignPut(string $objectKey, string $contentType, ?int $expiresSeconds = null, ?string $logicalBucket = null): array
-    {
+    public function presignPut(
+        string $objectKey,
+        string $contentType,
+        ?int $expiresSeconds = null,
+        ?string $logicalBucket = null,
+        ?string $checksumSha256 = null
+    ): array {
         $contentType = trim($contentType) !== '' ? trim($contentType) : 'application/octet-stream';
 
-        return $this->presign('PUT', $objectKey, $expiresSeconds, [
-            'content-type' => $contentType,
-        ], $logicalBucket);
+        $headers = ['content-type' => $contentType];
+        if (is_string($checksumSha256) && $checksumSha256 !== '') {
+            $headers['x-amz-checksum-sha256'] = $checksumSha256;
+        }
+
+        return $this->presign('PUT', $objectKey, $expiresSeconds, $headers, $logicalBucket);
     }
 
     public function presignGet(string $objectKey, ?int $expiresSeconds = null, ?string $logicalBucket = null): array
@@ -134,6 +142,8 @@ class S3CompatibleStorageSigner
                 'status' => $response->status(),
                 'size_matches' => $sizeMatches,
                 'size_bytes' => $sizeBytes,
+                'content_type' => $response->header('Content-Type'),
+                'checksum_sha256' => $response->header('x-amz-checksum-sha256'),
                 'attempts' => $attempt,
                 'retryable' => ! $sizeMatches,
             ];
@@ -168,6 +178,11 @@ class S3CompatibleStorageSigner
         $response = Http::timeout(20)->delete($signed['url']);
 
         return $response->successful() || $response->status() === 404;
+    }
+
+    public function canVerifyUploads(): bool
+    {
+        return $this->shouldVerifyUploads();
     }
 
     public function configuredBuckets(): array

@@ -43,6 +43,9 @@ class AttachmentClaimService
             if ($session->status !== 'completed') {
                 throw new \LogicException('ATTACHMENT_NOT_COMPLETED');
             }
+            if ($attachment->status !== 'active') {
+                throw new \LogicException('ATTACHMENT_NOT_ACTIVE');
+            }
             if ($attachment->assignment_id !== null && (int) $attachment->assignment_id !== $assignmentId) {
                 throw new \LogicException('ATTACHMENT_ASSIGNMENT_MISMATCH');
             }

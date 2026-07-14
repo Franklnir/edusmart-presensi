@@ -2,16 +2,21 @@
 
 namespace App\Providers;
 
+use App\Contracts\UploadStorageProvider;
 use App\Models\Absensi;
 use App\Models\AbsensiAjuan;
+use App\Models\Attachment;
 use App\Models\Profile;
 use App\Models\Tugas;
 use App\Models\TugasJawaban;
 use App\Policies\AbsensiAjuanPolicy;
 use App\Policies\AbsensiPolicy;
+use App\Policies\AttachmentPolicy;
 use App\Policies\ProfilePolicy;
 use App\Policies\TugasJawabanPolicy;
 use App\Policies\TugasPolicy;
+use App\Services\Storage\LocalFakeUploadStorageProvider;
+use App\Services\Storage\S3CompatibleUploadStorageProvider;
 use App\Support\Tenancy\TenantContext;
 use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Auth\Notifications\ResetPassword;
@@ -33,6 +38,13 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->scoped(TenantContext::class, fn () => new TenantContext);
+        $this->app->bind(UploadStorageProvider::class, function ($app) {
+            return match (config('api_v2.uploads.provider', 's3-compatible')) {
+                'local-fake' => $app->make(LocalFakeUploadStorageProvider::class),
+                's3-compatible' => $app->make(S3CompatibleUploadStorageProvider::class),
+                default => throw new \RuntimeException('Upload provider API V2 tidak didukung.'),
+            };
+        });
     }
 
     /**
@@ -50,6 +62,7 @@ class AppServiceProvider extends ServiceProvider
 
         Gate::policy(Absensi::class, AbsensiPolicy::class);
         Gate::policy(AbsensiAjuan::class, AbsensiAjuanPolicy::class);
+        Gate::policy(Attachment::class, AttachmentPolicy::class);
         Gate::policy(Profile::class, ProfilePolicy::class);
         Gate::policy(Tugas::class, TugasPolicy::class);
         Gate::policy(TugasJawaban::class, TugasJawabanPolicy::class);

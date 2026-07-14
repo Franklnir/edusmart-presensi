@@ -23,6 +23,7 @@ class UploadControllerTest extends TestCase
         Storage::fake('local');
         config([
             'api_v2.uploads_enabled' => true,
+            'api_v2.uploads.provider' => 'local-fake',
             'filesystems.default' => 'local',
             'tenancy.allow_header_override' => true,
         ]);
@@ -68,6 +69,8 @@ class UploadControllerTest extends TestCase
             'tenant_id' => $actor->profile->tenant_id,
             'actor_id' => $actor->id,
             'purpose' => 'assignment_attachment',
+            'provider' => 'local-fake',
+            'bucket' => 'test-uploads',
             'filename' => 'test.pdf',
             'content_type' => 'application/pdf',
             'size' => 100,
@@ -104,10 +107,12 @@ class UploadControllerTest extends TestCase
             'object_key' => '../../client-controlled',
             'bucket' => 'public',
             'file_url' => 'https://example.test/permanent',
-        ], ['X-Tenant' => 'tenant-a'])->assertCreated();
+        ], ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => (string) Str::uuid()])->assertCreated();
 
         $response->assertJsonMissingPath('data.object_key');
-        $session = UploadSession::findOrFail($response->json('data.session_id'));
+        $response->assertJsonPath('data.instruction.method', 'PUT')
+            ->assertJsonPath('data.instruction.fields', []);
+        $session = UploadSession::findOrFail($response->json('data.upload.id'));
         $this->assertStringStartsWith('tenants/tenant-a/assignments/pending/', $session->object_key);
         $this->assertStringNotContainsString('client-controlled', $session->object_key);
         $this->assertSame($teacher->id, $session->actor_id);
@@ -128,11 +133,11 @@ class UploadControllerTest extends TestCase
         ];
 
         Sanctum::actingAs($student);
-        $this->postJson('/api/v2/uploads', $payload, ['X-Tenant' => 'tenant-a'])->assertCreated();
+        $this->postJson('/api/v2/uploads', $payload, ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => (string) Str::uuid()])->assertCreated();
         Sanctum::actingAs($otherClass);
-        $this->postJson('/api/v2/uploads', $payload, ['X-Tenant' => 'tenant-a'])->assertForbidden();
+        $this->postJson('/api/v2/uploads', $payload, ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => (string) Str::uuid()])->assertForbidden();
         Sanctum::actingAs($teacher);
-        $this->postJson('/api/v2/uploads', $payload, ['X-Tenant' => 'tenant-a'])
+        $this->postJson('/api/v2/uploads', $payload, ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => (string) Str::uuid()])
             ->assertForbidden()->assertJsonPath('code', 'UPLOAD_SCOPE_FORBIDDEN');
     }
 
@@ -144,13 +149,13 @@ class UploadControllerTest extends TestCase
         Sanctum::actingAs($other);
 
         $this->getJson("/api/v2/uploads/{$session->id}", ['X-Tenant' => 'tenant-a'])->assertNotFound();
-        $this->deleteJson("/api/v2/uploads/{$session->id}", [], ['X-Tenant' => 'tenant-a'])->assertNotFound();
+        $this->deleteJson("/api/v2/uploads/{$session->id}", [], ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => (string) Str::uuid()])->assertNotFound();
 
         Sanctum::actingAs($owner);
         $this->getJson("/api/v2/uploads/{$session->id}", ['X-Tenant' => 'tenant-a'])
             ->assertOk()->assertJsonMissingPath('data.object_key');
-        $this->deleteJson("/api/v2/uploads/{$session->id}", [], ['X-Tenant' => 'tenant-a'])->assertOk();
-        $this->assertDatabaseHas('upload_sessions', ['id' => $session->id, 'status' => 'failed']);
+        $this->deleteJson("/api/v2/uploads/{$session->id}", [], ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => (string) Str::uuid()])->assertOk();
+        $this->assertDatabaseHas('upload_sessions', ['id' => $session->id, 'status' => 'cancelled']);
     }
 
     public function test_complete_verifies_object_before_creating_attachment(): void
@@ -159,12 +164,12 @@ class UploadControllerTest extends TestCase
         $session = $this->uploadSession($teacher);
         Sanctum::actingAs($teacher);
 
-        $this->postJson("/api/v2/uploads/{$session->id}/complete", [], ['X-Tenant' => 'tenant-a'])
+        $this->postJson("/api/v2/uploads/{$session->id}/complete", [], ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => (string) Str::uuid()])
             ->assertStatus(422)->assertJsonPath('code', 'UPLOAD_OBJECT_NOT_FOUND');
         $this->assertDatabaseCount('attachments', 0);
 
         Storage::disk('local')->put($session->object_key, str_repeat('x', 99));
-        $this->postJson("/api/v2/uploads/{$session->id}/complete", [], ['X-Tenant' => 'tenant-a'])
+        $this->postJson("/api/v2/uploads/{$session->id}/complete", [], ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => (string) Str::uuid()])
             ->assertStatus(422)->assertJsonPath('code', 'UPLOAD_SIZE_MISMATCH');
         $this->assertDatabaseCount('attachments', 0);
     }
@@ -176,31 +181,34 @@ class UploadControllerTest extends TestCase
         Storage::disk('local')->put($session->object_key, str_repeat('x', 100));
         Sanctum::actingAs($teacher);
 
-        $response = $this->postJson("/api/v2/uploads/{$session->id}/complete", [], ['X-Tenant' => 'tenant-a'])
+        $key = (string) Str::uuid();
+        $response = $this->postJson("/api/v2/uploads/{$session->id}/complete", [], ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => $key])
             ->assertOk();
         $this->assertDatabaseHas('attachments', [
-            'id' => $response->json('data.attachment_id'),
+            'id' => $response->json('data.attachment.id'),
             'tenant_id' => 'tenant-a',
             'actor_id' => $teacher->id,
             'upload_session_id' => $session->id,
             'purpose' => 'assignment_attachment',
         ]);
         $this->assertDatabaseHas('upload_sessions', ['id' => $session->id, 'status' => 'completed']);
-        $this->postJson("/api/v2/uploads/{$session->id}/complete", [], ['X-Tenant' => 'tenant-a'])
-            ->assertStatus(409)->assertJsonPath('code', 'UPLOAD_SESSION_NOT_PENDING');
+        $this->postJson("/api/v2/uploads/{$session->id}/complete", [], ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => $key])
+            ->assertOk()->assertHeader('Idempotency-Replayed', 'true');
+        $this->assertDatabaseCount('attachments', 1);
     }
 
     public function test_expired_or_cancelled_session_cannot_be_completed(): void
     {
         $teacher = $this->user('tenant-a', 'guru');
         $expired = $this->uploadSession($teacher, ['id' => (string) Str::uuid(), 'expires_at' => now()->subMinute()]);
-        $cancelled = $this->uploadSession($teacher, ['id' => (string) Str::uuid(), 'status' => 'failed']);
+        $cancelled = $this->uploadSession($teacher, ['id' => (string) Str::uuid(), 'status' => 'cancelled']);
         Sanctum::actingAs($teacher);
 
-        $this->postJson("/api/v2/uploads/{$expired->id}/complete", [], ['X-Tenant' => 'tenant-a'])
+        $this->postJson("/api/v2/uploads/{$expired->id}/complete", [], ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => (string) Str::uuid()])
             ->assertStatus(409)->assertJsonPath('code', 'UPLOAD_SESSION_EXPIRED');
-        $this->postJson("/api/v2/uploads/{$cancelled->id}/complete", [], ['X-Tenant' => 'tenant-a'])
-            ->assertStatus(409)->assertJsonPath('code', 'UPLOAD_SESSION_NOT_PENDING');
+        $this->assertDatabaseHas('upload_sessions', ['id' => $expired->id, 'status' => 'expired']);
+        $this->postJson("/api/v2/uploads/{$cancelled->id}/complete", [], ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => (string) Str::uuid()])
+            ->assertStatus(409)->assertJsonPath('code', 'UPLOAD_SESSION_NOT_COMPLETABLE');
     }
 
     public function test_filename_mime_and_size_are_restricted(): void
