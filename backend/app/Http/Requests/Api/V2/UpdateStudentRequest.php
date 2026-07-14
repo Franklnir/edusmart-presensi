@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Api\V2;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdateStudentRequest extends FormRequest
 {
@@ -15,7 +16,12 @@ class UpdateStudentRequest extends FormRequest
     {
         return [
             'nama' => ['sometimes', 'string', 'max:255'],
-            'email' => ['sometimes', 'email', 'max:255'],
+            'email' => [
+                'sometimes',
+                'email',
+                'max:255',
+                Rule::unique('users', 'email')->ignore($this->route('student')),
+            ],
             'kelas' => ['nullable', 'string', 'max:255'],
             'angkatan' => ['nullable', 'string', 'max:4'],
             'jk' => ['nullable', 'string', 'in:L,P'],
@@ -24,12 +30,11 @@ class UpdateStudentRequest extends FormRequest
             'nis' => ['nullable', 'string', 'max:50'],
             'agama' => ['nullable', 'string', 'max:50'],
             'alamat' => ['nullable', 'string'],
-            'status' => ['nullable', 'string', 'in:active,inactive,nonaktif,mutasi,alumni'],
-            'alasan_nonaktif' => ['nullable', 'string'],
             'tanggal_lahir' => ['nullable', 'date'],
             'no_hp_siswa' => ['nullable', 'string', 'max:20'],
             'no_hp_wali' => ['nullable', 'string', 'max:20'],
             'rfid_uid' => ['nullable', 'string', 'max:255'],
+            'idempotency_key' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

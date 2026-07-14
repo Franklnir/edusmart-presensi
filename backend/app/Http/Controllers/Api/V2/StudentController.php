@@ -4,26 +4,36 @@ namespace App\Http\Controllers\Api\V2;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V2\StoreStudentRequest;
+use App\Http\Requests\Api\V2\StudentIndexRequest;
 use App\Http\Requests\Api\V2\UpdateStudentRequest;
 use App\Http\Resources\Api\V2\StudentResource;
 use App\Models\Profile;
-use App\Models\User;
+use App\Services\AcademicAccessService;
+use App\Services\Actions\Student\ActivateStudent;
+use App\Services\Actions\Student\CreateStudent;
+use App\Services\Actions\Student\DeactivateStudent;
+use App\Services\Actions\Student\UpdateStudent as UpdateStudentAction;
+use App\Services\IdempotencyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class StudentController extends Controller
 {
+    public function __construct(
+        private readonly IdempotencyService $idempotencyService,
+        private readonly AcademicAccessService $academicAccess
+    ) {}
+
     private function getRequestId(Request $request): string
     {
         return $request->header('X-Request-ID', (string) Str::uuid());
     }
 
-    public function index(Request $request): AnonymousResourceCollection|JsonResponse
+    public function index(StudentIndexRequest $request): AnonymousResourceCollection|JsonResponse
     {
         Gate::authorize('viewAny', Profile::class);
         $tenantId = $request->attributes->get('tenant_id');
@@ -41,8 +51,23 @@ class StudentController extends Controller
 
         $query = Profile::where('tenant_id', $tenantId)->where('role', 'siswa');
 
+        $actor = $request->user()?->profile;
+        if ($actor?->role === 'guru') {
+            $classIds = $this->academicAccess->teacherClassIds($actor);
+            $classIds->isEmpty()
+                ? $query->whereRaw('1 = 0')
+                : $query->whereIn('kelas', $classIds);
+        }
+
         if ($request->filled('q')) {
             $query->where('nama', 'like', '%'.$request->query('q').'%');
+        }
+        if ($request->filled('search')) {
+            $search = $request->query('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('nama', 'like', "%{$search}%")
+                    ->orWhere('nis', 'like', "%{$search}%");
+            });
         }
         if ($request->filled('nis')) {
             $query->where('nis', 'like', '%'.$request->query('nis').'%');
@@ -52,6 +77,9 @@ class StudentController extends Controller
         }
         if ($request->filled('status')) {
             $query->where('status', $request->query('status'));
+        }
+        if ($request->filled('tahun_ajaran')) {
+            $query->where('angkatan', $request->query('tahun_ajaran'));
         }
         if ($request->filled('has_rfid')) {
             $hasRfid = filter_var($request->query('has_rfid'), FILTER_VALIDATE_BOOLEAN);
@@ -85,10 +113,13 @@ class StudentController extends Controller
         $includeContext = filter_var($request->query('include_context'), FILTER_VALIDATE_BOOLEAN);
         $context = [];
         if ($includeContext) {
-            $context['kelas'] = DB::table('kelas')
+            $classQuery = DB::table('kelas')
                 ->where('tenant_id', $tenantId)
-                ->orderBy('id')
-                ->get()
+                ->orderBy('id');
+            if ($actor?->role === 'guru') {
+                $classQuery->whereIn('id', $this->academicAccess->teacherClassIds($actor));
+            }
+            $context['kelas'] = $classQuery->get()
                 ->map(fn ($row) => (array) $row)
                 ->values();
 
@@ -99,9 +130,9 @@ class StudentController extends Controller
                 ->values();
 
             $context['wali_kelas_ids'] = [];
-            if ($request->user() && $request->user()->profile->role === 'guru') {
+            if ($actor?->role === 'guru') {
                 $context['wali_kelas_ids'] = collect($context['struktur'])
-                    ->where('wali_guru_id', $request->user()->id)
+                    ->where('wali_guru_id', $actor->id)
                     ->pluck('kelas_id')
                     ->values()
                     ->toArray();
@@ -121,47 +152,24 @@ class StudentController extends Controller
         return $response;
     }
 
-    public function store(StoreStudentRequest $request): JsonResponse
+    public function store(StoreStudentRequest $request, CreateStudent $action): JsonResponse
     {
         Gate::authorize('create', Profile::class);
         $tenantId = $request->attributes->get('tenant_id');
         $reqId = $this->getRequestId($request);
 
         $validated = $request->validated();
-        $validated['tenant_id'] = $tenantId;
-        $validated['id'] = (string) Str::uuid();
-        $validated['role'] = 'siswa';
-        $validated['status'] = $validated['status'] ?? 'active';
-        $validated['created_via'] = 'api_v2';
+        $idempotencyKey = $validated['idempotency_key'] ?? null;
 
-        DB::beginTransaction();
-        try {
-            $user = User::create([
-                'id' => $validated['id'],
-                'email' => $validated['email'],
-                'password' => Hash::make($validated['nis'] ?: 'password123'),
-                'name' => $validated['nama'],
-            ]);
-
-            $profile = Profile::create($validated);
-            DB::commit();
+        return $this->idempotencyService->handle($request, $idempotencyKey, function () use ($action, $validated, $tenantId, $reqId) {
+            $profile = $action->execute($validated, $tenantId);
 
             return (new StudentResource($profile))->additional([
                 'success' => true,
                 'message' => 'Siswa berhasil dibuat.',
                 'request_id' => $reqId,
             ])->response()->setStatusCode(201);
-        } catch (\Exception $e) {
-            DB::rollBack();
-
-            return response()->json([
-                'success' => false,
-                'code' => 'STUDENT_CREATE_FAILED',
-                'message' => 'Gagal membuat siswa.',
-                'error' => $e->getMessage(),
-                'request_id' => $reqId,
-            ], 500);
-        }
+        });
     }
 
     public function show(Request $request, string $id): JsonResponse
@@ -228,7 +236,7 @@ class StudentController extends Controller
         ], $context))->response()->setStatusCode(200);
     }
 
-    public function update(UpdateStudentRequest $request, string $id): JsonResponse
+    public function update(UpdateStudentRequest $request, string $id, UpdateStudentAction $action): JsonResponse
     {
         $tenantId = $request->attributes->get('tenant_id');
         $reqId = $this->getRequestId($request);
@@ -248,44 +256,20 @@ class StudentController extends Controller
         Gate::authorize('update', $profile);
 
         $validated = $request->validated();
+        $idempotencyKey = $validated['idempotency_key'] ?? null;
 
-        DB::beginTransaction();
-        try {
-            $profile->update($validated);
+        return $this->idempotencyService->handle($request, $idempotencyKey, function () use ($action, $profile, $validated, $reqId) {
+            $updatedProfile = $action->execute($profile, $validated);
 
-            if (isset($validated['email']) || isset($validated['nama'])) {
-                $user = User::find($profile->id);
-                if ($user) {
-                    if (isset($validated['email'])) {
-                        $user->email = $validated['email'];
-                    }
-                    if (isset($validated['nama'])) {
-                        $user->name = $validated['nama'];
-                    }
-                    $user->save();
-                }
-            }
-            DB::commit();
-
-            return (new StudentResource($profile))->additional([
+            return (new StudentResource($updatedProfile))->additional([
                 'success' => true,
                 'message' => 'Siswa berhasil diupdate.',
                 'request_id' => $reqId,
             ])->response()->setStatusCode(200);
-        } catch (\Exception $e) {
-            DB::rollBack();
-
-            return response()->json([
-                'success' => false,
-                'code' => 'STUDENT_UPDATE_FAILED',
-                'message' => 'Gagal mengupdate siswa.',
-                'error' => $e->getMessage(),
-                'request_id' => $reqId,
-            ], 500);
-        }
+        });
     }
 
-    public function destroy(Request $request, string $id): JsonResponse
+    public function deactivate(Request $request, string $id, DeactivateStudent $action): JsonResponse
     {
         $tenantId = $request->attributes->get('tenant_id');
         $reqId = $this->getRequestId($request);
@@ -302,29 +286,56 @@ class StudentController extends Controller
             ], 404);
         }
 
-        Gate::authorize('delete', $profile);
+        Gate::authorize('deactivate', $profile);
 
-        DB::beginTransaction();
-        try {
-            $profile->delete();
-            User::where('id', $profile->id)->delete();
-            DB::commit();
+        $validated = $request->validate([
+            'reason' => 'nullable|string|in:nonaktif,mutasi,alumni',
+            'idempotency_key' => 'nullable|string|max:64',
+        ]);
+
+        $reason = $validated['reason'] ?? 'nonaktif';
+        $idempotencyKey = $validated['idempotency_key'] ?? null;
+
+        return $this->idempotencyService->handle($request, $idempotencyKey, function () use ($action, $profile, $reason, $reqId) {
+            $action->execute($profile, $reason);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Siswa berhasil dihapus.',
+                'message' => 'Siswa berhasil dinonaktifkan.',
                 'request_id' => $reqId,
             ], 200);
-        } catch (\Exception $e) {
-            DB::rollBack();
+        });
+    }
 
+    public function activate(Request $request, string $id, ActivateStudent $action): JsonResponse
+    {
+        $tenantId = $request->attributes->get('tenant_id');
+        $reqId = $this->getRequestId($request);
+
+        $profile = Profile::where('tenant_id', $tenantId)->where('role', 'siswa')->find($id);
+
+        if (! $profile) {
             return response()->json([
                 'success' => false,
-                'code' => 'STUDENT_DELETE_FAILED',
-                'message' => 'Gagal menghapus siswa.',
-                'error' => $e->getMessage(),
+                'code' => 'STUDENT_NOT_FOUND',
+                'message' => 'Siswa tidak ditemukan.',
+                'error' => 'Siswa tidak ditemukan.',
                 'request_id' => $reqId,
-            ], 500);
+            ], 404);
         }
+
+        Gate::authorize('activate', $profile);
+
+        $idempotencyKey = $request->input('idempotency_key');
+
+        return $this->idempotencyService->handle($request, $idempotencyKey, function () use ($action, $profile, $reqId) {
+            $action->execute($profile);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Siswa berhasil diaktifkan.',
+                'request_id' => $reqId,
+            ], 200);
+        });
     }
 }

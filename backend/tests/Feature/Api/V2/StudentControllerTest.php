@@ -39,6 +39,26 @@ class StudentControllerTest extends TestCase
         return $user;
     }
 
+    private function grantTeacherClass(User $teacher, string $tenantId, string $classId, string $subject = 'Matematika'): void
+    {
+        DB::table('kelas')->insertOrIgnore([
+            'id' => $classId,
+            'nama' => $classId,
+            'tenant_id' => $tenantId,
+        ]);
+        DB::table('jadwal')->insert([
+            'id' => 'schedule-'.Str::uuid(),
+            'kelas_id' => $classId,
+            'hari' => 'Senin',
+            'mapel' => $subject,
+            'guru_id' => $teacher->id,
+            'guru_nama' => 'Teacher',
+            'jam_mulai' => '08:00',
+            'jam_selesai' => '09:00',
+            'tenant_id' => $tenantId,
+        ]);
+    }
+
     public function test_guest_cannot_access_students(): void
     {
         $response = $this->withHeaders(['X-Tenant' => 'tenant-a'])
@@ -91,6 +111,7 @@ class StudentControllerTest extends TestCase
                 'nama' => 'New Student',
                 'email' => 'newstudent@example.com',
                 'nis' => '123456',
+                'idempotency_key' => (string) Str::uuid(),
             ]);
 
         $response->assertStatus(201)
@@ -120,6 +141,7 @@ class StudentControllerTest extends TestCase
             ->putJson('/api/v2/students/'.$student->id, [
                 'nama' => 'Updated Name',
                 'email' => 'updated@example.com',
+                'idempotency_key' => (string) Str::uuid(),
             ]);
 
         $response->assertOk();
@@ -127,7 +149,7 @@ class StudentControllerTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => $student->id, 'name' => 'Updated Name', 'email' => 'updated@example.com']);
     }
 
-    public function test_admin_can_delete_student(): void
+    public function test_admin_can_deactivate_student(): void
     {
         $admin = $this->createUserWithRole('tenant-a', 'admin');
         $student = $this->createUserWithRole('tenant-a', 'siswa');
@@ -135,11 +157,14 @@ class StudentControllerTest extends TestCase
         Sanctum::actingAs($admin);
 
         $response = $this->withHeaders(['X-Tenant' => 'tenant-a'])
-            ->deleteJson('/api/v2/students/'.$student->id);
+            ->patchJson('/api/v2/students/'.$student->id.'/deactivate', [
+                'reason' => 'nonaktif',
+                'idempotency_key' => (string) Str::uuid(),
+            ]);
 
         $response->assertOk();
-        $this->assertDatabaseMissing('profiles', ['id' => $student->id]);
-        $this->assertDatabaseMissing('users', ['id' => $student->id]);
+        $this->assertDatabaseHas('profiles', ['id' => $student->id, 'status' => 'nonaktif']);
+        $this->assertDatabaseHas('users', ['id' => $student->id]);
     }
 
     public function test_student_cannot_mutate_student(): void
@@ -149,9 +174,82 @@ class StudentControllerTest extends TestCase
         Sanctum::actingAs($student);
 
         $this->withHeaders(['X-Tenant' => 'tenant-a'])
-            ->postJson('/api/v2/students', ['nama' => 'x', 'email' => 'x@x.com'])->assertStatus(403);
+            ->postJson('/api/v2/students', [
+                'nama' => 'x',
+                'email' => 'x@x.com',
+                'idempotency_key' => (string) Str::uuid(),
+            ])->assertStatus(403);
 
         $this->withHeaders(['X-Tenant' => 'tenant-a'])
-            ->deleteJson('/api/v2/students/'.$student->id)->assertStatus(403);
+            ->patchJson('/api/v2/students/'.$student->id.'/deactivate')->assertStatus(403);
+    }
+
+    public function test_guru_can_only_list_and_view_students_in_assigned_classes(): void
+    {
+        $guru = $this->createUserWithRole('tenant-a', 'guru');
+        $studentA = $this->createUserWithRole('tenant-a', 'siswa');
+        $studentA->profile->update(['kelas' => '10A', 'nis' => 'PRIVATE-A']);
+        $studentB = $this->createUserWithRole('tenant-a', 'siswa');
+        $studentB->profile->update(['kelas' => '10B', 'nis' => 'PRIVATE-B']);
+        $this->grantTeacherClass($guru, 'tenant-a', '10A');
+
+        Sanctum::actingAs($guru);
+
+        $this->withHeaders(['X-Tenant' => 'tenant-a'])
+            ->getJson('/api/v2/students')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $studentA->id)
+            ->assertJsonMissingPath('data.0.email')
+            ->assertJsonMissingPath('data.0.nis');
+
+        $this->withHeaders(['X-Tenant' => 'tenant-a'])
+            ->getJson('/api/v2/students/'.$studentB->id)
+            ->assertForbidden();
+    }
+
+    public function test_student_cannot_list_or_view_another_students_private_profile(): void
+    {
+        $student = $this->createUserWithRole('tenant-a', 'siswa');
+        $other = $this->createUserWithRole('tenant-a', 'siswa');
+        Sanctum::actingAs($student);
+
+        $this->withHeaders(['X-Tenant' => 'tenant-a'])
+            ->getJson('/api/v2/students')
+            ->assertForbidden();
+        $this->withHeaders(['X-Tenant' => 'tenant-a'])
+            ->getJson('/api/v2/students/'.$other->id)
+            ->assertForbidden();
+    }
+
+    public function test_create_ignores_tenant_and_role_from_payload_and_rejects_duplicate_identifiers(): void
+    {
+        $admin = $this->createUserWithRole('tenant-a', 'admin');
+        Sanctum::actingAs($admin);
+
+        $payload = [
+            'nama' => 'Scoped Student',
+            'email' => 'scoped@example.com',
+            'nis' => 'NIS-UNIQUE',
+            'tenant_id' => 'tenant-b',
+            'role' => 'admin',
+            'idempotency_key' => (string) Str::uuid(),
+        ];
+        $this->withHeaders(['X-Tenant' => 'tenant-a'])
+            ->postJson('/api/v2/students', $payload)
+            ->assertCreated();
+
+        $this->assertDatabaseHas('profiles', [
+            'email' => 'scoped@example.com',
+            'tenant_id' => 'tenant-a',
+            'role' => 'siswa',
+        ]);
+
+        $payload['email'] = 'different@example.com';
+        $payload['idempotency_key'] = (string) Str::uuid();
+        $this->withHeaders(['X-Tenant' => 'tenant-a'])
+            ->postJson('/api/v2/students', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('nis');
     }
 }

@@ -18,7 +18,7 @@ class KelasPolicy
             return false;
         }
 
-return in_array($user->profile->role, ['admin', 'guru', 'siswa']);
+        return in_array($user->profile->role, ['admin', 'guru', 'siswa']);
     }
 
     /**
@@ -32,9 +32,9 @@ return in_array($user->profile->role, ['admin', 'guru', 'siswa']);
             return false;
         }
 
-return
-               in_array($user->profile->role, ['admin', 'guru', 'siswa']) &&
-               $user->profile->tenant_id === $kelas->tenant_id;
+        return
+                       in_array($user->profile->role, ['admin', 'guru', 'siswa']) &&
+                       $user->profile->tenant_id === $kelas->tenant_id;
     }
 
     /**
@@ -48,7 +48,7 @@ return
             return false;
         }
 
-return $user->profile->role === 'admin';
+        return $user->profile->role === 'admin';
     }
 
     /**
@@ -62,9 +62,9 @@ return $user->profile->role === 'admin';
             return false;
         }
 
-return
-               $user->profile->role === 'admin' &&
-               $user->profile->tenant_id === $kelas->tenant_id;
+        return
+                       $user->profile->role === 'admin' &&
+                       $user->profile->tenant_id === $kelas->tenant_id;
     }
 
     /**
@@ -78,8 +78,8 @@ return
             return false;
         }
 
-return
-               $user->profile->role === 'admin' &&
-               $user->profile->tenant_id === $kelas->tenant_id;
+        return
+                       $user->profile->role === 'admin' &&
+                       $user->profile->tenant_id === $kelas->tenant_id;
     }
 }
