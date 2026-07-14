@@ -8,6 +8,7 @@ use App\Models\UploadSession;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -116,6 +117,40 @@ class UploadControllerTest extends TestCase
         $this->assertStringStartsWith('tenants/tenant-a/assignments/pending/', $session->object_key);
         $this->assertStringNotContainsString('client-controlled', $session->object_key);
         $this->assertSame($teacher->id, $session->actor_id);
+    }
+
+    public function test_upload_response_and_safe_telemetry_share_server_request_id(): void
+    {
+        Log::spy();
+        $teacher = $this->user('tenant-a', 'guru');
+        Sanctum::actingAs($teacher);
+
+        $response = $this->postJson('/api/v2/uploads', [
+            'purpose' => 'assignment_attachment',
+            'filename' => 'telemetry.pdf',
+            'content_type' => 'application/pdf',
+            'size' => 100,
+        ], ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => (string) Str::uuid()])
+            ->assertCreated();
+
+        $requestId = $response->headers->get('X-Request-ID');
+        $this->assertNotEmpty($requestId);
+        $response->assertJsonPath('request_id', $requestId);
+
+        Log::shouldHaveReceived('log')->withArgs(function (string $level, string $message, array $context) use ($requestId, $teacher): bool {
+            $serialized = json_encode($context, JSON_THROW_ON_ERROR);
+
+            return $level === 'info'
+                && $message === 'api_v2_upload_operation'
+                && ($context['request_id'] ?? null) === $requestId
+                && ($context['tenant_id'] ?? null) === 'tenant-a'
+                && ($context['actor_id'] ?? null) === $teacher->id
+                && ($context['operation'] ?? null) === 'initiate'
+                && isset($context['upload_session_id'], $context['duration_ms'])
+                && ! str_contains($serialized, 'object_key')
+                && ! str_contains($serialized, 'signed_url')
+                && ! str_contains($serialized, 'instruction');
+        })->once();
     }
 
     public function test_submission_upload_requires_student_and_accessible_assignment(): void

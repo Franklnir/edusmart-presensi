@@ -10,6 +10,7 @@ use App\Http\Resources\Api\V2\AttachmentResource;
 use App\Models\Attachment;
 use App\Services\Actions\Upload\DeleteAttachment;
 use App\Services\IdempotencyService;
+use App\Services\UploadTelemetry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -20,7 +21,8 @@ class AttachmentController extends Controller
     public function __construct(
         private readonly UploadStorageProvider $provider,
         private readonly DeleteAttachment $deleteAttachment,
-        private readonly IdempotencyService $idempotency
+        private readonly IdempotencyService $idempotency,
+        private readonly UploadTelemetry $telemetry
     ) {}
 
     public function show(Request $request, string $id): JsonResponse
@@ -42,6 +44,7 @@ class AttachmentController extends Controller
 
     public function download(Request $request, string $id): JsonResponse
     {
+        $startedAt = hrtime(true);
         if ($response = $this->unavailable($request)) {
             return $response;
         }
@@ -56,6 +59,15 @@ class AttachmentController extends Controller
             $attachment->object_key,
             (int) config('api_v2.uploads.download_ttl_seconds', 600)
         );
+
+        $this->telemetry->record($request, 'download_sign', 'succeeded', $startedAt, [
+            'upload_session_id' => $attachment->upload_session_id,
+            'attachment_id' => $attachment->id,
+            'purpose' => $attachment->purpose,
+            'provider' => $attachment->provider,
+            'size' => $attachment->actual_size ?? $attachment->size,
+            'status_transition' => 'active->signed',
+        ]);
 
         return response()->json([
             'success' => true,
@@ -76,11 +88,32 @@ class AttachmentController extends Controller
         $validated = $request->validated();
 
         return $this->idempotency->handle($request, $validated['idempotency_key'] ?? null, function () use ($request, $attachment) {
+            $startedAt = hrtime(true);
             try {
                 $result = $this->deleteAttachment->execute($attachment);
             } catch (UploadException $exception) {
+                $this->telemetry->record($request, 'delete', 'failed', $startedAt, [
+                    'upload_session_id' => $attachment->upload_session_id,
+                    'attachment_id' => $attachment->id,
+                    'purpose' => $attachment->purpose,
+                    'provider' => $attachment->provider,
+                    'size' => $attachment->actual_size ?? $attachment->size,
+                    'status_transition' => 'active->failed',
+                    'failure_code' => $exception->stableCode,
+                ]);
+
                 return $this->error($request, $exception->stableCode, $exception->getMessage(), $exception->httpStatus);
             }
+
+            $this->telemetry->record($request, 'delete', 'succeeded', $startedAt, [
+                'upload_session_id' => $attachment->upload_session_id,
+                'attachment_id' => $attachment->id,
+                'purpose' => $attachment->purpose,
+                'provider' => $attachment->provider,
+                'size' => $attachment->actual_size ?? $attachment->size,
+                'status_transition' => $result['deleted'] ? 'active->deleted' : 'active->delete_pending',
+                'failure_code' => $result['deleted'] ? null : 'UPLOAD_DELETE_PENDING',
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -113,7 +146,8 @@ class AttachmentController extends Controller
 
     private function requestId(Request $request): string
     {
-        return $request->header('X-Request-ID', (string) Str::uuid());
+        return (string) ($request->attributes->get('request_id')
+            ?: $request->header('X-Request-ID', (string) Str::uuid()));
     }
 
     private function error(Request $request, string $code, string $message, int $status): JsonResponse

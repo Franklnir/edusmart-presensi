@@ -251,7 +251,7 @@ class IdempotencyService
             'operation' => $operation,
             'cache_identity' => hash('sha256', $cacheKey),
             'route' => $request->route()?->getName(),
-            'request_id' => $request->header('X-Request-ID'),
+            'request_id' => $request->attributes->get('request_id') ?: $request->header('X-Request-ID'),
             'exception_class' => $exception::class,
         ]);
     }
@@ -276,7 +276,7 @@ class IdempotencyService
             'message' => $message,
             'error' => $message,
             'errors' => (object) [],
-            'request_id' => $request->header('X-Request-ID'),
+            'request_id' => $request->attributes->get('request_id') ?: $request->header('X-Request-ID'),
         ], $status);
     }
 }
