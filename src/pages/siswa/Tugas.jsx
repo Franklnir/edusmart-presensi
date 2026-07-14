@@ -21,6 +21,7 @@ import useStudentPeriodClass from '../../hooks/useStudentPeriodClass'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import { assignmentService, submissionService } from '../../services/assignmentService'
+import { uploadService } from '../../services/uploadService'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
   ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES,
@@ -38,11 +39,6 @@ import {
 /* =========================
    Constants & Helpers
 ========================= */
-const MONTH_NAMES_ID = [
-  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
-]
-
 const STATUS_FILTER_VALUES = new Set(['all', 'belum', 'menunggu', 'dinilai'])
 const TIME_RANGE_VALUES = new Set(['recent', 'week', 'all', 'custom_months'])
 const DEFAULT_TASK_LIST_LIMIT = 10
@@ -50,6 +46,15 @@ const TUGAS_LIST_COLUMNS = 'id, kelas, judul, mapel, mulai, deadline, keterangan
 const TUGAS_MAPEL_COLUMNS = 'mapel'
 const TUGAS_JAWABAN_LIST_COLUMNS = 'tugas_id, user_id, nilai, status, file_url, file_urls, link_url, komentar_siswa, waktu_submit'
 const MAPEL_CACHE_TTL_MS = 5 * 60 * 1000
+const USE_ASSIGNMENT_UPLOADS_V2 = import.meta.env.VITE_USE_ASSIGNMENT_UPLOADS_API_V2 === 'true'
+const ATTACHMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+const withV2Attachments = (record = {}) => {
+  if (!record) return record
+  if (!USE_ASSIGNMENT_UPLOADS_V2) return record
+  const ids = Array.isArray(record.attachment_ids) ? record.attachment_ids : []
+  return { ...record, file_url: ids[0] || '', file_urls: ids }
+}
 
 const normalizeStatusFilter = (value) => (
   STATUS_FILTER_VALUES.has(value) ? value : ''
@@ -213,30 +218,6 @@ const sanitizeFileName = (name = 'file') => {
     .replace(/[^a-zA-Z0-9._-]/g, '')
     .slice(0, 80)
   return base || 'file'
-}
-
-const getFileExt = (nameOrUrl = '') => {
-  const raw = String(nameOrUrl || '').split('?')[0]
-  const parts = raw.split('.')
-  if (parts.length < 2) return ''
-  return parts.pop()?.toLowerCase() || ''
-}
-
-const guessIfImage = (nameOrUrl = '') => {
-  const ext = getFileExt(nameOrUrl)
-  return ['jpeg', 'jpg', 'png', 'gif', 'webp', 'bmp'].includes(ext)
-}
-
-const buildLast12Months = () => {
-  const now = new Date()
-  const items = []
-  for (let i = 0; i < 12; i += 1) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    const label = `${MONTH_NAMES_ID[d.getMonth()]} ${d.getFullYear()}`
-    items.push({ value: ym, label })
-  }
-  return items
 }
 
 const NEAR_DEADLINE_HOURS = 24
@@ -403,6 +384,9 @@ const isGoogleDriveUrl = (value = '') => /^https?:\/\/(?:drive|docs)\.google\.co
 
 const createSignedUrlForKey = async (keyOrUrl, expiresInSeconds = 60 * 60) => {
   if (!keyOrUrl) return null
+  if (USE_ASSIGNMENT_UPLOADS_V2 && ATTACHMENT_ID_PATTERN.test(String(keyOrUrl))) {
+    return uploadService.resolveDownloadUrl(keyOrUrl)
+  }
   const key = extractObjectKeyFromAny(keyOrUrl)
   if (!key) {
     if (/^https?:\/\//i.test(String(keyOrUrl || ''))) return String(keyOrUrl)
@@ -418,6 +402,11 @@ const createSignedUrlForKey = async (keyOrUrl, expiresInSeconds = 60 * 60) => {
  */
 const deleteJawabanFileFromStorage = async (fileKeyOrUrl, tugasId, userId) => {
   const raw = String(fileKeyOrUrl || '').trim()
+  if (USE_ASSIGNMENT_UPLOADS_V2) {
+    if (!ATTACHMENT_ID_PATTERN.test(raw)) throw new Error('Attachment ID V2 tidak valid')
+    await uploadService.deleteAttachment(raw)
+    return
+  }
   if (isGoogleDriveUrl(raw)) {
     const { error } = await supabase.storage.from(ASSIGNMENT_BUCKET).remove([raw])
     if (error) throw error
@@ -492,7 +481,6 @@ export default function TugasSiswa() {
   const { loading, pushToast, setLoading } = useUIStore()
   const {
 	    activeAcademicPeriod,
-	    period,
 	    termPeriod,
 	    dateFilterPeriod,
 	    periodFilter,
@@ -714,12 +702,8 @@ export default function TugasSiswa() {
           weekAgo.setDate(now.getDate() - 7)
           params.created_after = weekAgo.toISOString()
         }
-        try {
-          const res = await assignmentService.getAssignments(params)
-          tugasData = res.data
-        } catch (e) {
-          throw e
-        }
+        const res = await assignmentService.getAssignments(params)
+        tugasData = (res.data || []).map(withV2Attachments)
       } else {
         // tugas untuk kelas siswa
         let query = supabase.from('tugas').select(TUGAS_LIST_COLUMNS).eq('kelas', kelas)
@@ -773,12 +757,8 @@ export default function TugasSiswa() {
       const tugasIds = tugasArr.map((t) => t.id)
       let jawabanData = []
       if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
-        try {
-          const res = await submissionService.getSubmissions({ tugas_id: tugasIds, user_id: user.id, per_page: 'all' })
-          jawabanData = res.data
-        } catch (e) {
-          throw e
-        }
+        const res = await submissionService.getSubmissions({ tugas_id: tugasIds, user_id: user.id, per_page: 'all' })
+        jawabanData = (res.data || []).map(withV2Attachments)
       } else {
         let jawabanQuery = supabase
           .from('tugas_jawaban')
@@ -900,27 +880,39 @@ export default function TugasSiswa() {
     try {
       setIsLoadingDetail(true)
 
-      // ambil data tugas terbaru (optional, biar sinkron)
-      let tugasQuery = supabase
-        .from('tugas')
-        .select(TUGAS_LIST_COLUMNS)
-        .eq('id', tugas.id)
-        .single()
-      tugasQuery = applyAcademicSemesterFilter(tugasQuery)
-      const { data: tugasData, error: tErr } = await tugasQuery
+      let tugasData
+      let jawabanData
+      let attachmentMetadata = []
+      if (USE_ASSIGNMENT_UPLOADS_V2) {
+        const [taskResponse, submissionsResponse] = await Promise.all([
+          assignmentService.getAssignment(tugas.id),
+          submissionService.getSubmissions({ tugas_id: tugas.id, per_page: 'all' })
+        ])
+        tugasData = withV2Attachments(taskResponse.data || taskResponse)
+        jawabanData = withV2Attachments((submissionsResponse.data || []).find((item) => item.user_id === user.id) || null)
+        const ids = Array.isArray(jawabanData?.attachment_ids) ? jawabanData.attachment_ids : []
+        attachmentMetadata = await Promise.all(ids.map((id) => uploadService.getAttachment(id)))
+      } else {
+        let tugasQuery = supabase
+          .from('tugas')
+          .select(TUGAS_LIST_COLUMNS)
+          .eq('id', tugas.id)
+          .single()
+        tugasQuery = applyAcademicSemesterFilter(tugasQuery)
+        const { data, error } = await tugasQuery
+        if (error) throw error
+        tugasData = data
 
-      if (tErr) throw tErr
-
-      // ambil jawaban milik siswa untuk tugas ini
-      let jawabanQuery = supabase
-        .from('tugas_jawaban')
-        .select('id, tugas_id, user_id, file_url, file_urls, link_url, komentar_siswa, nilai, status, waktu_submit')
-        .eq('tugas_id', tugas.id)
-        .eq('user_id', user.id)
-        .maybeSingle()
-      const { data: jawabanData, error: jErr } = await jawabanQuery
-
-      if (jErr) throw jErr
+        let jawabanQuery = supabase
+          .from('tugas_jawaban')
+          .select('id, tugas_id, user_id, file_url, file_urls, link_url, komentar_siswa, nilai, status, waktu_submit')
+          .eq('tugas_id', tugas.id)
+          .eq('user_id', user.id)
+          .maybeSingle()
+        const result = await jawabanQuery
+        if (result.error) throw result.error
+        jawabanData = result.data
+      }
 
       const windowInfo = getTaskWindowInfo(tugasData?.mulai, tugasData?.deadline, new Date())
 
@@ -940,8 +932,17 @@ export default function TugasSiswa() {
 
       // set current answer assets; galeri foto dan lampiran biasa dipisah di UI
       const existingFiles = parseAssignmentFileList(jawabanData?.file_urls, jawabanData?.file_url)
-      const existingPhotos = existingFiles.filter(isImageLikeFile)
-      const existingAttachment = existingFiles.find((item) => !isImageLikeFile(item)) || ''
+      const imageIds = new Set(
+        attachmentMetadata
+          .filter((item) => String(item.content_type || '').startsWith('image/'))
+          .map((item) => item.id)
+      )
+      const existingPhotos = existingFiles.filter((item) => (
+        USE_ASSIGNMENT_UPLOADS_V2 ? imageIds.has(item) : isImageLikeFile(item)
+      ))
+      const existingAttachment = existingFiles.find((item) => (
+        USE_ASSIGNMENT_UPLOADS_V2 ? !imageIds.has(item) : !isImageLikeFile(item)
+      )) || ''
       setJawabanPhotoValues(existingPhotos)
       setJawabanPhotoSizes(existingPhotos.map(() => `maks ${formatFileSize(ASSIGNMENT_PHOTO_MAX_BYTES)}`))
       setJawabanKomentar(jawabanData?.komentar_siswa || '')
@@ -1057,26 +1058,37 @@ export default function TugasSiswa() {
 
       const compressed = await compressFileBeforeUpload(file)
 
-      const safeName = sanitizeFileName(compressed.name)
-      const filePath = `${selectedTugas.id}/${user.id}-${Date.now()}-${safeName}`
-
       setUploadProgress('Mengupload file lewat jalur cepat...')
-
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from(ASSIGNMENT_BUCKET)
-        .upload(filePath, compressed, {
-          ...ASSIGNMENT_FAST_UPLOAD_OPTIONS,
+      let storedFileValue
+      let sizeLabel
+      let storedProvider
+      if (USE_ASSIGNMENT_UPLOADS_V2) {
+        const attachment = await uploadService.uploadFile(compressed, {
+          purpose: 'submission_attachment',
+          assignmentId: selectedTugas.id,
           signal: uploadController.signal,
           onProgress: setUploadPercent
         })
-
-      if (uploadError) throw new Error(uploadError.message)
-
-      const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
-      const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
-      const storedProvider = ['google_drive', 'object_storage'].includes(uploadData?.provider)
-        ? uploadData.provider
-        : 'local'
+        storedFileValue = attachment.id
+        sizeLabel = formatFileSize(attachment.size || compressed.size)
+        storedProvider = 'api_v2'
+      } else {
+        const safeName = sanitizeFileName(compressed.name)
+        const filePath = `${selectedTugas.id}/${user.id}-${Date.now()}-${safeName}`
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from(ASSIGNMENT_BUCKET)
+          .upload(filePath, compressed, {
+            ...ASSIGNMENT_FAST_UPLOAD_OPTIONS,
+            signal: uploadController.signal,
+            onProgress: setUploadPercent
+          })
+        if (uploadError) throw new Error(uploadError.message)
+        storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
+        sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
+        storedProvider = ['google_drive', 'object_storage'].includes(uploadData?.provider)
+          ? uploadData.provider
+          : 'local'
+      }
       setAnswerUploadProvider(storedProvider)
 
       const oldPendingFile = pendingJawabanFile?.value
@@ -1157,25 +1169,37 @@ export default function TugasSiswa() {
       const uploadedResults = await runConcurrentQueue(files, async (file, i) => {
         const compressed = await compressImage(file, ASSIGNMENT_PHOTO_MAX_BYTES / 1024)
         updateAggregateProgress(i, 8)
-        const safeName = sanitizeFileName(compressed.name || `foto-${i + 1}.jpg`)
-        const filePath = `${selectedTugas.id}/${user.id}-${Date.now()}-${i + 1}-${safeName}`
-
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from(ASSIGNMENT_BUCKET)
-          .upload(filePath, compressed, {
-            ...ASSIGNMENT_FAST_UPLOAD_OPTIONS,
+        let storedFileValue
+        let sizeLabel
+        let storedProvider
+        if (USE_ASSIGNMENT_UPLOADS_V2) {
+          const attachment = await uploadService.uploadFile(compressed, {
+            purpose: 'submission_attachment',
+            assignmentId: selectedTugas.id,
             signal: uploadController.signal,
             onProgress: (progress) => updateAggregateProgress(i, progress)
           })
-
-        if (uploadError) throw new Error(uploadError.message)
+          storedFileValue = attachment.id
+          sizeLabel = formatFileSize(attachment.size || compressed.size)
+          storedProvider = 'api_v2'
+        } else {
+          const safeName = sanitizeFileName(compressed.name || `foto-${i + 1}.jpg`)
+          const filePath = `${selectedTugas.id}/${user.id}-${Date.now()}-${i + 1}-${safeName}`
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from(ASSIGNMENT_BUCKET)
+            .upload(filePath, compressed, {
+              ...ASSIGNMENT_FAST_UPLOAD_OPTIONS,
+              signal: uploadController.signal,
+              onProgress: (progress) => updateAggregateProgress(i, progress)
+            })
+          if (uploadError) throw new Error(uploadError.message)
+          storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
+          sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
+          storedProvider = ['google_drive', 'object_storage'].includes(uploadData?.provider)
+            ? uploadData.provider
+            : 'local'
+        }
         updateAggregateProgress(i, 100)
-
-        const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
-        const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
-        const storedProvider = ['google_drive', 'object_storage'].includes(uploadData?.provider)
-          ? uploadData.provider
-          : 'local'
         const item = { value: storedFileValue, sizeLabel, provider: storedProvider }
         uploaded.push(item)
         return item
@@ -1186,7 +1210,8 @@ export default function TugasSiswa() {
       uploaded = uploadedResults.filter(Boolean)
       const hasDriveUpload = uploaded.some((item) => item.provider === 'google_drive')
       const hasObjectStorageUpload = uploaded.some((item) => item.provider === 'object_storage')
-      setAnswerUploadProvider(hasDriveUpload ? 'google_drive' : hasObjectStorageUpload ? 'object_storage' : 'local')
+      const hasApiV2Upload = uploaded.some((item) => item.provider === 'api_v2')
+      setAnswerUploadProvider(hasApiV2Upload ? 'api_v2' : hasDriveUpload ? 'google_drive' : hasObjectStorageUpload ? 'object_storage' : 'local')
 
       const stalePending = pendingJawabanPhotos.map((item) => item?.value).filter(Boolean)
       if (stalePending.length > 0) {
@@ -1240,7 +1265,6 @@ export default function TugasSiswa() {
       return
     }
 
-    // eslint-disable-next-line no-restricted-globals
     if (!confirm('Hapus file jawaban ini?')) return
 
     const pendingValues = Array.from(new Set([
@@ -1276,15 +1300,16 @@ export default function TugasSiswa() {
       const existing = detail?.myJawaban || null
       const currentLink = (jawabanLink || existing?.link_url || '').trim()
       const existingPhotos = parseAssignmentFileList(existing?.file_urls, existing?.file_url).filter(isImageLikeFile)
+      const retainedV2Attachments = parseAssignmentFileList(existing?.file_urls, existing?.file_url)
+        .filter((value) => value !== targetFile)
 
       if (existing?.id) {
-        if (currentLink || existingPhotos.length > 0) {
+        if (currentLink || existingPhotos.length > 0 || (USE_ASSIGNMENT_UPLOADS_V2 && retainedV2Attachments.length > 0)) {
           if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
-            await submissionService.gradeByUser({
-              tugas_id: selectedTugas.id,
-              user_id: user.id,
-              file_url: existingPhotos[0] || null,
-              file_urls: existingPhotos.length > 0 ? existingPhotos : null
+            await submissionService.updateSubmission(existing.id, {
+              attachment_ids: USE_ASSIGNMENT_UPLOADS_V2 ? retainedV2Attachments : undefined,
+              link_url: currentLink || null,
+              komentar_siswa: existing.komentar_siswa || null
             })
           } else {
             const { error } = await supabase
@@ -1393,7 +1418,6 @@ export default function TugasSiswa() {
       if (!/^https?:\/\//i.test(safeLink)) safeLink = `https://${safeLink}`
       try {
         // validasi URL
-        // eslint-disable-next-line no-new
         new URL(safeLink)
       } catch {
         pushToast('error', 'Link tidak valid')
@@ -1408,18 +1432,20 @@ export default function TugasSiswa() {
       const existingFiles = parseAssignmentFileList(existing?.file_urls, existing?.file_url)
       const payload = {
         tugas_id: selectedTugas.id,
-        user_id: user.id,
-        file_url: attachmentValue || photoValues[0] || null,
-        file_urls: answerFiles.length > 0 ? answerFiles : null,
+        ...(USE_ASSIGNMENT_UPLOADS_V2
+          ? { attachment_ids: answerFiles }
+          : {
+              file_url: attachmentValue || photoValues[0] || null,
+              file_urls: answerFiles.length > 0 ? answerFiles : null
+            }),
         link_url: safeLink || null,
         komentar_siswa: komentar || null,
-        status: existing?.nilai != null ? 'dinilai' : 'menunggu',
-        waktu_submit: new Date().toISOString(),
         ...academicPeriodPayload
       }
 
       if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
-        await submissionService.storeSubmission(payload)
+        if (existing?.id) await submissionService.updateSubmission(existing.id, payload)
+        else await submissionService.storeSubmission(payload)
       } else {
         const { error } = await supabase.assignments.submitAnswer(payload)
         if (error) throw error

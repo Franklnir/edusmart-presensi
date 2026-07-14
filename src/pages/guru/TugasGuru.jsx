@@ -21,6 +21,7 @@ import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import { assignmentService, submissionService } from '../../services/assignmentService'
+import { uploadService } from '../../services/uploadService'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
   ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES,
@@ -32,11 +33,6 @@ import {
 /* =========================
    Constants & Helpers
 ========================= */
-const MONTH_NAMES_ID = [
-  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
-]
-
 const FILE_SIZE_LIMITS = {
   IMAGE: ASSIGNMENT_PHOTO_MAX_BYTES,
   PDF: 3 * 1024 * 1024,
@@ -51,6 +47,15 @@ const TUGAS_GURU_COLUMNS = 'id,kelas,judul,mapel,mulai,deadline,keterangan,file_
 const TUGAS_JAWABAN_STATS_COLUMNS = 'tugas_id,user_id,nilai,status'
 const TUGAS_JAWABAN_DETAIL_COLUMNS = 'id,tugas_id,user_id,file_url,file_urls,link_url,komentar_siswa,nilai,status,waktu_submit,profiles(nama,photo_url)'
 const DEFAULT_TASK_LIST_LIMIT = 10
+const USE_ASSIGNMENT_UPLOADS_V2 = import.meta.env.VITE_USE_ASSIGNMENT_UPLOADS_API_V2 === 'true'
+const ATTACHMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+const withV2Attachments = (record = {}) => {
+  if (!record) return record
+  if (!USE_ASSIGNMENT_UPLOADS_V2) return record
+  const ids = Array.isArray(record.attachment_ids) ? record.attachment_ids : []
+  return { ...record, file_url: ids[0] || '', file_urls: ids }
+}
 
 const isHttpUrl = (v = '') => /^https?:\/\//i.test(String(v || ''))
 const looksLikeDomainUrl = (v = '') => /^[a-z0-9-]+(\.[a-z0-9-]+)+(?::\d+)?(\/|$)/i.test(String(v || '').trim())
@@ -407,6 +412,9 @@ const normalizeAssignmentKey = (urlOrPath) => extractObjectPath(ASSIGNMENT_BUCKE
 const isGoogleDriveUrl = (value = '') => /^https?:\/\/(?:drive|docs)\.google\.com\//i.test(String(value || '').trim())
 
 const createSignedUrlForAssignment = async (urlOrPath, expiresInSec = 60 * 15) => {
+  if (USE_ASSIGNMENT_UPLOADS_V2 && ATTACHMENT_ID_PATTERN.test(String(urlOrPath || ''))) {
+    return uploadService.resolveDownloadUrl(urlOrPath)
+  }
   const key = normalizeAssignmentKey(urlOrPath)
   if (!key) {
     const normalizedExternal = normalizeOptionalUrl(urlOrPath)
@@ -420,6 +428,11 @@ const createSignedUrlForAssignment = async (urlOrPath, expiresInSec = 60 * 15) =
 // ANTI-IDOR: penghapusan file hanya untuk folder milik guru (tugas_lampiran/<guruId>/...)
 const deleteTeacherAttachment = async (urlOrPath, teacherId) => {
   const raw = String(urlOrPath || '').trim()
+  if (USE_ASSIGNMENT_UPLOADS_V2) {
+    if (!ATTACHMENT_ID_PATTERN.test(raw)) throw new Error('Attachment ID V2 tidak valid')
+    await uploadService.deleteAttachment(raw)
+    return
+  }
   if (isGoogleDriveUrl(raw)) {
     const { error } = await supabase.storage.from(ASSIGNMENT_BUCKET).remove([raw])
     if (error) throw error
@@ -455,7 +468,7 @@ function Avatar({ src, name }) {
       try {
         const signed = await getSignedUrlForValue(PROFILE_BUCKET, src, 60 * 60)
         if (!cancelled) setResolvedSrc(addCacheBuster(signed))
-      } catch (err) {
+      } catch {
         if (!cancelled) setResolvedSrc(isHttpUrl(src) ? addCacheBuster(src) : '')
       }
     }
@@ -482,18 +495,6 @@ function Avatar({ src, name }) {
       onError={() => setBroken(true)}
     />
   )
-}
-
-const buildLast12Months = () => {
-  const now = new Date()
-  const items = []
-  for (let i = 0; i < 12; i += 1) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    const label = `${MONTH_NAMES_ID[d.getMonth()]} ${d.getFullYear()}`
-    items.push({ value: ym, label })
-  }
-  return items
 }
 
 /* =========================
@@ -629,8 +630,7 @@ export default function TugasGuru() {
 
   // Detail
   const [selectedTugas, setSelectedTugas] = useState(null)
-  const [listTugas, setListTugas, hasListTugas] = useLocalCache(`guru_tugas_list:${academicSemesterCacheKey}`, [])
-  const [isLoadingList, setIsLoadingList] = useState(!hasListTugas)
+  const [listTugas, setListTugas] = useLocalCache(`guru_tugas_list:${academicSemesterCacheKey}`, [])
   const [siswaDiKelas, setSiswaDiKelas] = useState([])
   const [jawabanTugas, setJawabanTugas] = useState([])
   const [nilaiInput, setNilaiInput] = useState({})
@@ -830,7 +830,7 @@ export default function TugasGuru() {
           params.created_before = end.toISOString()
         }
         const res = await assignmentService.getAssignments(params)
-        tugasRaw = res.data
+        tugasRaw = (res.data || []).map(withV2Attachments)
       } else {
         let query = supabase.from('tugas').select(TUGAS_GURU_COLUMNS).eq('created_by', user.id)
         query = applyAcademicSemesterFilter(query)
@@ -963,7 +963,7 @@ export default function TugasGuru() {
       if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2 && tugasIds.length > 0) {
         try {
             const res = await submissionService.getSubmissions({ tugas_id: tugasIds, per_page: 'all' })
-            jawabanRes = { data: res.data, error: null }
+            jawabanRes = { data: (res.data || []).map(withV2Attachments), error: null }
         } catch (e) {
             jawabanRes = { data: [], error: e }
         }
@@ -1086,12 +1086,8 @@ export default function TugasGuru() {
       let tugasData = []
       
       if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
-        try {
-          const res = await assignmentService.getAssignments({ created_by: user.id, per_page: 'all' })
-          tugasData = res.data
-        } catch (e) {
-          throw e
-        }
+        const res = await assignmentService.getAssignments({ created_by: user.id, per_page: 'all' })
+        tugasData = (res.data || []).map(withV2Attachments)
       } else {
         let tugasQuery = supabase
           .from('tugas')
@@ -1110,13 +1106,8 @@ export default function TugasGuru() {
       const tugasIds = tugasData.map((t) => t.id)
       let jawabanData = []
       if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
-        try {
-          // Status 'menunggu' means not yet graded or nilai is null. We can just fetch all and filter in JS.
-          const res = await submissionService.getSubmissions({ tugas_id: tugasIds, per_page: 'all' })
-          jawabanData = (res.data || []).filter(j => j.nilai === null || j.status === 'menunggu')
-        } catch (e) {
-          throw e
-        }
+        const res = await submissionService.getSubmissions({ tugas_id: tugasIds, per_page: 'all' })
+        jawabanData = (res.data || []).map(withV2Attachments).filter(j => j.nilai === null || j.status === 'menunggu')
       } else {
         let jawabanQuery = supabase
           .from('tugas_jawaban')
@@ -1251,7 +1242,7 @@ export default function TugasGuru() {
           ? (async () => {
               try {
                 const res = await submissionService.getSubmissions({ tugas_id: tugas.id, per_page: 'all' })
-                return { data: res.data, error: null }
+                return { data: (res.data || []).map(withV2Attachments), error: null }
               } catch (e) {
                 return { data: null, error: e }
               }
@@ -1430,29 +1421,37 @@ export default function TugasGuru() {
 
       const compressed = await compressFileBeforeUpload(file)
 
-      const safeName = sanitizeFileName(compressed.name)
-      const filePath = `tugas_lampiran/${user.id}/${Date.now()}-${safeName}`
-
       setCompressionProgress('Mengupload file lewat jalur cepat...')
-
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from(ASSIGNMENT_BUCKET)
-        .upload(filePath, compressed, {
-          ...ASSIGNMENT_FAST_UPLOAD_OPTIONS,
+      let storedFileValue
+      let sizeLabel
+      let storedProvider
+      if (USE_ASSIGNMENT_UPLOADS_V2) {
+        const attachment = await uploadService.uploadFile(compressed, {
+          purpose: 'assignment_attachment',
+          assignmentId: mode === 'edit' ? editForm?.id : undefined,
           signal: uploadController.signal,
           onProgress: setUploadPercent
         })
-
-      if (uploadError) {
-        // RLS storage paling sering muncul di sini
-        throw new Error(uploadError.message || 'Upload ditolak oleh policy storage')
+        storedFileValue = attachment.id
+        sizeLabel = formatFileSize(attachment.size || compressed.size)
+        storedProvider = 'api_v2'
+      } else {
+        const safeName = sanitizeFileName(compressed.name)
+        const filePath = `tugas_lampiran/${user.id}/${Date.now()}-${safeName}`
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from(ASSIGNMENT_BUCKET)
+          .upload(filePath, compressed, {
+            ...ASSIGNMENT_FAST_UPLOAD_OPTIONS,
+            signal: uploadController.signal,
+            onProgress: setUploadPercent
+          })
+        if (uploadError) throw new Error(uploadError.message || 'Upload ditolak oleh policy storage')
+        storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
+        sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
+        storedProvider = ['google_drive', 'object_storage'].includes(uploadData?.provider)
+          ? uploadData.provider
+          : 'local'
       }
-
-      const storedFileValue = uploadData?.path || uploadData?.fullPath || filePath
-      const sizeLabel = uploadData?.uploadedSizeLabel || formatFileSize(uploadData?.uploadedSizeBytes || compressed.size)
-      const storedProvider = ['google_drive', 'object_storage'].includes(uploadData?.provider)
-        ? uploadData.provider
-        : 'local'
       setUploadProvider(storedProvider)
 
       if (mode === 'edit') {
@@ -1669,7 +1668,9 @@ export default function TugasGuru() {
         link: safeLink || null,
         mulai: new Date(form.mulai).toISOString(),
         deadline: new Date(form.deadline).toISOString(),
-        file_url: form.file_url
+        ...(USE_ASSIGNMENT_UPLOADS_V2
+          ? { attachment_ids: form.file_url ? [form.file_url] : [] }
+          : { file_url: form.file_url })
       }
 
       if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
@@ -1766,7 +1767,9 @@ export default function TugasGuru() {
         judul: editForm.judul,
         keterangan: editForm.keterangan,
         link: safeLink || null,
-        file_url: editForm.file_url,
+        ...(USE_ASSIGNMENT_UPLOADS_V2
+          ? { attachment_ids: editForm.file_url ? [editForm.file_url] : [] }
+          : { file_url: editForm.file_url }),
         updated_at: new Date().toISOString()
       }
       if (mulaiChanged) payload.mulai = new Date(editForm.mulai).toISOString()
@@ -1829,7 +1832,6 @@ export default function TugasGuru() {
       return
     }
 
-    // eslint-disable-next-line no-restricted-globals
     if (!confirm('Apakah Anda yakin ingin menghapus tugas ini?')) return
 
     try {
