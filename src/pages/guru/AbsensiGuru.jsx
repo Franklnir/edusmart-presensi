@@ -6,10 +6,11 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { attendanceService } from '../../services/attendanceService'
 import {
-  scheduleErrorMessage,
   scheduleService,
-  USE_SCHEDULES_API_V2
+  USE_SCHEDULES_API_V2,
+  scheduleErrorMessage
 } from '../../services/scheduleService'
+import { fetchClassRosterHistory } from '../../services/studentClassHistoryService'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
@@ -1627,15 +1628,10 @@ function AbsensiGuru() {
         periodFilter.tahunAjaran !== activeAcademicPeriod.tahunAjaran
       let resolvedStudentsRes = absensiBatch?.students || { data: [], error: null }
       if (isArchivePeriod && periodFilter.tahunAjaran) {
-        const { data: histRows } = await supabase
-          .from('student_class_histories')
-          .select('student_id')
-          .eq('class_id', kelas)
-          .eq('tahun_ajaran', periodFilter.tahunAjaran)
-          .in('status', ['active', 'nonaktif', 'mutasi'])
-        const histIds = (histRows || [])
-          .map((r) => String(r.student_id || '').trim())
-          .filter(Boolean)
+        const histIds = await fetchClassRosterHistory({
+          classId: kelas,
+          tahunAjaran: periodFilter.tahunAjaran
+        })
         if (histIds.length) {
           const { data: histProfiles, error: histErr } = await supabase
             .from('profiles')

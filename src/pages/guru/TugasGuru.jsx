@@ -21,6 +21,7 @@ import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import { assignmentService, submissionService } from '../../services/assignmentService'
+import { fetchClassRosterHistory } from '../../services/studentClassHistoryService'
 import {
   scheduleErrorMessage,
   scheduleService,
@@ -886,17 +887,23 @@ export default function TugasGuru() {
       const uniqueKelasVariants = Array.from(new Set(uniqueKelas.flatMap((k) => buildKelasVariants(k))))
 
       const statRequests = []
+      let classHistoryRes = { data: [], error: null }
+
       if (uniqueKelasVariants.length > 0) {
         if (isViewingArchivePeriod && period.tahunAjaran) {
-          statRequests.push({
-            key: 'classHistory',
-            query: supabase
-              .from('student_class_histories')
-              .select('student_id, class_id')
-              .in('class_id', uniqueKelasVariants)
-              .eq('tahun_ajaran', period.tahunAjaran)
-              .in('status', ['active', 'nonaktif', 'mutasi'])
-          })
+          try {
+            const historyPromises = uniqueKelasVariants.map(async (classId) => {
+              const studentIds = await fetchClassRosterHistory({
+                classId,
+                tahunAjaran: period.tahunAjaran
+              })
+              return studentIds.map((sid) => ({ class_id: classId, student_id: sid }))
+            })
+            const results = await Promise.all(historyPromises)
+            classHistoryRes.data = results.flat()
+          } catch (e) {
+            classHistoryRes.error = e
+          }
         } else {
           statRequests.push({
             key: 'siswa',
@@ -909,7 +916,7 @@ export default function TugasGuru() {
         }
       }
 
-      const { data: statBatch } = await supabase.batch(statRequests)
+      const { data: statBatch } = statRequests.length > 0 ? await supabase.batch(statRequests) : { data: {} }
 
       let jawabanRes = { data: [], error: null }
       if (tugasIds.length > 0) {
@@ -922,7 +929,6 @@ export default function TugasGuru() {
       }
       
       const siswaRes = statBatch?.siswa || { data: [], error: null }
-      const classHistoryRes = statBatch?.classHistory || { data: [], error: null }
       if (jawabanRes.error) console.error('Error fetching stats jawaban tugas:', jawabanRes.error)
       if (siswaRes.error) console.error('Error fetching students for stats:', siswaRes.error)
       if (classHistoryRes.error) console.error('Error fetching class history for stats:', classHistoryRes.error)
@@ -1139,15 +1145,10 @@ export default function TugasGuru() {
           // grading panel when the teacher views a historical assignment.
           const tugasYear = (tugas.tahun_ajaran || (period.tahunAjaran || '')).trim()
           if (isViewingArchivePeriod && tugasYear && tugas.kelas) {
-            const { data: histRows } = await supabase
-              .from('student_class_histories')
-              .select('student_id')
-              .eq('class_id', tugas.kelas)
-              .eq('tahun_ajaran', tugasYear)
-              .in('status', ['active', 'nonaktif', 'mutasi'])
-            const histIds = (histRows || [])
-              .map((r) => String(r.student_id || '').trim())
-              .filter(Boolean)
+            const histIds = await fetchClassRosterHistory({
+              classId: tugas.kelas,
+              tahunAjaran: tugasYear
+            })
             if (histIds.length) {
               let { data, error } = await supabase
                 .from('profiles')

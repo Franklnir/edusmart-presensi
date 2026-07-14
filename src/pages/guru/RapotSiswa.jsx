@@ -8,10 +8,8 @@ import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import { getAcademicAssessmentLabels } from '../../utils/academicAssessment'
 import { getKelasDisplayName, normalizeKelasKey, toNumberOrNull, round2, makeLocalId } from './laporan/laporanUtils'
-import {
-  scheduleService,
-  USE_SCHEDULES_API_V2
-} from '../../services/scheduleService'
+import { scheduleService, USE_SCHEDULES_API_V2 } from '../../services/scheduleService'
+import { fetchClassRosterHistory } from '../../services/studentClassHistoryService'
 import {
   reportCardService,
   USE_REPORT_CARDS_API_V2
@@ -392,17 +390,12 @@ export default function RapotSiswa() {
             let historyStudentIds = rapotStudentIds
             const historyYear = (tahunPelajaran || '').trim()
             if (historyYear) {
-              const { data: classHistoryRows } = await supabase
-                .from('student_class_histories')
-                .select('student_id')
-                .eq('class_id', selectedKelas)
-                .eq('tahun_ajaran', historyYear)
-                .in('status', ['active', 'nonaktif', 'mutasi'])
-              const historyFromClass = (classHistoryRows || [])
-                .map((row) => row.student_id)
-                .filter(Boolean)
-              if (historyFromClass.length) {
-                historyStudentIds = historyFromClass
+              const histIds = await fetchClassRosterHistory({
+                classId: selectedKelas,
+                tahunAjaran: historyYear
+              })
+              if (histIds.length) {
+                historyStudentIds = histIds
               }
             }
             const { data: historyStudents, error: historyStudentsError } = await supabase
