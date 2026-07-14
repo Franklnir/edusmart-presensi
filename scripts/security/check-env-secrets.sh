@@ -32,7 +32,6 @@ append_candidate_files() {
       -o -path "$ROOT_DIR/node_modules" \
       -o -path "$ROOT_DIR/backend/vendor" \
       -o -path "$ROOT_DIR/backend/node_modules" \
-      -o -path "$ROOT_DIR/mobile-app/node_modules" \
       -o -path "$ROOT_DIR/dist" \
       -o -path "$ROOT_DIR/.local" \) -prune \
     -o -type f \( -name '.env' -o -name '.env.*' -o -name '*.env' -o -path "$ROOT_DIR/docs/*.md" \) \
@@ -46,7 +45,7 @@ while IFS= read -r relative_path; do
   [ -n "$relative_path" ] || continue
 
   case "$relative_path" in
-    .git/*|node_modules/*|backend/vendor/*|backend/node_modules/*|mobile-app/node_modules/*|dist/*|.local/*)
+    .git/*|node_modules/*|backend/vendor/*|backend/node_modules/*|dist/*|.local/*)
       continue
       ;;
   esac

@@ -92,7 +92,7 @@ export default function AccountSecurityPanel({ className = '', tone = 'blue' }) 
       setOverview(data?.security || null)
       const webCount = Number(data?.web_sessions_revoked || 0)
       const tokenCount = Number(data?.api_tokens_revoked || 0)
-      pushToast('success', `Perangkat lain dikeluarkan. Web: ${webCount}, mobile/API: ${tokenCount}.`)
+      pushToast('success', `Perangkat lain dikeluarkan. Web: ${webCount}, token API: ${tokenCount}.`)
     } catch (error) {
       pushToast('error', error?.message || 'Gagal mengeluarkan perangkat lain')
     } finally {
@@ -130,7 +130,7 @@ export default function AccountSecurityPanel({ className = '', tone = 'blue' }) 
             <p className="mt-1 text-2xl font-bold text-slate-900">{activeWebSessions}</p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs font-semibold text-slate-500">Token mobile/API</p>
+            <p className="text-xs font-semibold text-slate-500">Token API</p>
             <p className="mt-1 text-2xl font-bold text-slate-900">{activeApiTokens}</p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
@@ -180,7 +180,7 @@ export default function AccountSecurityPanel({ className = '', tone = 'blue' }) 
                 <div key={`token-${item.id}`} className="rounded-xl border border-slate-200 bg-white p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-900">{item.name || 'Token mobile/API'}</p>
+                      <p className="text-sm font-semibold text-slate-900">{item.name || 'Token API'}</p>
                       <p className="mt-1 text-xs text-slate-500">
                         Terakhir aktif {formatDateTime(item.last_active_at || item.created_at)}
                       </p>
@@ -216,7 +216,7 @@ export default function AccountSecurityPanel({ className = '', tone = 'blue' }) 
                 </button>
               </div>
               <p className="mt-2 text-xs leading-5 text-red-700">
-                Session web lain dan token mobile/API lain akan dicabut. Perangkat ini tetap login.
+                Session web lain dan token API lain akan dicabut. Perangkat ini tetap login.
               </p>
             </div>
           </div>

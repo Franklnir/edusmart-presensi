@@ -30,9 +30,9 @@ class AuthSecurityDeviceTest extends TestCase
         DB::table('personal_access_tokens')->insert([
             'tokenable_type' => User::class,
             'tokenable_id' => $user->id,
-            'name' => 'mobile-guru-20260621',
-            'token' => hash('sha256', 'mobile-token-a'),
-            'abilities' => json_encode(['mobile', 'guru']),
+            'name' => 'api-guru-20260621',
+            'token' => hash('sha256', 'api-token-a'),
+            'abilities' => json_encode(['api', 'guru']),
             'last_used_at' => now(),
             'created_at' => now(),
             'updated_at' => now(),
@@ -61,7 +61,7 @@ class AuthSecurityDeviceTest extends TestCase
         $response->assertJsonPath('data.summary.active_api_tokens', 1);
         $response->assertJsonPath('data.login_history.0.event', 'login_success');
         $response->assertJsonPath('data.web_sessions.0.ip_address', '10.1.1.10');
-        $response->assertJsonPath('data.api_tokens.0.name', 'mobile-guru-20260621');
+        $response->assertJsonPath('data.api_tokens.0.name', 'api-guru-20260621');
     }
 
     public function test_logout_other_devices_requires_password_and_revokes_sessions_and_tokens(): void
@@ -98,9 +98,9 @@ class AuthSecurityDeviceTest extends TestCase
             [
                 'tokenable_type' => User::class,
                 'tokenable_id' => $user->id,
-                'name' => 'mobile-siswa-a',
-                'token' => hash('sha256', 'mobile-token-a'),
-                'abilities' => json_encode(['mobile', 'siswa']),
+                'name' => 'api-siswa-a',
+                'token' => hash('sha256', 'api-token-a'),
+                'abilities' => json_encode(['api', 'siswa']),
                 'last_used_at' => now(),
                 'created_at' => now(),
                 'updated_at' => now(),
@@ -108,9 +108,9 @@ class AuthSecurityDeviceTest extends TestCase
             [
                 'tokenable_type' => User::class,
                 'tokenable_id' => $user->id,
-                'name' => 'mobile-siswa-b',
-                'token' => hash('sha256', 'mobile-token-b'),
-                'abilities' => json_encode(['mobile', 'siswa']),
+                'name' => 'api-siswa-b',
+                'token' => hash('sha256', 'api-token-b'),
+                'abilities' => json_encode(['api', 'siswa']),
                 'last_used_at' => now(),
                 'created_at' => now(),
                 'updated_at' => now(),

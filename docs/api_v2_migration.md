@@ -43,7 +43,7 @@ Migrasi dari API lama berbasis routing `/api/db` dan `/api/admin/` menuju API V2
 ### Deployment
 1. Deployment branch `hardening/API V2` melalui proses normal CI/CD.
 2. Karena seluruh schema tidak ada yang berubah dan murni refactor dari routing, tidak perlu migration manual.
-3. `/api/db` dan endpoint `/api/admin/*` tetap aktif sebagai layer backwards-compatibility (tidak ada yang dihapus, mengurangi resiko downtime pada endpoint yang mungkin dikonsumsi oleh aplikasi Mobile/External apps yang belum siap migrasi).
+3. `/api/db` dan endpoint `/api/admin/*` tetap aktif sebagai layer backwards-compatibility (tidak ada yang dihapus, mengurangi risiko downtime pada endpoint yang mungkin dikonsumsi oleh integrasi eksternal yang belum siap migrasi).
 
 ### Rollback Plan
 Jika terjadi major fault (seperti `cors` miss-configuration, atau missing policy check yang kritis di production):

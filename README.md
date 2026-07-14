@@ -2,6 +2,10 @@
 
 EduSmart Presensi adalah aplikasi presensi dan manajemen sekolah berbasis React, Laravel, PostgreSQL, Redis, Caddy, Nginx, Mosquitto, dan Docker Compose.
 
+Produk yang didukung pada fase ini adalah aplikasi web responsif/PWA. Aplikasi
+native Android/iOS tidak lagi menjadi bagian repository; browser NFC, RFID,
+MQTT, service worker, dan manifest web tetap didukung.
+
 Branch production yang saat ini dipakai:
 
 ```bash

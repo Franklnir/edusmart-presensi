@@ -87,7 +87,9 @@ const getStableQuizDeviceId = () => {
   let deviceId = ''
   try {
     deviceId = window.localStorage.getItem(key) || ''
-  } catch { }
+  } catch {
+    // Storage access is best-effort (private browsing can deny it).
+  }
   if (!deviceId) {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       deviceId = crypto.randomUUID()
@@ -96,7 +98,9 @@ const getStableQuizDeviceId = () => {
     }
     try {
       window.localStorage.setItem(key, deviceId)
-    } catch { }
+    } catch {
+      // Storage access is best-effort (private browsing can deny it).
+    }
   }
   return deviceId
 }
@@ -124,7 +128,9 @@ const writePendingAnswersToStorage = (userId, quizId, submissionId, rows = {}) =
       return
     }
     window.localStorage.setItem(key, JSON.stringify(rows))
-  } catch { }
+  } catch {
+    // Storage access is best-effort (private browsing can deny it).
+  }
 }
 
 const quizEssayDraftStorageKey = (userId, quizId, submissionId) => (
@@ -152,14 +158,18 @@ const writeEssayDraftToStorage = (userId, quizId, submissionId, questionId, valu
       updatedAt: Date.now()
     }
     window.localStorage.setItem(key, JSON.stringify(drafts))
-  } catch { }
+  } catch {
+    // Storage access is best-effort (private browsing can deny it).
+  }
 }
 
 const clearEssayDraftsFromStorage = (userId, quizId, submissionId) => {
   if (typeof window === 'undefined' || !userId || !quizId || !submissionId) return
   try {
     window.localStorage.removeItem(quizEssayDraftStorageKey(userId, quizId, submissionId))
-  } catch { }
+  } catch {
+    // Storage cleanup is best-effort.
+  }
 }
 
 const parseStoredDraftTime = (value) => {
@@ -250,25 +260,9 @@ const FULLSCREEN_FAILED_MESSAGE = 'Browser menolak fullscreen. Klik ulang tombol
 const MONTH_FILTER_ALL = ''
 const MONTH_FILTER_THIS = '__this_month'
 
-const normalizeAccessDevice = (value) => {
-  const raw = String(value || '').trim().toLowerCase()
-  if (raw === 'web') return 'web'
-  if (raw === 'mobile' || raw === 'mobile_app' || raw === 'app') return 'mobile'
-  return 'both'
-}
+const getAccessDeviceLabel = () => 'Web'
 
-const getAccessDeviceLabel = (value) => {
-  const mode = normalizeAccessDevice(value)
-  if (mode === 'web') return 'Web saja'
-  if (mode === 'mobile') return 'Mobile saja'
-  return 'Web & Mobile'
-}
-
-const getWebAccessBlockMessage = (quiz) => (
-  normalizeAccessDevice(quiz?.access_device) === 'mobile'
-    ? 'Quiz ini hanya dapat dikerjakan melalui aplikasi mobile. Buka aplikasi EduSmart Mobile untuk mengerjakan.'
-    : ''
-)
+const getWebAccessBlockMessage = () => ''
 
 const TEXT_EDITABLE_INPUT_TYPES = new Set([
   '',
@@ -513,7 +507,6 @@ export default function SiswaQuiz() {
   const { pushToast, setLoading } = useUIStore()
   const {
 	    activeAcademicPeriod,
-	    period,
 	    termPeriod,
 	    dateFilterPeriod,
 	    periodFilter,
@@ -1258,7 +1251,9 @@ export default function SiswaQuiz() {
     const pingQuizPresence = async () => {
       try {
         await supabase.presence.ping({ deviceId, activity: true })
-      } catch {}
+      } catch {
+        // Presence is best-effort; polling will retry on the next interval.
+      }
     }
 
     void pingQuizPresence()
@@ -1955,7 +1950,9 @@ export default function SiswaQuiz() {
             return q
           }))
         }
-      } catch {}
+      } catch {
+        // Server deadline refresh is best-effort while a quiz is active.
+      }
     }, 30000)
     return () => clearInterval(timer)
   }, [isTaking, selectedQuiz?.id, activeSubmissionId])
@@ -2033,7 +2030,9 @@ export default function SiswaQuiz() {
       if (document.fullscreenElement) {
         try {
           await document.exitFullscreen()
-        } catch {}
+        } catch {
+          // Fullscreen may already have been released by the browser.
+        }
       }
       setCelebration({
         open: true,
@@ -2184,7 +2183,9 @@ export default function SiswaQuiz() {
       if (!navigator?.clipboard?.writeText) return
       try {
         await navigator.clipboard.writeText('')
-      } catch {}
+      } catch {
+        // Clipboard clearing is not supported by every browser.
+      }
     }
 
     const lockKeyboardShortcuts = async () => {
@@ -2193,14 +2194,18 @@ export default function SiswaQuiz() {
       if (!navigator?.keyboard?.lock) return
       try {
         await navigator.keyboard.lock(['Escape', 'Tab', 'Meta', 'Alt'])
-      } catch {}
+      } catch {
+        // Keyboard lock is an optional browser capability.
+      }
     }
 
     const unlockKeyboardShortcuts = () => {
       if (!navigator?.keyboard?.unlock) return
       try {
         navigator.keyboard.unlock()
-      } catch {}
+      } catch {
+        // Keyboard unlock is an optional browser capability.
+      }
     }
 
     const handleVisibility = () => {
@@ -2337,7 +2342,9 @@ export default function SiswaQuiz() {
       if (getActiveTextEditableElement()) return
       try {
         window.getSelection()?.removeAllRanges()
-      } catch {}
+      } catch {
+        // Selection cleanup is best-effort.
+      }
     }
 
     const handleBeforeUnload = (event) => {
@@ -3703,7 +3710,7 @@ export default function SiswaQuiz() {
                           disabled
                           className="cursor-not-allowed rounded-lg bg-slate-100 px-5 py-2.5 font-semibold text-slate-400"
                         >
-                          {selectedWebAccessBlocked ? 'Akses Mobile Saja' : 'Quiz belum tersedia'}
+                          Quiz belum tersedia
                         </button>
                       )}
                       {activeSubmission?.score != null && (

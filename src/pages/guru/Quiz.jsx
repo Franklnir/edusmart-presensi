@@ -16,8 +16,6 @@ import {
   POINT_OPTIONS,
   QUIZ_MAX_POINTS,
   QUIZ_IMAGE_MAX_BYTES,
-  QUIZ_IMAGE_ALLOWED_EXT,
-  QUIZ_IMAGE_ALLOWED_MIME,
   MONTH_FILTER_ALL,
   MONTH_FILTER_THIS,
   makeId,
@@ -41,8 +39,6 @@ import {
   getQuizEndAt,
   getRemainingSeconds,
   getQuizStatus,
-  getQuizCreatedAtMs,
-  compareQuizByDeadlineUrgency,
   sortQuizzesByPriority,
   getQuizCountdownMeta,
   getQuizMutationMeta,
@@ -67,20 +63,13 @@ const ATTEMPT_LIMIT_OPTIONS = [
 ]
 
 const ACCESS_DEVICE_OPTIONS = [
-  { value: 'both', label: 'Web & Mobile', help: 'Siswa bisa mengerjakan dari browser atau aplikasi mobile.' },
-  { value: 'web', label: 'Web saja', help: 'Siswa hanya bisa mengerjakan dari browser/web.' },
-  { value: 'mobile', label: 'Mobile saja', help: 'Siswa hanya bisa mengerjakan dari aplikasi mobile.' }
+  { value: 'web', label: 'Web', help: 'Siswa mengerjakan quiz melalui browser web.' }
 ]
 
-const normalizeAccessDevice = (value) => {
-  const raw = String(value || '').trim().toLowerCase()
-  if (raw === 'web') return 'web'
-  if (raw === 'mobile' || raw === 'mobile_app' || raw === 'app') return 'mobile'
-  return 'both'
-}
+const normalizeAccessDevice = () => 'web'
 
 const getAccessDeviceLabel = (value) => (
-  ACCESS_DEVICE_OPTIONS.find((option) => option.value === normalizeAccessDevice(value))?.label || 'Web & Mobile'
+  ACCESS_DEVICE_OPTIONS.find((option) => option.value === normalizeAccessDevice(value))?.label || 'Web'
 )
 
 const KELAS_COLUMNS = 'id,nama,grade,suffix,tingkat,jurusan,angkatan'
@@ -91,7 +80,6 @@ export default function GuruQuiz() {
   const { pushToast, setLoading } = useUIStore()
   const {
 	    activeAcademicPeriod,
-	    period,
 	    termPeriod,
 	    dateFilterPeriod,
 	    periodFilter,
@@ -120,7 +108,7 @@ export default function GuruQuiz() {
   const [selectedMapel, setSelectedMapel] = useState('')
   const [selectedMonth, setSelectedMonth] = useState('')
 
-  const [quizList, setQuizList, hasQuizList] = useLocalCache(`guru_quiz_list:${academicSemesterCacheKey}`, [])
+  const [quizList, setQuizList] = useLocalCache(`guru_quiz_list:${academicSemesterCacheKey}`, [])
   const [quizStatsById, setQuizStatsById] = useState({})
   const [selectedQuizId, setSelectedQuizId] = useState('')
   const [questions, setQuestions] = useState([])
@@ -199,7 +187,7 @@ export default function GuruQuiz() {
     max_attempts: '',
     access_code: '',
     security_mode: 'standard',
-    access_device: 'both'
+    access_device: 'web'
   })
   const [questionImageUploading, setQuestionImageUploading] = useState(false)
   const [optionImageUploading, setOptionImageUploading] = useState({})
@@ -246,13 +234,6 @@ export default function GuruQuiz() {
       .sort()
   }, [cloneForm.target_kelas_id, jadwal])
 
-  const selectedStats = selectedQuiz ? quizStatsById[selectedQuiz.id] || null : null
-  const totalStudents = selectedStats?.total_students ?? participants.length
-  const joinedCount = selectedStats?.started_count ?? participants.filter((p) => p.submission?.started_at).length
-  const notStartedCount = Math.max(0, totalStudents - joinedCount)
-  const selectedEssayQuestionCount = Number(selectedStats?.essay_question_count || 0)
-  const selectedEssayStudentPendingCount = Number(selectedStats?.essay_student_pending_count || 0)
-  const selectedEssayStudentGradedCount = Number(selectedStats?.essay_student_graded_count || 0)
   const detailReviewCompletedAt = detailSubmission?.essay_review_completed_at || null
   const previewQuestion = questions[previewQuestionIndex] || null
   const teacherQuestion = questions[teacherQuestionIndex] || null
@@ -1302,7 +1283,7 @@ export default function GuruQuiz() {
         max_attempts: '',
         access_code: '',
         security_mode: 'standard',
-        access_device: 'both'
+        access_device: 'web'
       })
       return
     }
@@ -1503,7 +1484,7 @@ export default function GuruQuiz() {
       live_started_at: null,
       duration_minutes: quizForm.mode !== 'regular' ? 60 : null,
       result_visible_to_students: false,
-      access_device: 'both',
+      access_device: 'web',
       ...activeAcademicPeriodPayload,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -1566,7 +1547,7 @@ export default function GuruQuiz() {
     if (!['standard', 'strict'].includes(String(selectedQuiz.security_mode || '').toLowerCase())) {
       return { ok: false, message: 'Simpan mode keamanan quiz terlebih dahulu' }
     }
-    if (!['web', 'mobile', 'both'].includes(normalizeAccessDevice(selectedQuiz.access_device))) {
+    if (normalizeAccessDevice(selectedQuiz.access_device) !== 'web') {
       return { ok: false, message: 'Simpan akses perangkat quiz terlebih dahulu' }
     }
     if (securitySettingsDirty) {

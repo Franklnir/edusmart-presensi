@@ -155,7 +155,6 @@ bebas tanpa kontrol.
 |---|---|---|
 | `GET /api/health` | Fingerprinting minimal | Response kecil, tanpa versi detail. |
 | `GET /api/public/settings` | Kebocoran setting sensitif | Allowlist field publik saja. |
-| `GET /api/mobile/schools` | Enumerasi tenant | Throttle, data minimal, tanpa secret. |
 | `GET /api/internal/tls/authorize` | Penyalahgunaan ACME ask endpoint | Secret/validasi domain di controller dan throttle. |
 | `POST /api/auth/login` | Bruteforce | `throttle:auth`, root-domain block, password policy. |
 | `POST /api/auth/register` | Spam akun | `throttle:auth`, admin public ditolak, setting registrasi. |
@@ -503,31 +502,6 @@ Payload penting:
 
 Hapus permanen guru/siswa sengaja dinonaktifkan; gunakan status nonaktif,
 mutasi, atau alumni agar histori akademik tetap aman.
-
-### Mobile
-
-Endpoint `/api/mobile/*` memakai Sanctum kecuali `/api/mobile/schools`.
-
-Fitur guru:
-
-- dashboard guru.
-- jadwal hari ini.
-- daftar kelas yang diajar.
-- detail kelas.
-- ringkasan absensi.
-- scan RFID/NFC mobile.
-- sync batch RFID/NFC mobile.
-- input absensi manual.
-
-Payload penting:
-
-- `guru/rfid/scan`: `card_uid`, optional `device_id`, `event_id`, `mode`,
-  `scanned_at`.
-- `guru/rfid/sync`: `events[]` dengan `card_uid`, optional `event_id`,
-  `scan_id`, `device_id`, `mode`, `scanned_at`, `timestamp`.
-- `guru/attendance/manual`: `jadwal_id`, `kelas_id`, `siswa_id`, `status`
-  salah satu `Hadir`, `Izin`, `Sakit`, `Alpha`.
-- `siswa/attendance`: query optional `start`, `end`.
 
 ### Attendance QR
 
@@ -1188,8 +1162,6 @@ Total route API aplikasi aktif: 242.
 | `POST` | `/api/auth/google/credential-login` | `AuthController@googleCredentialLogin` | Public |
 | `GET` | `/api/auth/google/finalize-login` | `AuthController@googleFinalizeLogin` | Public, web |
 | `GET` | `/api/auth/google/link` | `AuthController@googleLinkRedirect` | Sanctum, web |
-| `POST` | `/api/auth/google/mobile/exchange` | `AuthController@googleMobileExchange` | Public |
-| `GET` | `/api/auth/google/mobile/redirect` | `AuthController@googleMobileRedirect` | Public, web |
 | `GET` | `/api/auth/google/popup-context` | `AuthController@googlePopupContext` | Public |
 | `GET` | `/api/auth/google/redirect` | `AuthController@googleRedirect` | Public, web |
 | `POST` | `/api/auth/google/unlink` | `AuthController@googleUnlink` | Sanctum |
@@ -1228,28 +1200,6 @@ Total route API aplikasi aktif: 242.
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
 | `GET` | `/api/internal/tls/authorize` | `InfrastructureController@authorizeTlsDomain` | TLS ask secret |
-
-### Mobile
-
-| Method | Endpoint | Handler | Auth |
-|---|---|---|---|
-| `GET` | `/api/mobile/dashboard` | `MobileController@dashboard` | Sanctum |
-| `POST` | `/api/mobile/guru/attendance/manual` | `MobileController@guruManualAttendance` | Sanctum |
-| `GET` | `/api/mobile/guru/attendance/summary` | `MobileController@guruAttendanceSummary` | Sanctum |
-| `GET` | `/api/mobile/guru/classes` | `MobileController@guruClasses` | Sanctum |
-| `GET` | `/api/mobile/guru/classes/{id}` | `MobileController@guruClass` | Sanctum |
-| `GET` | `/api/mobile/guru/dashboard` | `MobileController@guruDashboard` | Sanctum |
-| `POST` | `/api/mobile/guru/rfid/scan` | `MobileController@guruRfidScan` | Sanctum |
-| `POST` | `/api/mobile/guru/rfid/sync` | `MobileController@guruRfidSync` | Sanctum |
-| `GET` | `/api/mobile/guru/schedules/today` | `MobileController@guruSchedulesToday` | Sanctum |
-| `GET` | `/api/mobile/me` | `MobileController@me` | Sanctum |
-| `GET` | `/api/mobile/schools` | `MobileDirectoryController@schools` | Public |
-| `GET` | `/api/mobile/siswa/attendance` | `MobileController@siswaAttendance` | Sanctum |
-| `GET` | `/api/mobile/siswa/dashboard` | `MobileController@siswaDashboard` | Sanctum |
-| `GET` | `/api/mobile/siswa/digital-card` | `MobileController@siswaDigitalCard` | Sanctum |
-| `GET` | `/api/mobile/siswa/grades` | `MobileController@siswaGrades` | Sanctum |
-| `GET` | `/api/mobile/siswa/schedules` | `MobileController@siswaSchedules` | Sanctum |
-| `GET` | `/api/mobile/siswa/tasks` | `MobileController@siswaTasks` | Sanctum |
 
 ### Profile
 

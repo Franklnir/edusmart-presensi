@@ -130,7 +130,7 @@ Paket yang perlu ditinjau:
 
 Rekomendasi:
 
-- Install Node sesuai `.nvmrc`/engine, lalu jalankan `npm audit` di root, `backend`, dan `mobile-app`.
+- Install Node sesuai `.nvmrc`/engine, lalu jalankan `npm audit` di root dan `backend`.
 - Upgrade lockfile dengan `npm update` atau versi patch/minor aman.
 - Pastikan Vite dev server tidak pernah diekspos ke internet.
 - Tambahkan OSV/npm audit ke CI.

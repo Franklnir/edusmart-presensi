@@ -10,8 +10,6 @@ use App\Http\Controllers\Api\DbController;
 use App\Http\Controllers\Api\GoogleDriveController;
 use App\Http\Controllers\Api\InfrastructureController;
 use App\Http\Controllers\Api\JadwalController;
-use App\Http\Controllers\Api\MobileController;
-use App\Http\Controllers\Api\MobileDirectoryController;
 use App\Http\Controllers\Api\PresenceController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\PublicSettingsController;
@@ -42,13 +40,6 @@ Route::get('/internal/tls/authorize', [InfrastructureController::class, 'authori
         EnsureTenantMatchesProfile::class,
     ]);
 
-Route::get('/mobile/schools', [MobileDirectoryController::class, 'schools'])
-    ->middleware('throttle:public-directory')
-    ->withoutMiddleware([
-        ResolveTenant::class,
-        EnsureTenantMatchesProfile::class,
-    ]);
-
 Route::get('/public/settings', [PublicSettingsController::class, 'show'])
     ->middleware('throttle:api')
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
@@ -56,25 +47,6 @@ Route::get('/public/settings', [PublicSettingsController::class, 'show'])
 Route::post('/observability/web-vitals', [WebVitalsController::class, 'store'])
     ->middleware('throttle:api')
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
-
-Route::prefix('mobile')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
-    Route::get('/me', [MobileController::class, 'me']);
-    Route::get('/dashboard', [MobileController::class, 'dashboard']);
-    Route::get('/guru/dashboard', [MobileController::class, 'guruDashboard']);
-    Route::get('/guru/schedules/today', [MobileController::class, 'guruSchedulesToday']);
-    Route::get('/guru/classes', [MobileController::class, 'guruClasses']);
-    Route::get('/guru/classes/{id}', [MobileController::class, 'guruClass']);
-    Route::get('/guru/attendance/summary', [MobileController::class, 'guruAttendanceSummary']);
-    Route::post('/guru/rfid/scan', [MobileController::class, 'guruRfidScan']);
-    Route::post('/guru/rfid/sync', [MobileController::class, 'guruRfidSync']);
-    Route::post('/guru/attendance/manual', [MobileController::class, 'guruManualAttendance']);
-    Route::get('/siswa/dashboard', [MobileController::class, 'siswaDashboard']);
-    Route::get('/siswa/attendance', [MobileController::class, 'siswaAttendance']);
-    Route::get('/siswa/schedules', [MobileController::class, 'siswaSchedules']);
-    Route::get('/siswa/tasks', [MobileController::class, 'siswaTasks']);
-    Route::get('/siswa/grades', [MobileController::class, 'siswaGrades']);
-    Route::get('/siswa/digital-card', [MobileController::class, 'siswaDigitalCard']);
-});
 
 Route::post('/auth/register', [AuthController::class, 'register'])
     ->middleware(['throttle:auth', 'auth.not_root_domain'])
@@ -84,9 +56,6 @@ Route::post('/auth/login', [AuthController::class, 'login'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/google/redirect', [AuthController::class, 'googleRedirect'])
     ->middleware(['web', 'throttle:auth', 'auth.not_root_domain'])
-    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
-Route::get('/auth/google/mobile/redirect', [AuthController::class, 'googleMobileRedirect'])
-    ->middleware(['web', 'throttle:auth'])
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/google/popup-context', [AuthController::class, 'googlePopupContext'])
     ->middleware('throttle:auth')
@@ -99,9 +68,6 @@ Route::post('/auth/google/code-login', [AuthController::class, 'googleCodeLogin'
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::post('/auth/google/credential-login', [AuthController::class, 'googleCredentialLogin'])
     ->middleware(['throttle:auth', 'auth.not_root_domain'])
-    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
-Route::post('/auth/google/mobile/exchange', [AuthController::class, 'googleMobileExchange'])
-    ->middleware('throttle:auth')
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 Route::get('/auth/google/callback', [AuthController::class, 'googleCallback'])
     ->middleware(['web', 'throttle:auth'])

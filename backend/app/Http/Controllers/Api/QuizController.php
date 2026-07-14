@@ -493,7 +493,7 @@ class QuizController extends ApiController
                 'shuffle_options' => $copySecurity ? (bool) ($sourceQuiz->shuffle_options ?? false) : false,
                 'max_attempts' => $copySecurity ? ($sourceQuiz->max_attempts ?? null) : null,
                 'security_mode' => $copySecurity ? ($sourceQuiz->security_mode ?? 'standard') : 'standard',
-                'access_device' => $copySecurity ? $this->quizAccessDevice($sourceQuiz) : 'both',
+                'access_device' => 'web',
                 'timezone' => $sourceQuiz->timezone ?? self::DEFAULT_QUIZ_TIMEZONE,
                 'published_at' => null,
                 'closed_at' => null,
@@ -2654,26 +2654,12 @@ class QuizController extends ApiController
 
     private function normalizeQuizAccessDevice($value): ?string
     {
-        $raw = strtolower(trim((string) ($value ?? '')));
-        if ($raw === '') {
-            return 'both';
-        }
-        if (in_array($raw, ['both', 'all', 'any', 'semua', 'keduanya'], true)) {
-            return 'both';
-        }
-        if (in_array($raw, ['web', 'browser', 'desktop'], true)) {
-            return 'web';
-        }
-        if (in_array($raw, ['mobile', 'app', 'mobile_app', 'aplikasi', 'android', 'ios'], true)) {
-            return 'mobile';
-        }
-
-        return null;
+        return 'web';
     }
 
     private function quizAccessDevice(object $quiz): string
     {
-        return $this->normalizeQuizAccessDevice($quiz->access_device ?? null) ?: 'both';
+        return 'web';
     }
 
     private function clientMetaArray($clientMeta): array
@@ -2695,22 +2681,7 @@ class QuizController extends ApiController
 
     private function clientDeviceFromMeta($clientMeta): ?string
     {
-        $values = [];
-        $meta = $this->clientMetaArray($clientMeta);
-        foreach (['device', 'client_device', 'client', 'source', 'platform'] as $key) {
-            $values[] = strtolower(trim((string) ($meta[$key] ?? '')));
-        }
-
-        foreach ($values as $value) {
-            if (in_array($value, ['mobile', 'mobile_app', 'app', 'android', 'ios', 'react_native'], true)) {
-                return 'mobile';
-            }
-            if (in_array($value, ['web', 'browser', 'desktop'], true)) {
-                return 'web';
-            }
-        }
-
-        return null;
+        return 'web';
     }
 
     private function normalizeClientDeviceId($value): string
@@ -2838,44 +2809,12 @@ class QuizController extends ApiController
 
     private function requestClientDevice(Request $request, $clientMeta = null): string
     {
-        $metaDevice = $this->clientDeviceFromMeta($clientMeta);
-        if ($metaDevice) {
-            return $metaDevice;
-        }
-
-        $header = strtolower(trim((string) $request->header('X-EduSmart-Client', '')));
-        if (in_array($header, ['mobile', 'mobile_app', 'app', 'android', 'ios', 'react_native'], true)) {
-            return 'mobile';
-        }
-        if (in_array($header, ['web', 'browser', 'desktop'], true)) {
-            return 'web';
-        }
-
-        $queryClient = strtolower(trim((string) $request->query('client', '')));
-        if (in_array($queryClient, ['mobile', 'mobile_app', 'app', 'android', 'ios'], true)) {
-            return 'mobile';
-        }
-
         return 'web';
     }
 
     private function denyIfQuizDeviceNotAllowed(object $quiz, string $clientDevice)
     {
-        $allowed = $this->quizAccessDevice($quiz);
-        if ($allowed === 'both' || $allowed === $clientDevice) {
-            return null;
-        }
-
-        $message = $allowed === 'mobile'
-            ? 'Quiz ini hanya dapat dikerjakan melalui aplikasi mobile.'
-            : 'Quiz ini hanya dapat dikerjakan melalui web/browser.';
-
-        return response()->json([
-            'message' => $message,
-            'code' => 'quiz_device_not_allowed',
-            'allowed_device' => $allowed,
-            'client_device' => $clientDevice,
-        ], 403);
+        return null;
     }
 
     private function quizNow(?object $quiz = null): Carbon
@@ -3061,24 +3000,6 @@ class QuizController extends ApiController
     {
         $securityMode = strtolower(trim((string) ($quiz->security_mode ?? 'standard')));
         if ($securityMode !== 'strict') {
-            return null;
-        }
-
-        $clientDevice = $this->clientDeviceFromMeta($clientMeta) ?: 'web';
-        if ($clientDevice === 'mobile') {
-            $secureScreen = false;
-            if (is_array($clientMeta)) {
-                $secureScreen = $this->boolValue($clientMeta['secure_screen'] ?? $clientMeta['screen_capture_protected'] ?? false);
-            } elseif (is_object($clientMeta)) {
-                $secureScreen = $this->boolValue($clientMeta->secure_screen ?? $clientMeta->screen_capture_protected ?? false);
-            }
-
-            if (! $secureScreen) {
-                return response()->json([
-                    'message' => 'Mode strict di aplikasi mobile wajib mengaktifkan proteksi layar sebelum quiz dimulai.',
-                ], 403);
-            }
-
             return null;
         }
 
@@ -3836,9 +3757,9 @@ class QuizController extends ApiController
 
         $payload = (array) $quiz;
         if (array_key_exists('access_device', $payload)) {
-            $payload['access_device'] = $this->normalizeQuizAccessDevice($payload['access_device'] ?? null) ?: 'both';
+            $payload['access_device'] = 'web';
         } else {
-            $payload['access_device'] = 'both';
+            $payload['access_device'] = 'web';
         }
         $payload['has_access_code'] = trim((string) ($payload['access_code_hash'] ?? '')) !== '';
         unset($payload['access_code_hash']);
