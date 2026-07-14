@@ -17,8 +17,11 @@ class StoreAttendanceRequest extends FormRequest
         return [
             'uid' => ['required', 'uuid', function ($attribute, $value, $fail) {
                 $tenantId = $this->attributes->get('tenant_id');
-                $exists = Profile::where('id', $value)->where('tenant_id', $tenantId)->exists();
-                if (!$exists) {
+                $exists = Profile::where('id', $value)
+                    ->where('tenant_id', $tenantId)
+                    ->where('role', 'siswa')
+                    ->exists();
+                if (! $exists) {
                     $fail('Siswa tidak ditemukan atau tidak berada di tenant ini.');
                 }
             }],
@@ -29,7 +32,7 @@ class StoreAttendanceRequest extends FormRequest
             'komentar' => ['nullable', 'string'],
             'tahun_ajaran' => ['nullable', 'string', 'max:50'],
             'semester' => ['nullable', 'string', 'max:50'],
-            'idempotency_key' => ['required', 'string', 'max:255'],
+            'idempotency_key' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

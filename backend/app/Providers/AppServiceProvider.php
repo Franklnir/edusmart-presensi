@@ -2,6 +2,16 @@
 
 namespace App\Providers;
 
+use App\Models\Absensi;
+use App\Models\AbsensiAjuan;
+use App\Models\Profile;
+use App\Models\Tugas;
+use App\Models\TugasJawaban;
+use App\Policies\AbsensiAjuanPolicy;
+use App\Policies\AbsensiPolicy;
+use App\Policies\ProfilePolicy;
+use App\Policies\TugasJawabanPolicy;
+use App\Policies\TugasPolicy;
 use App\Support\Tenancy\TenantContext;
 use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Auth\Notifications\ResetPassword;
@@ -38,7 +48,11 @@ class AppServiceProvider extends ServiceProvider
         $frontendUrl = $this->safeFrontendBaseUrl();
         $passwordMinLength = max(12, (int) env('PASSWORD_MIN_LENGTH', 12));
 
-        Gate::policy(\App\Models\Absensi::class, \App\Policies\AbsensiPolicy::class);
+        Gate::policy(Absensi::class, AbsensiPolicy::class);
+        Gate::policy(AbsensiAjuan::class, AbsensiAjuanPolicy::class);
+        Gate::policy(Profile::class, ProfilePolicy::class);
+        Gate::policy(Tugas::class, TugasPolicy::class);
+        Gate::policy(TugasJawaban::class, TugasJawabanPolicy::class);
 
         PasswordRule::defaults(static fn () => PasswordRule::min($passwordMinLength)
             ->letters()

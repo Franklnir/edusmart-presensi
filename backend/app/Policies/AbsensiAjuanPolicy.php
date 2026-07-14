@@ -2,11 +2,11 @@
 
 namespace App\Policies;
 
-use App\Models\Absensi;
+use App\Models\AbsensiAjuan;
 use App\Models\User;
 use App\Services\AcademicAccessService;
 
-class AbsensiPolicy
+class AbsensiAjuanPolicy
 {
     public function __construct(private readonly AcademicAccessService $academicAccess) {}
 
@@ -15,10 +15,10 @@ class AbsensiPolicy
         return in_array($user->profile?->role, ['admin', 'guru', 'siswa'], true);
     }
 
-    public function view(User $user, Absensi $absensi): bool
+    public function view(User $user, AbsensiAjuan $ajuan): bool
     {
         $actor = $user->profile;
-        $student = $absensi->profile;
+        $student = $ajuan->profile;
         if (! $actor || ! $student || $actor->tenant_id !== $student->tenant_id) {
             return false;
         }
@@ -28,24 +28,24 @@ class AbsensiPolicy
         }
 
         if ($actor->role === 'guru') {
-            return $this->academicAccess->canManageClass($actor, (string) $absensi->kelas, (string) $absensi->mapel);
+            return $this->academicAccess->canManageClass($actor, (string) $ajuan->kelas, (string) $ajuan->mapel);
         }
 
-        return $actor->role === 'siswa' && $actor->id === $absensi->uid;
+        return $actor->role === 'siswa' && $ajuan->uid === $actor->id;
     }
 
     public function create(User $user): bool
     {
-        return in_array($user->profile?->role, ['admin', 'guru'], true);
+        return $user->profile?->role === 'siswa';
     }
 
-    public function update(User $user, Absensi $absensi): bool
+    public function update(User $user, AbsensiAjuan $ajuan): bool
     {
-        return $this->view($user, $absensi) && in_array($user->profile?->role, ['admin', 'guru'], true);
+        return $this->view($user, $ajuan) && in_array($user->profile?->role, ['admin', 'guru'], true);
     }
 
-    public function delete(User $user, Absensi $absensi): bool
+    public function delete(User $user, AbsensiAjuan $ajuan): bool
     {
-        return false;
+        return $ajuan->status_guru === 'pending' && $this->view($user, $ajuan);
     }
 }

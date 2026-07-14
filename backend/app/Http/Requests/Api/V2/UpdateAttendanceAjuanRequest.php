@@ -4,7 +4,7 @@ namespace App\Http\Requests\Api\V2;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class UpdateAttendanceRequest extends FormRequest
+class UpdateAttendanceAjuanRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -14,9 +14,7 @@ class UpdateAttendanceRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => ['sometimes', 'string', 'in:Hadir,Izin,Sakit,Alpha'],
-            'komentar' => ['nullable', 'string'],
-            'idempotency_key' => ['nullable', 'string', 'max:255'],
+            'action' => ['required', 'string', 'in:izin,sakit,reject'],
         ];
     }
 }

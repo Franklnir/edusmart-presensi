@@ -7,6 +7,7 @@ use App\Models\Profile;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -20,7 +21,7 @@ class AttendanceControllerTest extends TestCase
         parent::setUp();
         config(['tenancy.allow_header_override' => true]);
 
-        \Illuminate\Support\Facades\DB::table('tenants')->insertOrIgnore([
+        DB::table('tenants')->insertOrIgnore([
             ['id' => 'tenant-a', 'slug' => 'tenant-a', 'name' => 'Tenant A'],
             ['id' => 'tenant-b', 'slug' => 'tenant-b', 'name' => 'Tenant B'],
         ]);
@@ -29,16 +30,32 @@ class AttendanceControllerTest extends TestCase
     private function createUserWithRole(string $tenantId, string $role): User
     {
         $user = User::factory()->create([
-            'id' => Str::uuid()->toString()
+            'id' => Str::uuid()->toString(),
         ]);
         Profile::forceCreate([
             'id' => $user->id,
             'email' => $user->email,
             'tenant_id' => $tenantId,
             'role' => $role,
-            'nama' => 'Test ' . $role,
+            'nama' => 'Test '.$role,
         ]);
+
         return $user;
+    }
+
+    private function grantTeacherClass(User $teacher, string $tenantId, string $classId, string $subject): void
+    {
+        DB::table('kelas')->insertOrIgnore(['id' => $classId, 'nama' => $classId, 'tenant_id' => $tenantId]);
+        DB::table('jadwal')->insert([
+            'id' => 'schedule-'.Str::uuid(),
+            'kelas_id' => $classId,
+            'hari' => 'Senin',
+            'mapel' => $subject,
+            'guru_id' => $teacher->id,
+            'jam_mulai' => '08:00',
+            'jam_selesai' => '09:00',
+            'tenant_id' => $tenantId,
+        ]);
     }
 
     public function test_admin_can_list_tenant_attendances()
@@ -48,25 +65,27 @@ class AttendanceControllerTest extends TestCase
         $studentB = $this->createUserWithRole('tenant-b', 'siswa');
 
         Absensi::forceCreate([
+            'tenant_id' => 'tenant-a',
             'uid' => $studentA->id,
             'kelas' => '10A',
             'tanggal' => Carbon::today(),
             'status' => 'Hadir',
-            'mapel' => 'Matematika'
+            'mapel' => 'Matematika',
         ]);
 
         Absensi::forceCreate([
+            'tenant_id' => 'tenant-b',
             'uid' => $studentB->id,
             'kelas' => '10B',
             'tanggal' => Carbon::today(),
             'status' => 'Hadir',
-            'mapel' => 'Fisika'
+            'mapel' => 'Fisika',
         ]);
-        
+
         Sanctum::actingAs($admin);
 
         $response = $this->getJson('/api/v2/attendance', [
-            'X-Tenant' => 'tenant-a'
+            'X-Tenant' => 'tenant-a',
         ]);
 
         $response->assertStatus(200)
@@ -75,7 +94,7 @@ class AttendanceControllerTest extends TestCase
             ->assertJsonStructure([
                 'success',
                 'message',
-                'request_id'
+                'request_id',
             ]);
     }
 
@@ -83,7 +102,9 @@ class AttendanceControllerTest extends TestCase
     {
         $guru = $this->createUserWithRole('tenant-a', 'guru');
         $student = $this->createUserWithRole('tenant-a', 'siswa');
-        
+        $student->profile->update(['kelas' => '10A']);
+        $this->grantTeacherClass($guru, 'tenant-a', '10A', 'Biologi');
+
         Sanctum::actingAs($guru);
 
         $payload = [
@@ -97,31 +118,31 @@ class AttendanceControllerTest extends TestCase
 
         // First request
         $response1 = $this->postJson('/api/v2/attendance', $payload, [
-            'X-Tenant' => 'tenant-a'
+            'X-Tenant' => 'tenant-a',
         ]);
         $response1->assertStatus(201);
 
         // Second request with same idempotency key AND SAME PAYLOAD
         $response2 = $this->postJson('/api/v2/attendance', $payload, [
-            'X-Tenant' => 'tenant-a'
+            'X-Tenant' => 'tenant-a',
         ]);
         $response2->assertStatus(201) // Idempotent! returns cached 201
             ->assertJsonPath('success', true);
-            
+
         // Third request with SAME idempotency key BUT DIFFERENT payload
         $payloadDiff = $payload;
-        $payloadDiff['kelas'] = '10B';
+        $payloadDiff['status'] = 'Izin';
         $response3 = $this->postJson('/api/v2/attendance', $payloadDiff, [
-            'X-Tenant' => 'tenant-a'
+            'X-Tenant' => 'tenant-a',
         ]);
         $response3->assertStatus(409)
             ->assertJsonPath('code', 'IDEMPOTENCY_CONFLICT');
-            
+
         // Fourth request with different idempotency key but same attendance logic (duplicate attendance on same day)
         $payload2 = $payload;
         $payload2['idempotency_key'] = Str::uuid()->toString();
         $response4 = $this->postJson('/api/v2/attendance', $payload2, [
-            'X-Tenant' => 'tenant-a'
+            'X-Tenant' => 'tenant-a',
         ]);
         $response4->assertStatus(409)
             ->assertJsonPath('code', 'ATTENDANCE_ALREADY_EXISTS');
@@ -130,7 +151,7 @@ class AttendanceControllerTest extends TestCase
     public function test_guest_cannot_access_attendance()
     {
         $response = $this->getJson('/api/v2/attendance', [
-            'X-Tenant' => 'tenant-a'
+            'X-Tenant' => 'tenant-a',
         ]);
         $response->assertStatus(401);
     }
@@ -149,7 +170,7 @@ class AttendanceControllerTest extends TestCase
             'status' => 'Hadir',
             'idempotency_key' => Str::uuid()->toString(),
         ], [
-            'X-Tenant' => 'tenant-a'
+            'X-Tenant' => 'tenant-a',
         ]);
 
         $response->assertStatus(422)
@@ -169,7 +190,7 @@ class AttendanceControllerTest extends TestCase
             'status' => 'Hadir',
             'idempotency_key' => Str::uuid()->toString(),
         ], [
-            'X-Tenant' => 'tenant-a'
+            'X-Tenant' => 'tenant-a',
         ]);
 
         $responseCreate->assertStatus(403);
