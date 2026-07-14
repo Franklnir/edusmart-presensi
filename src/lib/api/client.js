@@ -1,8 +1,7 @@
 // src/lib/api/client.js
 import { generateRequestId } from './requestId'
-import { makeError, isTransientError } from './errors'
+import { makeError } from './errors'
 import { executeWithRetry } from './retry'
-import { sanitizePayload } from './sanitizer'
 import { useAuthStore } from '../../store/useAuthStore'
 
 export const DEFAULT_TIMEOUT_MS = 15000
@@ -27,7 +26,7 @@ export const logFrontendError = (level, message, context = {}) => {
         url: window.location.href
       })
     }).catch(() => {}) // fire and forget
-  } catch (e) {
+  } catch {
     // silently fail
   }
 }
@@ -125,11 +124,12 @@ export const apiClient = async (path, options = {}) => {
       }
 
       if (!response.ok) {
+        const responseRequestId = response.headers.get('X-Request-ID') || requestId
         throw makeError(
           data?.message || data?.error || 'API Request Failed', 
           response.status, 
           data?.code, 
-          { requestId, raw: data, retryAfter: response.headers.get('Retry-After') }
+          { requestId: responseRequestId, raw: data, retryAfter: response.headers.get('Retry-After') }
         )
       }
 
@@ -161,12 +161,13 @@ export const apiClient = async (path, options = {}) => {
       return result
     } catch (error) {
       clearTimeout(timeoutId)
-      console.error(`[API Error] ${method} ${url} - ${error.status} - ID: ${requestId}`)
+      const errorRequestId = error.requestId || requestId
+      console.error(`[API Error] ${method} ${url} - ${error.status} - ID: ${errorRequestId}`)
       if (error.status >= 500 || error.status === 0 || error.code === 'REQUEST_ABORTED') {
           logFrontendError('error', `API Call Failed: ${method} ${path}`, {
             status: error.status,
             code: error.code,
-            requestId,
+            requestId: errorRequestId,
             errorMessage: error.message
           });
       }

@@ -95,21 +95,41 @@ describe('API Client Regression Tests', () => {
 
   it('request ID tampil pada error', async () => {
     useAuthStore.getState.mockReturnValue({ authState: 'authenticated' })
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        headers: new Headers({
+          'content-type': 'application/json',
+          'X-Request-ID': 'req-server-500'
+        }),
+        json: async () => ({ message: 'Server crash' })
+      })
+      // Fire-and-forget frontend logger must settle without recursion.
+      .mockResolvedValueOnce({ ok: true })
+      // A second request to the same URL proves failed GET deduplication is cleared.
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ data: 'recovered' })
+      })
+
+    const rejectedRequest = apiClient('/api/db', { maxRetries: 0 })
+    await expect(rejectedRequest).rejects.toMatchObject({
+      name: 'ApiError',
       status: 500,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      json: async () => ({ message: 'Server crash' })
+      message: 'Server crash',
+      requestId: 'req-server-500'
     })
 
-    try {
-      const p = apiClient('/api/db')
-      await vi.advanceTimersByTimeAsync(100)
-      await p
-    } catch (err) {
-      expect(err.requestId).toBeDefined()
-      expect(err.message).toBe('Server crash')
-    }
+    const recovered = await apiClient('/api/db', { maxRetries: 0 })
+    expect(recovered.data).toBe('recovered')
+
+    const dbCalls = mockFetch.mock.calls.filter(([url]) => new URL(url).pathname === '/api/db')
+    const loggerCalls = mockFetch.mock.calls.filter(([url]) => new URL(url).pathname === '/api/v2/frontend-logs')
+    expect(dbCalls).toHaveLength(2)
+    expect(loggerCalls).toHaveLength(1)
   })
 
   it('AbortController membatalkan request saat unmount', async () => {
