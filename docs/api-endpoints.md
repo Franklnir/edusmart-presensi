@@ -1,6 +1,6 @@
 # Dokumentasi Endpoint API EduSmart
 
-Tanggal audit: 2026-07-12
+Tanggal audit: 2026-07-14
 
 Dokumen ini merangkum kontrak endpoint API backend EduSmart dari source
 `backend/routes/api.php`, hasil verifikasi `php artisan route:list --path=api`,
@@ -579,6 +579,7 @@ Semua endpoint ini secara otomatis ter-scope oleh `tenant_id` dan memvalidasi `p
 
 **API V2 Uploads:**
 - `POST /api/v2/uploads`: Initiate upload session
+- `GET /api/v2/uploads/{session}`: Read owned upload-session metadata
 - `POST /api/v2/uploads/{session}/complete`: Complete upload session
 - `DELETE /api/v2/uploads/{session}`: Cancel upload session
 
@@ -1454,7 +1455,8 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `POST` | `/api/v2/students` | Membuat siswa baru |
 | `PUT` | `/api/v2/students/{student}` | Mengupdate siswa (full) |
 | `PATCH` | `/api/v2/students/{student}` | Mengupdate siswa (partial) |
-| `DELETE` | `/api/v2/students/{student}` | Menghapus siswa |
+| `PATCH` | `/api/v2/students/{student}/deactivate` | Menonaktifkan siswa |
+| `PATCH` | `/api/v2/students/{student}/activate` | Mengaktifkan siswa |
 | `GET` | `/api/v2/teachers` | Mendapatkan daftar guru |
 | `GET` | `/api/v2/teachers/{teacher}` | Mendapatkan detail guru |
 | `POST` | `/api/v2/teachers` | Membuat guru baru |
@@ -1467,7 +1469,6 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `POST` | `/api/v2/attendance` | Mencatat presensi |
 | `PUT` | `/api/v2/attendance/{attendance}` | Mengupdate presensi |
 | `PATCH` | `/api/v2/attendance/{attendance}` | Mengupdate presensi |
-| `DELETE` | `/api/v2/attendance/{attendance}` | Menghapus presensi |
 | `GET` | `/api/v2/assignments` | Mendapatkan daftar tugas |
 | `GET` | `/api/v2/assignments/{assignment}` | Mendapatkan detail tugas |
 | `POST` | `/api/v2/assignments` | Membuat tugas |
@@ -1483,5 +1484,10 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `PATCH` | `/api/v2/submissions/{submission}/grade` | Menilai submission |
 | `POST` | `/api/v2/submissions/grade-by-user` | Menilai by user |
 | `POST` | `/api/v2/uploads` | Upload session init |
+| `GET` | `/api/v2/uploads/{session}` | Metadata upload session milik actor |
 | `POST` | `/api/v2/uploads/{session}/complete` | Upload session complete |
 | `DELETE` | `/api/v2/uploads/{session}` | Upload session cancel |
+| `GET` | `/api/v2/attendance-requests` | Mengambil daftar pengajuan izin |
+| `POST` | `/api/v2/attendance-requests` | Membuat pengajuan izin baru |
+| `PATCH` | `/api/v2/attendance-requests/{attendance_request}` | Merespon (approve/reject) pengajuan izin |
+| `DELETE` | `/api/v2/attendance-requests/{attendance_request}` | Menghapus pengajuan izin |
