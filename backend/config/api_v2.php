@@ -6,5 +6,9 @@ return [
     'idempotency' => [
         'ttl_seconds' => max(60, (int) env('API_V2_IDEMPOTENCY_TTL_SECONDS', 86400)),
         'lock_seconds' => max(5, (int) env('API_V2_IDEMPOTENCY_LOCK_SECONDS', 15)),
+        'lock_seconds_by_route' => [
+            'uploads.store' => max(5, (int) env('API_V2_IDEMPOTENCY_UPLOAD_LOCK_SECONDS', 60)),
+            'uploads.complete' => max(5, (int) env('API_V2_IDEMPOTENCY_UPLOAD_LOCK_SECONDS', 60)),
+        ],
     ],
 ];
