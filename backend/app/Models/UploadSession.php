@@ -10,6 +10,7 @@ class UploadSession extends Model
     use HasFactory;
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -33,6 +34,6 @@ class UploadSession extends Model
 
     public function attachments()
     {
-        return $this->hasMany(Attachment::class);
+        return $this->hasMany(Attachment::class, 'upload_session_id');
     }
 }
