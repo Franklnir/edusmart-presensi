@@ -1022,6 +1022,12 @@ const runApiFetch = async (path, options = {}) => {
     headers['X-Tenant'] = TENANT_SLUG
   }
 
+  if (path === '/api/db' || path === '/api/db/batch') {
+    const frontendRoute = typeof window !== 'undefined' ? window.location?.pathname || '' : ''
+    if (frontendRoute) headers['X-Frontend-Route'] = frontendRoute
+    headers['X-DB-Consumer'] = String(options.dbConsumer || 'legacy-supabase-adapter').slice(0, 128)
+  }
+
   const delegatedFeatureKey = typeof window !== 'undefined'
     ? resolveDelegatedAdminFeatureKeyFromPath(window.location?.pathname || '', window.location?.search || '')
     : ''

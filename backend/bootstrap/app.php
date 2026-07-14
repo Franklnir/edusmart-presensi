@@ -10,6 +10,7 @@ use App\Http\Middleware\RequestTelemetry;
 use App\Http\Middleware\RequireTrustedEdgeProxy;
 use App\Http\Middleware\ResolveTenant;
 use App\Http\Middleware\SecureHeaders;
+use App\Http\Middleware\TrackDbProxyUsage;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -61,6 +62,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'auth.not_root_domain' => DenyRootDomainAuthAccess::class,
             'conceal.db.guests' => ConcealDbGatewayFromGuests::class,
+            'track.db.proxy' => TrackDbProxyUsage::class,
             'super.admin' => EnsureSuperAdminAccess::class,
             'super.domain' => EnsureSuperAdminDomain::class,
         ]);

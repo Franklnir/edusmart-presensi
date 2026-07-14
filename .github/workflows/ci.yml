@@ -47,6 +47,9 @@ jobs:
       - name: Schedule V2 static migration gate
         run: npm run audit:schedules-v2
 
+      - name: DB proxy legacy migration gate
+        run: npm run audit:api-db-legacy
+
   backend-quality:
     name: Backend Test And Pint
     runs-on: ubuntu-latest

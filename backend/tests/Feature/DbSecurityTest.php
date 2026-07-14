@@ -47,6 +47,34 @@ class DbSecurityTest extends TestCase
             ->assertUnauthorized();
     }
 
+    public function test_database_gateway_records_privacy_safe_migration_telemetry(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'admin', 'X-1');
+
+        $this->actingAs($user)
+            ->withHeader('X-Frontend-Route', '/admin/kelas?secret=must-not-be-stored')
+            ->withHeader('X-DB-Consumer', 'admin-class-page')
+            ->postJson('/api/db', [
+                'table' => 'settings',
+                'action' => 'select',
+                'columns' => 'id,tahun_ajaran',
+            ])
+            ->assertOk();
+
+        $telemetry = DB::table('db_proxy_usage_telemetry')->first();
+
+        $this->assertNotNull($telemetry);
+        $this->assertSame($tenantId, $telemetry->tenant_id);
+        $this->assertSame($user->id, $telemetry->actor_id);
+        $this->assertSame('/admin/kelas', $telemetry->frontend_route);
+        $this->assertSame('admin-class-page', $telemetry->consumer_id);
+        $this->assertSame('settings', $telemetry->domain);
+        $this->assertSame('select', $telemetry->operation);
+        $this->assertSame(200, (int) $telemetry->response_status);
+        $this->assertSame(1, (int) $telemetry->count);
+    }
+
     public function test_public_settings_endpoint_is_sanitized(): void
     {
         $tenantId = $this->defaultTenantId();
