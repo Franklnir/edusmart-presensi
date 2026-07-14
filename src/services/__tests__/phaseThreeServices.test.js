@@ -7,6 +7,7 @@ vi.mock('../../lib/api/requestId', () => ({ generateRequestId: () => 'generated-
 
 const { assignmentService, submissionService } = await import('../assignmentService')
 const { attendanceService } = await import('../attendanceService')
+const { scheduleService } = await import('../scheduleService')
 
 describe('Phase 3 API V2 services', () => {
   beforeEach(() => {
@@ -88,6 +89,99 @@ describe('Phase 3 API V2 services', () => {
       method: 'DELETE',
       headers: { 'Idempotency-Key': 'generated-key' },
       body: { idempotency_key: 'generated-key' }
+    })
+  })
+
+  it('strips tenant and period fields from schedule mutations', async () => {
+    await scheduleService.storeSchedule({
+      kelas_id: 'class-1',
+      hari: 'Senin',
+      mapel: 'Matematika',
+      guru_id: 'd6ce9361-084a-4516-9099-5917cfac8b5b',
+      jam_mulai: '07:00',
+      jam_selesai: '08:00',
+      tenant_id: 'forged',
+      tahun_ajaran: '2099/2100',
+      semester: 'Genap',
+      guru_nama: 'forged'
+    })
+
+    expect(apiClient).toHaveBeenCalledWith('/api/v2/schedules', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': 'generated-key' },
+      body: {
+        kelas_id: 'class-1',
+        hari: 'Senin',
+        mapel: 'Matematika',
+        guru_id: 'd6ce9361-084a-4516-9099-5917cfac8b5b',
+        jam_mulai: '07:00',
+        jam_selesai: '08:00',
+        idempotency_key: 'generated-key'
+      }
+    })
+  })
+
+  it('uses class identity and idempotency when deleting a schedule', async () => {
+    await scheduleService.deleteSchedule('legacy-id', 'class-1')
+
+    expect(apiClient).toHaveBeenCalledWith('/api/v2/schedules/legacy-id', {
+      method: 'DELETE',
+      headers: { 'Idempotency-Key': 'generated-key' },
+      body: { kelas_id: 'class-1', idempotency_key: 'generated-key' }
+    })
+  })
+
+  it('loads every schedule page before an all-class export uses the result', async () => {
+    apiClient
+      .mockResolvedValueOnce({ payload: { success: true, data: [{ id: 'one' }], meta: { last_page: 2 } } })
+      .mockResolvedValueOnce({ payload: { success: true, data: [{ id: 'two' }], meta: { last_page: 2 } } })
+
+    await expect(scheduleService.listAllSchedules({ tahun_ajaran: '2026/2027' }))
+      .resolves.toEqual({ data: [{ id: 'one' }, { id: 'two' }] })
+
+    expect(apiClient).toHaveBeenNthCalledWith(1, '/api/v2/schedules', {
+      method: 'GET',
+      params: { tahun_ajaran: '2026/2027', per_page: 500, page: 1 }
+    })
+    expect(apiClient).toHaveBeenNthCalledWith(2, '/api/v2/schedules', {
+      method: 'GET',
+      params: { tahun_ajaran: '2026/2027', per_page: 500, page: 2 }
+    })
+  })
+
+  it('derives sorted subject options from the scoped V2 schedule response', async () => {
+    apiClient.mockResolvedValueOnce({
+      payload: {
+        success: true,
+        data: [
+          { id: '2', mapel: 'Matematika' },
+          { id: '1', mapel: 'Biologi' },
+          { id: '3', mapel: 'Matematika' }
+        ],
+        meta: { last_page: 1 }
+      }
+    })
+
+    await expect(scheduleService.listSubjectOptions({
+      kelas_id: 'X-A',
+      hari: 'Senin',
+      tahun_ajaran: '2026/2027'
+    })).resolves.toEqual({
+      data: [
+        { id: '1', mapel: 'Biologi' },
+        { id: '2', mapel: 'Matematika' }
+      ]
+    })
+
+    expect(apiClient).toHaveBeenCalledWith('/api/v2/schedules', {
+      method: 'GET',
+      params: {
+        kelas_id: 'X-A',
+        hari: 'Senin',
+        tahun_ajaran: '2026/2027',
+        per_page: 500,
+        page: 1
+      }
     })
   })
 })

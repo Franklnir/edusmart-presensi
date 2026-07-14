@@ -23,7 +23,7 @@ export const logFrontendError = (level, message, context = {}) => {
         level,
         message,
         context,
-        url: window.location.href
+        url: `${window.location.origin}${window.location.pathname}`
       })
     }).catch(() => {}) // fire and forget
   } catch {

@@ -28,6 +28,11 @@ import {
   getAssessmentSlotLabel,
   normalizeAssessmentSlot
 } from '../../utils/academicAssessment'
+import {
+  scheduleErrorMessage,
+  scheduleService,
+  USE_SCHEDULES_API_V2
+} from '../../services/scheduleService'
 
 const QuizEssayTextarea = memo(function QuizEssayTextarea({ value, onChange, onBlur, disabled, placeholder, className }) {
   return (
@@ -1277,6 +1282,19 @@ export default function SiswaQuiz() {
     if (!kelasId) return []
 
     try {
+	      if (USE_SCHEDULES_API_V2) {
+	        const payload = await scheduleService.listStudentSchedules({
+	          kelas_id: kelasId,
+	          tahun_ajaran: periodFilter.tahunAjaran
+	        })
+
+	        return [...new Set(
+	          filterSchedulesForSemester(payload.data || [], periodFilter.semester)
+	            .map((row) => String(row?.mapel || '').trim())
+	            .filter(Boolean)
+	        )].sort((a, b) => a.localeCompare(b, 'id'))
+	      }
+
 	      let query = supabase
 	        .from('jadwal')
 	        .select('mapel,periode_berlaku')
@@ -1294,9 +1312,12 @@ export default function SiswaQuiz() {
 	      )].sort((a, b) => a.localeCompare(b, 'id'))
     } catch (err) {
       console.warn('Gagal memuat mapel jadwal quiz siswa:', err)
+      if (USE_SCHEDULES_API_V2) {
+        pushToast('error', scheduleErrorMessage(err, 'Gagal memuat jadwal mata pelajaran'))
+      }
       return []
     }
-	  }, [applyAcademicYearFilter, kelasId, periodFilter.semester])
+	  }, [applyAcademicYearFilter, kelasId, periodFilter.semester, periodFilter.tahunAjaran, pushToast])
 
   const rememberEssayDraft = (questionId, value) => {
     const key = String(questionId || '')

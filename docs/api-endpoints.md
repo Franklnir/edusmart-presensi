@@ -1437,11 +1437,7 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 - Tambahkan changelog API per release agar mobile app dan frontend bisa melacak
   breaking change.
 
-### API V2 Pilot (Manajemen Kelas & Frontend Log)
-
-
-
-### API V2 Pilot (Manajemen Kelas & Frontend Log)
+### API V2 Domain Contracts
 
 | Method | Endpoint | Deskripsi |
 |---|---|---|
@@ -1466,6 +1462,12 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `PUT` | `/api/v2/teachers/{teacher}` | Mengupdate guru (full) |
 | `PATCH` | `/api/v2/teachers/{teacher}` | Mengupdate guru (partial) |
 | `DELETE` | `/api/v2/teachers/{teacher}` | Menghapus guru |
+| `GET` | `/api/v2/schedules` | Daftar jadwal tahunan dalam tenant dan tahun ajaran; scope guru/siswa diselesaikan server. |
+| `GET` | `/api/v2/schedules/{schedule}` | Detail jadwal; sertakan `kelas_id` bila ID lama ambigu. |
+| `POST` | `/api/v2/schedules` | Membuat jadwal untuk periode aktif; admin saja, idempotent, conflict checked. |
+| `PUT` | `/api/v2/schedules/{schedule}` | Memperbarui jadwal secara penuh; `kelas_id` dan idempotency wajib. |
+| `PATCH` | `/api/v2/schedules/{schedule}` | Memperbarui jadwal parsial; hasil akhir tetap divalidasi terhadap konflik. |
+| `DELETE` | `/api/v2/schedules/{schedule}` | Menghapus jadwal; `kelas_id` dan `Idempotency-Key` wajib. |
 
 | `GET` | `/api/v2/attendance` | Mendapatkan daftar presensi |
 | `GET` | `/api/v2/attendance/{attendance}` | Mendapatkan detail presensi |

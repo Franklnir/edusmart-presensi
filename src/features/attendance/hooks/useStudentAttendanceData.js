@@ -4,6 +4,10 @@ import { fetchAbsensiSettings } from '../../../utils/absensiSettings'
 import { filterSchedulesForSemester } from '../../../utils/schedulePeriodScope'
 import { getDayName, getToday, toMinutes } from '../utils/attendanceDate'
 import { attendanceService } from '../../../services/attendanceService'
+import {
+  scheduleService,
+  USE_SCHEDULES_API_V2
+} from '../../../services/scheduleService'
 
 const HARI_ORDER = [
   'Senin',
@@ -103,14 +107,23 @@ export function useStudentAttendanceData({
       const hari = getDayName(getToday())
       const today = getToday()
 
-      let jadwalQuery = supabase
-        .from('jadwal')
-        .select('*')
-        .eq('kelas_id', profile.kelas)
-        .eq('hari', hari)
-        .order('jam_mulai')
+      const jadwalRequest = USE_SCHEDULES_API_V2
+        ? scheduleService.listStudentSchedules({
+          kelas_id: profile.kelas,
+          hari,
+          tahun_ajaran: periodFilter.tahunAjaran
+        })
+        : (() => {
+          let query = supabase
+            .from('jadwal')
+            .select('*')
+            .eq('kelas_id', profile.kelas)
+            .eq('hari', hari)
+            .order('jam_mulai')
 
-      if (periodFilter.tahunAjaran) jadwalQuery = jadwalQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+          if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+          return query
+        })()
 
       let jamKosongQuery = supabase
         .from('jam_kosong')
@@ -123,7 +136,7 @@ export function useStudentAttendanceData({
       if (periodFilter.semester) jamKosongQuery = jamKosongQuery.eq('semester', periodFilter.semester)
 
       const [jadwalRes, settingsRes, jamKosongRes] = await Promise.all([
-        jadwalQuery,
+        jadwalRequest,
         fetchAbsensiSettings({
           kelas: profile.kelas,
           tanggal: today,
@@ -268,16 +281,25 @@ export function useStudentAttendanceData({
 
     setIsLoadingJadwalMinggu(true)
     try {
-      let query = supabase
-        .from('jadwal')
-        .select('*')
-        .eq('kelas_id', profile.kelas)
-        .order('hari')
-        .order('jam_mulai')
+      const jadwalResult = USE_SCHEDULES_API_V2
+        ? await scheduleService.listStudentSchedules({
+          kelas_id: profile.kelas,
+          tahun_ajaran: periodFilter.tahunAjaran
+        })
+        : await (() => {
+          let query = supabase
+            .from('jadwal')
+            .select('*')
+            .eq('kelas_id', profile.kelas)
+            .order('hari')
+            .order('jam_mulai')
 
-      if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+          if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+          return query
+        })()
 
-      const { data: jadwalList, error } = await query
+      const jadwalList = jadwalResult.data || []
+      const error = jadwalResult.error
 
       if (error) throw error
 

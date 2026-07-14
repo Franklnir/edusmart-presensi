@@ -32,6 +32,7 @@ import { formatDateTime } from '../../lib/time'
 import { useBrowserNfc } from '../../components/browser-nfc/BrowserNfcProvider'
 import { normalizeBrowserNfcUid } from '../../utils/browserNfc'
 import { attendanceService } from '../../services/attendanceService'
+import { loadScheduleRows } from '../../services/scheduleService'
 
 const USE_ATTENDANCE_API_V2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
 
@@ -912,18 +913,28 @@ export default function Scan() {
           const timeStr = now.toTimeString().slice(0, 5)
           const dayName = format(now, 'EEEE', { locale: localeId })
 
-	          const { data: jadwalAktifRows, error: errJadwal } = await supabase
-	            .from('jadwal')
-	            .select('*')
-	            .eq('kelas_id', student.kelas)
-	            .eq('hari', dayName)
-	            .lte('jam_mulai', timeStr)
-	            .gte('jam_selesai', timeStr)
-	            .order('jam_mulai')
+	          const jadwalAktifRows = await loadScheduleRows(
+	            { kelas_id: student.kelas, hari: dayName },
+	            async () => {
+	              const { data, error } = await supabase
+	                .from('jadwal')
+	                .select('*')
+	                .eq('kelas_id', student.kelas)
+	                .eq('hari', dayName)
+	                .lte('jam_mulai', timeStr)
+	                .gte('jam_selesai', timeStr)
+	                .order('jam_mulai')
+
+	              if (error) throw error
+	              return data || []
+	            }
+	          )
 
 	          const todayIso = now.toISOString().slice(0, 10)
 	          const jadwalAktif = filterSchedulesForSemester(
-	            jadwalAktifRows || [],
+	            (jadwalAktifRows || []).filter((row) => (
+	              toTimeValue(row.jam_mulai) <= timeStr && toTimeValue(row.jam_selesai) >= timeStr
+	            )),
 	            semesterForDateKey(todayIso)
 	          )[0] || null
 
@@ -1396,12 +1407,18 @@ export default function Scan() {
       const baseDate = new Date(`${tanggal}T00:00:00`)
       const hariIni = format(baseDate, 'EEEE', { locale: localeId })
 
-	      const { data: jadwalHariIniRaw, error: errJadwal } = await supabase
-	        .from('jadwal')
-	        .select('*')
-	        .eq('hari', hariIni)
+	      const jadwalHariIniRaw = await loadScheduleRows(
+	        { hari: hariIni },
+	        async () => {
+	          const { data, error } = await supabase
+	            .from('jadwal')
+	            .select('*')
+	            .eq('hari', hariIni)
 
-	      if (errJadwal) throw errJadwal
+	          if (error) throw error
+	          return data || []
+	        }
+	      )
 	      const jadwalHariIni = filterSchedulesForSemester(
 	        jadwalHariIniRaw || [],
 	        semesterForDateKey(tanggal)

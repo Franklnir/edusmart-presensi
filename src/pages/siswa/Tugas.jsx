@@ -21,6 +21,11 @@ import useStudentPeriodClass from '../../hooks/useStudentPeriodClass'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import { assignmentService, submissionService } from '../../services/assignmentService'
+import {
+  scheduleErrorMessage,
+  scheduleService,
+  USE_SCHEDULES_API_V2
+} from '../../services/scheduleService'
 import { uploadService } from '../../services/uploadService'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
@@ -647,17 +652,26 @@ export default function TugasSiswa() {
         .order('mapel', { ascending: true })
       tugasQuery = applyAcademicSemesterFilter(tugasQuery)
 
-	      let jadwalQuery = supabase
-	        .from('jadwal')
-	        .select('mapel,periode_berlaku')
-	        .eq('kelas_id', kelas)
-	        .order('mapel', { ascending: true })
-      jadwalQuery = applyAcademicYearFilter(jadwalQuery)
+	      const jadwalRequest = USE_SCHEDULES_API_V2
+	        ? scheduleService.listStudentSchedules({
+	          kelas_id: kelas,
+	          tahun_ajaran: periodFilter.tahunAjaran
+	        })
+	        : (() => {
+	          let query = supabase
+	            .from('jadwal')
+	            .select('mapel,periode_berlaku')
+	            .eq('kelas_id', kelas)
+	            .order('mapel', { ascending: true })
+          query = applyAcademicYearFilter(query)
+          return query
+	        })()
 
-      const [
-        { data: tugasMapelData, error },
-        { data: jadwalMapelData, error: jadwalError }
-      ] = await Promise.all([tugasQuery, jadwalQuery])
+      const [tugasRes, jadwalRes] = await Promise.all([tugasQuery, jadwalRequest])
+      const tugasMapelData = tugasRes.data || []
+      const error = tugasRes.error
+      const jadwalMapelData = jadwalRes.data || []
+      const jadwalError = jadwalRes.error
 
       if (error) throw error
       if (jadwalError) {
@@ -674,12 +688,15 @@ export default function TugasSiswa() {
     } catch (error) {
       if (requestId !== mapelRequestSeqRef.current) return
       console.warn('Gagal memuat opsi mapel tugas:', error)
+      if (USE_SCHEDULES_API_V2) {
+        pushToast('error', scheduleErrorMessage(error, 'Gagal memuat jadwal mata pelajaran'))
+      }
     } finally {
       if (requestId === mapelRequestSeqRef.current) {
         setIsMapelLoading(false)
       }
     }
-  }, [applyAcademicSemesterFilter, applyAcademicYearFilter, user?.id, selectedKelas, kelasSiswa, periodFilter.semester])
+  }, [applyAcademicSemesterFilter, applyAcademicYearFilter, user?.id, selectedKelas, kelasSiswa, periodFilter.semester, periodFilter.tahunAjaran, pushToast])
 
   const loadTugasList = useCallback(async () => {
     if (!user?.id) return

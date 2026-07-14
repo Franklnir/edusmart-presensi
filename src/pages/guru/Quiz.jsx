@@ -11,6 +11,11 @@ import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveF
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import { getAcademicAssessmentLabels } from '../../utils/academicAssessment'
+import {
+  scheduleErrorMessage,
+  scheduleService,
+  USE_SCHEDULES_API_V2
+} from '../../services/scheduleService'
 
 import {
   POINT_OPTIONS,
@@ -743,6 +748,26 @@ export default function GuruQuiz() {
     const loadInitialTeachingData = async () => {
       if (!user?.id) return
       try {
+        if (USE_SCHEDULES_API_V2) {
+          const [schedulePayload, kelasRes] = await Promise.all([
+            scheduleService.listTeacherSchedules({ tahun_ajaran: periodFilter.tahunAjaran }),
+            supabase.from('kelas').select(KELAS_COLUMNS).order('grade').order('suffix')
+          ])
+          if (kelasRes.error) throw kelasRes.error
+
+          const filteredJadwal = filterSchedulesForSemester(schedulePayload.data || [], periodFilter.semester)
+          const kelasIds = new Set(filteredJadwal.map((j) => j.kelas_id).filter(Boolean))
+          const visibleKelas = (kelasRes.data || []).filter((kelas) => kelasIds.has(kelas.id))
+
+          setJadwal(filteredJadwal)
+          setKelasList(visibleKelas)
+          setSelectedKelas((prev) => {
+            if (prev && visibleKelas.some((kelas) => kelas.id === prev)) return prev
+            return visibleKelas[0]?.id || ''
+          })
+          return
+        }
+
         let jadwalQuery = supabase.from('jadwal').select(JADWAL_GURU_COLUMNS).eq('guru_id', user.id)
         jadwalQuery = applyAcademicYearFilter(jadwalQuery)
 
@@ -772,11 +797,11 @@ export default function GuruQuiz() {
         })
       } catch (err) {
         console.error('Error loading quiz teaching data:', err)
-        pushToast('error', 'Gagal memuat data awal quiz')
+        pushToast('error', scheduleErrorMessage(err, 'Gagal memuat data awal quiz'))
       }
     }
     loadInitialTeachingData()
-  }, [applyAcademicYearFilter, periodFilter.semester, user?.id, pushToast])
+  }, [applyAcademicYearFilter, periodFilter.semester, periodFilter.tahunAjaran, user?.id, pushToast])
 
   useEffect(() => {
     // Guru doesn't need per-second countdown — 15s is enough for status badges

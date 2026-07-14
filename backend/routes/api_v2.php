@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V2\AttendanceController;
 use App\Http\Controllers\Api\V2\AttendanceRequestController;
 use App\Http\Controllers\Api\V2\ClassController;
 use App\Http\Controllers\Api\V2\FrontendLogController;
+use App\Http\Controllers\Api\V2\ScheduleController;
 use App\Http\Controllers\Api\V2\StudentController;
 use App\Http\Controllers\Api\V2\SubmissionController;
 use App\Http\Controllers\Api\V2\TeacherController;
@@ -35,6 +36,7 @@ Route::middleware('throttle:api')->group(function () {
     Route::patch('students/{student}/deactivate', [StudentController::class, 'deactivate'])->name('students.deactivate');
     Route::patch('students/{student}/activate', [StudentController::class, 'activate'])->name('students.activate');
     Route::apiResource('teachers', TeacherController::class);
+    Route::apiResource('schedules', ScheduleController::class);
     Route::apiResource('attendance', AttendanceController::class)->except(['destroy']);
     Route::get('attendance-requests', [AttendanceRequestController::class, 'index'])->name('attendance-requests.index');
     Route::post('attendance-requests', [AttendanceRequestController::class, 'store'])->name('attendance-requests.store');

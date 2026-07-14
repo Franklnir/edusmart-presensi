@@ -38,9 +38,9 @@ class FrontendLogController extends Controller
     {
         $validated = $request->validate([
             'level' => 'required|string|in:info,warning,error,critical',
-            'message' => 'required|string',
+            'message' => 'required|string|max:1000',
             'context' => 'nullable|array',
-            'url' => 'nullable|string',
+            'url' => 'nullable|string|max:2048',
         ]);
 
         FrontendErrorLog::create([

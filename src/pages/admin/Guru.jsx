@@ -707,21 +707,6 @@ export default function AGuru() {
     await loadAllData()
   }
 
-  const loadJadwalAll = async () => {
-    const { data, error } = await supabase
-      .from('jadwal')
-      .select('*')
-
-    if (error) throw error
-
-    const jadwalByKelas = {}
-    data?.forEach(j => {
-      if (!jadwalByKelas[j.kelas_id]) jadwalByKelas[j.kelas_id] = {}
-      jadwalByKelas[j.kelas_id][j.id] = j
-    })
-    setJadwalAll(jadwalByKelas)
-  }
-
   const loadStrukturKelasAll = async () => {
     const { data, error } = await supabase
       .from('kelas_struktur')

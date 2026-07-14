@@ -6,12 +6,14 @@ use App\Contracts\UploadStorageProvider;
 use App\Models\Absensi;
 use App\Models\AbsensiAjuan;
 use App\Models\Attachment;
+use App\Models\Jadwal;
 use App\Models\Profile;
 use App\Models\Tugas;
 use App\Models\TugasJawaban;
 use App\Policies\AbsensiAjuanPolicy;
 use App\Policies\AbsensiPolicy;
 use App\Policies\AttachmentPolicy;
+use App\Policies\JadwalPolicy;
 use App\Policies\ProfilePolicy;
 use App\Policies\TugasJawabanPolicy;
 use App\Policies\TugasPolicy;
@@ -67,6 +69,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(AbsensiAjuan::class, AbsensiAjuanPolicy::class);
         Gate::policy(Attachment::class, AttachmentPolicy::class);
         Gate::policy(Profile::class, ProfilePolicy::class);
+        Gate::policy(Jadwal::class, JadwalPolicy::class);
         Gate::policy(Tugas::class, TugasPolicy::class);
         Gate::policy(TugasJawaban::class, TugasJawabanPolicy::class);
 

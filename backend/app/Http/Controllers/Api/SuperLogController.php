@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Resources\SuperLogResource;
+use App\Models\FrontendErrorLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
@@ -178,9 +179,70 @@ class SuperLogController extends ApiController
             }
         }
 
+        foreach ($this->frontendEntries($filters, $maxEntries) as $entry) {
+            $entries[] = $entry;
+        }
+
         usort($entries, fn ($left, $right) => strcmp((string) ($right['timestamp'] ?? ''), (string) ($left['timestamp'] ?? '')));
 
-        return $entries;
+        return array_slice($entries, 0, $maxEntries);
+    }
+
+    /**
+     * Browser errors are persisted separately from Laravel's rotating files.
+     * Normalize them into the same monitor contract so a super admin does not
+     * need DevTools or direct database access for an application incident.
+     */
+    private function frontendEntries(array $filters, int $maxEntries): array
+    {
+        try {
+            $query = FrontendErrorLog::query()->orderByDesc('created_at');
+            if (($filters['from'] ?? null) !== null) {
+                $query->where('created_at', '>=', $filters['from']);
+            }
+            if (($filters['to'] ?? null) !== null) {
+                $query->where('created_at', '<=', $filters['to']);
+            }
+            if (($filters['level'] ?? '') !== '') {
+                $query->where('level', $filters['level']);
+            }
+            if (($filters['endpoint'] ?? '') !== '') {
+                $query->where('url', 'like', '%'.$filters['endpoint'].'%');
+            }
+            if (($filters['q'] ?? '') !== '') {
+                $needle = '%'.$filters['q'].'%';
+                $query->where(function ($builder) use ($needle): void {
+                    $builder
+                        ->whereRaw('LOWER(message) LIKE ?', [$needle])
+                        ->orWhereRaw('LOWER(COALESCE(url, \'\')) LIKE ?', [$needle]);
+                });
+            }
+
+            return $query
+                ->limit($maxEntries)
+                ->get()
+                ->map(function (FrontendErrorLog $log): array {
+                    return [
+                        'id' => 'frontend-'.$log->id,
+                        'timestamp' => $log->created_at?->toIso8601String(),
+                        'level' => Str::lower((string) $log->level),
+                        'endpoint' => $this->sanitizeUrl((string) ($log->url ?: '-')),
+                        'message' => $this->sanitizeText((string) $log->message, 700),
+                        'user' => (string) ($log->user_id ?: '-'),
+                        'method' => 'BROWSER',
+                        'ip_address' => (string) ($log->ip_address ?: '-'),
+                        'file' => '-',
+                        'line' => null,
+                        'stack_trace' => '-',
+                        'context' => $this->sanitizeValue($log->context ?: []),
+                    ];
+                })
+                ->all();
+        } catch (\Throwable) {
+            // Monitoring must not fail just because the optional browser-log
+            // table has not been migrated on an older environment yet.
+            return [];
+        }
     }
 
     private function logFiles(): array

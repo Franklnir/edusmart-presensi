@@ -5,6 +5,7 @@ import { supabase, apiFetch } from '../../lib/supabase'
 import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useUIStore } from '../../store/useUIStore'
 import { ClassesApi } from '../../lib/api/v2/classes'
+import { scheduleService } from '../../services/scheduleService'
 import PasswordInput from '../../components/PasswordInput'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import { CalendarClock, Copy, Loader2, PlusCircle, Trash2 } from 'lucide-react'
@@ -55,6 +56,8 @@ import {
   normalizeClassSuffixInput,
 } from '../../features/classes/utils/classUtils'
 import SchedulePreviewTable from '../../features/classes/components/SchedulePreviewTable'
+
+const USE_SCHEDULES_API_V2 = import.meta.env.VITE_USE_SCHEDULES_API_V2 === 'true'
 
 function RolloverExceptionStudentRow({
   index,
@@ -343,18 +346,22 @@ const formatStudentClassHistory = (history = []) => {
 }
 
 const mapScheduleRows = (rows = [], period = {}) => {
-  const mapped = (rows || []).map((row) => ({
-    id: row.id,
-    hari: row.hari,
-    mapel: normalizeMapelName(row.mapel),
-    guruId: row.guru_id,
-    guruNama: row.guru_nama || '',
-    jamMulai: toTimeHHMM(row.jam_mulai),
-    jamSelesai: toTimeHHMM(row.jam_selesai),
-    tahunAjaran: row.tahun_ajaran || period.tahunAjaran,
-    semester: row.semester || period.semester,
-    periodeBerlaku: normalizeScheduleScope(row.periode_berlaku)
-  }))
+  const mapped = (rows || []).map((row) => {
+    const scope = normalizeScheduleScope(row.periode_berlaku)
+
+    return {
+      id: row.id,
+      hari: row.hari,
+      mapel: normalizeMapelName(row.mapel),
+      guruId: row.guru_id,
+      guruNama: row.guru_nama || '',
+      jamMulai: toTimeHHMM(row.jam_mulai),
+      jamSelesai: toTimeHHMM(row.jam_selesai),
+      tahunAjaran: row.tahun_ajaran || period.tahunAjaran,
+      semester: row.semester || (scope === SCHEDULE_SCOPE_YEAR ? '' : period.semester),
+      periodeBerlaku: scope
+    }
+  })
 
   mapped.sort((a, b) => {
     const ai = HARI_OPTS.indexOf(a.hari)
@@ -548,7 +555,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       const params = {
         class_id: kelasSelected,
         include_students: needsStudents,
-        include_schedule: needsSchedule,
+        include_schedule: needsSchedule && !USE_SCHEDULES_API_V2,
         include_mapel: needsMapel,
         tahun_ajaran: schedulePeriod.tahunAjaran,
         semester: schedulePeriod.semester,
@@ -569,9 +576,20 @@ export default function AKelas({ initialTab = 'kelas' }) {
         staleTime: force ? 0 : 60 * 1000,
       })
 
+      const v2SchedulePayload = needsSchedule && USE_SCHEDULES_API_V2
+        ? await scheduleService.listAllSchedules({
+          kelas_id: kelasSelected,
+          tahun_ajaran: schedulePeriod.tahunAjaran
+        })
+        : null
       const nextStudents = needsStudents ? mapStudentRows(data?.selected_students || []) : null
       const nextSchedule = needsSchedule
-        ? mapScheduleRows(filterSchedulesForSemester(data?.schedule || [], schedulePeriod.semester), schedulePeriod)
+        ? mapScheduleRows(
+          USE_SCHEDULES_API_V2
+            ? v2SchedulePayload?.data || []
+            : filterSchedulesForSemester(data?.schedule || [], schedulePeriod.semester),
+          schedulePeriod
+        )
         : null
       const nextMapel = needsMapel ? mapSubjectRows(data?.mapel || []) : null
 
@@ -735,7 +753,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
         const params = {
           class_id: initialRouteClassId,
           include_students: !isSchedulePage,
-          include_schedule: isSchedulePage,
+          include_schedule: isSchedulePage && !USE_SCHEDULES_API_V2,
           include_mapel: isSchedulePage,
           students_limit: 1000
         }
@@ -762,7 +780,16 @@ export default function AKelas({ initialTab = 'kelas' }) {
         }
 
         const selectedClassId = data?.selected_class_id || initialRouteClassId || kelasRows[0]?.id || ''
-        const scheduleRows = mapScheduleRows(data?.schedule || [], nextPeriod)
+        const v2SchedulePayload = isSchedulePage && USE_SCHEDULES_API_V2 && selectedClassId
+          ? await scheduleService.listAllSchedules({
+            kelas_id: selectedClassId,
+            tahun_ajaran: nextPeriod.tahunAjaran
+          }, { signal })
+          : null
+        const scheduleRows = mapScheduleRows(
+          USE_SCHEDULES_API_V2 ? v2SchedulePayload?.data || [] : data?.schedule || [],
+          nextPeriod
+        )
 
         startTransition(() => {
           setAcademicPeriod(nextPeriod)
@@ -988,35 +1015,25 @@ export default function AKelas({ initialTab = 'kelas' }) {
     if (!kelasSelected) return
 
     try {
-      const { data, error } = await supabase
-        .from('jadwal')
-        .select('*')
-        .eq('kelas_id', kelasSelected)
-        .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
-        .order('hari')
-        .order('jam_mulai')
+      let rows = []
+      if (USE_SCHEDULES_API_V2) {
+        const payload = await scheduleService.listAllSchedules({
+          kelas_id: kelasSelected,
+          tahun_ajaran: schedulePeriod.tahunAjaran
+        })
+        rows = mapScheduleRows(payload.data || [], schedulePeriod)
+      } else {
+        const { data, error } = await supabase
+          .from('jadwal')
+          .select('*')
+          .eq('kelas_id', kelasSelected)
+          .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
+          .order('hari')
+          .order('jam_mulai')
 
-      if (error) throw error
-
-      const rows = filterSchedulesForSemester(data || [], schedulePeriod.semester).map(j => ({
-        id: j.id,
-        hari: j.hari,
-        mapel: normalizeMapelName(j.mapel),
-        guruId: j.guru_id,
-        guruNama: j.guru_nama || '',
-        jamMulai: toTimeHHMM(j.jam_mulai),
-        jamSelesai: toTimeHHMM(j.jam_selesai),
-        tahunAjaran: j.tahun_ajaran || schedulePeriod.tahunAjaran,
-        semester: j.semester || schedulePeriod.semester,
-        periodeBerlaku: normalizeScheduleScope(j.periode_berlaku)
-      }))
-
-      rows.sort((a, b) => {
-        const ai = HARI_OPTS.indexOf(a.hari)
-        const bi = HARI_OPTS.indexOf(b.hari)
-        if (ai !== bi) return ai - bi
-        return toMinutes(a.jamMulai) - toMinutes(b.jamMulai)
-      })
+        if (error) throw error
+        rows = mapScheduleRows(filterSchedulesForSemester(data || [], schedulePeriod.semester), schedulePeriod)
+      }
 
       setJadwal(rows)
       setJadwalLoadedKey(`${kelasSelected}|${schedulePeriod.tahunAjaran}|${schedulePeriod.semester}`)
@@ -1922,12 +1939,18 @@ export default function AKelas({ initialTab = 'kelas' }) {
     try {
       setLoading(true)
       
-      // Cek apakah masih digunakan di jadwal
-      const { data: usedJadwal, error: checkError } = await supabase
-        .from('jadwal')
-        .select('kelas_id, mapel')
+      // Only the active academic year's schedule can be changed through V2.
+      // Archived schedules keep their subject label as historical evidence.
+      const scheduleUsage = USE_SCHEDULES_API_V2
+        ? await scheduleService.listAllSchedules({
+          tahun_ajaran: schedulePeriod.tahunAjaran
+        })
+        : await supabase
+          .from('jadwal')
+          .select('kelas_id, mapel')
 
-      if (checkError) throw checkError
+      if (scheduleUsage.error) throw scheduleUsage.error
+      const usedJadwal = scheduleUsage.data || []
 
       const usedByMapel = (usedJadwal || []).find(
         (row) => normalizeMapelName(row.mapel) === normalizeMapelName(mapel.nama)
@@ -1986,42 +2009,61 @@ export default function AKelas({ initialTab = 'kelas' }) {
     try {
       setLoading(true)
 
-      const conflictMsg = await hasConflict({
-        hari,
-        jamMulai,
-        jamSelesai,
-        guruId,
-        mapel,
-        kelasId: kelasSelected,
-        periodeBerlaku
-      })
-
-      if (conflictMsg) {
-        pushToast('error', conflictMsg)
+      if (toMinutes(jamMulai) >= toMinutes(jamSelesai)) {
+        pushToast('error', 'Jam mulai harus lebih awal dari jam selesai.')
+        return
+      }
+      if (toMinutes(jamSelesai) - toMinutes(jamMulai) < 30) {
+        pushToast('error', 'Durasi pelajaran minimal 30 menit.')
         return
       }
 
-      const id = buildJadwalKey({ hari, mapel, jamMulai, jamSelesai, periodeBerlaku })
-      const guruNama = guruId ? guruNameById(guruId) : ''
-
-      const { error } = await supabase
-        .from('jadwal')
-        .insert({
-          id,
+      if (USE_SCHEDULES_API_V2) {
+        await scheduleService.storeSchedule({
           kelas_id: kelasSelected,
           hari,
           mapel,
           guru_id: guruId || null,
-          guru_nama: guruNama,
           jam_mulai: jamMulai,
-          jam_selesai: jamSelesai,
-          tahun_ajaran: academicPeriod.tahunAjaran,
-          semester: scheduleSemester || null,
-          periode_berlaku: periodeBerlaku,
-          created_at: new Date().toISOString()
+          jam_selesai: jamSelesai
+        })
+      } else {
+        const conflictMsg = await hasConflict({
+          hari,
+          jamMulai,
+          jamSelesai,
+          guruId,
+          mapel,
+          kelasId: kelasSelected,
+          periodeBerlaku
         })
 
-      if (error) throw error
+        if (conflictMsg) {
+          pushToast('error', conflictMsg)
+          return
+        }
+
+        const id = buildJadwalKey({ hari, mapel, jamMulai, jamSelesai, periodeBerlaku })
+        const guruNama = guruId ? guruNameById(guruId) : ''
+        const { error } = await supabase
+          .from('jadwal')
+          .insert({
+            id,
+            kelas_id: kelasSelected,
+            hari,
+            mapel,
+            guru_id: guruId || null,
+            guru_nama: guruNama,
+            jam_mulai: jamMulai,
+            jam_selesai: jamSelesai,
+            tahun_ajaran: academicPeriod.tahunAjaran,
+            semester: scheduleSemester || null,
+            periode_berlaku: periodeBerlaku,
+            created_at: new Date().toISOString()
+          })
+
+        if (error) throw error
+      }
 
       pushToast('success', 'Jadwal berhasil ditambahkan')
       setForm({
@@ -2057,13 +2099,17 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
     try {
       setLoading(true)
-      const { error } = await supabase
-        .from('jadwal')
-        .delete()
-        .eq('id', id)
-        .eq('kelas_id', kelasSelected)
+      if (USE_SCHEDULES_API_V2) {
+        await scheduleService.deleteSchedule(id, kelasSelected)
+      } else {
+        const { error } = await supabase
+          .from('jadwal')
+          .delete()
+          .eq('id', id)
+          .eq('kelas_id', kelasSelected)
 
-      if (error) throw error
+        if (error) throw error
+      }
 
       pushToast('success', 'Jadwal berhasil dihapus')
       if (editId === id) {
@@ -2116,71 +2162,89 @@ export default function AKelas({ initialTab = 'kelas' }) {
     try {
       setLoading(true)
 
-      const conflictMsg = await hasConflict({
-        hari,
-        jamMulai,
-        jamSelesai,
-        guruId,
-        mapel,
-        kelasId: kelasSelected,
-        periodeBerlaku
-      }, editId)
-
-      if (conflictMsg) {
-        pushToast('error', conflictMsg)
+      if (toMinutes(jamMulai) >= toMinutes(jamSelesai)) {
+        pushToast('error', 'Jam mulai harus lebih awal dari jam selesai.')
+        return
+      }
+      if (toMinutes(jamSelesai) - toMinutes(jamMulai) < 30) {
+        pushToast('error', 'Durasi pelajaran minimal 30 menit.')
         return
       }
 
-      const newId = buildJadwalKey({ hari, mapel, jamMulai, jamSelesai, periodeBerlaku })
-      const guruNama = guruId ? guruNameById(guruId) : ''
-
-      if (newId !== editId) {
-        // Hapus yang lama dan buat yang baru
-        await supabase
-          .from('jadwal')
-          .delete()
-          .eq('id', editId)
-          .eq('kelas_id', kelasSelected)
-
-        const { error } = await supabase
-          .from('jadwal')
-          .insert({
-            id: newId,
-            kelas_id: kelasSelected,
-            hari,
-            mapel,
-            guru_id: guruId || null,
-            guru_nama: guruNama,
-            jam_mulai: jamMulai,
-            jam_selesai: jamSelesai,
-            tahun_ajaran: academicPeriod.tahunAjaran,
-            semester: scheduleSemester || null,
-            periode_berlaku: periodeBerlaku,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-
-        if (error) throw error
+      if (USE_SCHEDULES_API_V2) {
+        await scheduleService.updateSchedule(editId, {
+          kelas_id: kelasSelected,
+          hari,
+          mapel,
+          guru_id: guruId || null,
+          jam_mulai: jamMulai,
+          jam_selesai: jamSelesai
+        })
       } else {
-        // Update yang sudah ada
-        const { error } = await supabase
-          .from('jadwal')
-          .update({
-            hari,
-            mapel,
-            guru_id: guruId || null,
-            guru_nama: guruNama,
-            jam_mulai: jamMulai,
-            jam_selesai: jamSelesai,
-            tahun_ajaran: academicPeriod.tahunAjaran,
-            semester: scheduleSemester || null,
-            periode_berlaku: periodeBerlaku,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', editId)
-          .eq('kelas_id', kelasSelected)
+        const conflictMsg = await hasConflict({
+          hari,
+          jamMulai,
+          jamSelesai,
+          guruId,
+          mapel,
+          kelasId: kelasSelected,
+          periodeBerlaku
+        }, editId)
 
-        if (error) throw error
+        if (conflictMsg) {
+          pushToast('error', conflictMsg)
+          return
+        }
+
+        const newId = buildJadwalKey({ hari, mapel, jamMulai, jamSelesai, periodeBerlaku })
+        const guruNama = guruId ? guruNameById(guruId) : ''
+
+        if (newId !== editId) {
+          await supabase
+            .from('jadwal')
+            .delete()
+            .eq('id', editId)
+            .eq('kelas_id', kelasSelected)
+
+          const { error } = await supabase
+            .from('jadwal')
+            .insert({
+              id: newId,
+              kelas_id: kelasSelected,
+              hari,
+              mapel,
+              guru_id: guruId || null,
+              guru_nama: guruNama,
+              jam_mulai: jamMulai,
+              jam_selesai: jamSelesai,
+              tahun_ajaran: academicPeriod.tahunAjaran,
+              semester: scheduleSemester || null,
+              periode_berlaku: periodeBerlaku,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+
+          if (error) throw error
+        } else {
+          const { error } = await supabase
+            .from('jadwal')
+            .update({
+              hari,
+              mapel,
+              guru_id: guruId || null,
+              guru_nama: guruNama,
+              jam_mulai: jamMulai,
+              jam_selesai: jamSelesai,
+              tahun_ajaran: academicPeriod.tahunAjaran,
+              semester: scheduleSemester || null,
+              periode_berlaku: periodeBerlaku,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', editId)
+            .eq('kelas_id', kelasSelected)
+
+          if (error) throw error
+        }
       }
 
       pushToast('success', 'Jadwal berhasil diupdate')
@@ -2242,15 +2306,21 @@ export default function AKelas({ initialTab = 'kelas' }) {
     }
 
     if (targetClassId === '__all__') {
-      const { data, error } = await supabase
-        .from('jadwal')
-        .select('*')
-        .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
-        .order('kelas_id')
-        .order('hari')
-        .order('jam_mulai')
-
-      if (error) throw error
+      let data = []
+      if (USE_SCHEDULES_API_V2) {
+        const payload = await scheduleService.listAllSchedules({ tahun_ajaran: schedulePeriod.tahunAjaran })
+        data = payload.data || []
+      } else {
+        const response = await supabase
+          .from('jadwal')
+          .select('*')
+          .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
+          .order('kelas_id')
+          .order('hari')
+          .order('jam_mulai')
+        if (response.error) throw response.error
+        data = response.data || []
+      }
 
       const grouped = {}
       filterSchedulesForSemester(data || [], schedulePeriod.semester).forEach((raw) => {
@@ -2293,14 +2363,24 @@ export default function AKelas({ initialTab = 'kelas' }) {
         kelasId: selectedId
       })))
     } else {
-      const { data, error } = await supabase
-        .from('jadwal')
-        .select('*')
-        .eq('kelas_id', selectedId)
-        .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
-        .order('hari')
-        .order('jam_mulai')
-      if (error) throw error
+      let data = []
+      if (USE_SCHEDULES_API_V2) {
+        const payload = await scheduleService.listAllSchedules({
+          kelas_id: selectedId,
+          tahun_ajaran: schedulePeriod.tahunAjaran
+        })
+        data = payload.data || []
+      } else {
+        const response = await supabase
+          .from('jadwal')
+          .select('*')
+          .eq('kelas_id', selectedId)
+          .eq('tahun_ajaran', schedulePeriod.tahunAjaran)
+          .order('hari')
+          .order('jam_mulai')
+        if (response.error) throw response.error
+        data = response.data || []
+      }
       rows = sortJadwalRows(filterSchedulesForSemester(data || [], schedulePeriod.semester).map(normalizeScheduleRow))
     }
 

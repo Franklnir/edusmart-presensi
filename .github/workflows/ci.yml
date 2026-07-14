@@ -44,6 +44,9 @@ jobs:
       - name: Frontend quality gate
         run: npm run check
 
+      - name: Schedule V2 static migration gate
+        run: npm run audit:schedules-v2
+
   backend-quality:
     name: Backend Test And Pint
     runs-on: ubuntu-latest
@@ -166,6 +169,7 @@ jobs:
           VITE_GOOGLE_AUTH_LINK_URL: ${{ vars.VITE_GOOGLE_AUTH_LINK_URL }}
           VITE_USE_ASSIGNMENTS_API_V2: "false"
           VITE_USE_ASSIGNMENT_UPLOADS_API_V2: "false"
+          VITE_USE_SCHEDULES_API_V2: "false"
         run: |
           set -euo pipefail
           docker buildx build \
@@ -182,6 +186,7 @@ jobs:
             --build-arg VITE_GOOGLE_AUTH_LINK_URL="${VITE_GOOGLE_AUTH_LINK_URL:-/api/auth/google/link}" \
             --build-arg VITE_USE_ASSIGNMENTS_API_V2="${VITE_USE_ASSIGNMENTS_API_V2:-false}" \
             --build-arg VITE_USE_ASSIGNMENT_UPLOADS_API_V2="${VITE_USE_ASSIGNMENT_UPLOADS_API_V2:-false}" \
+            --build-arg VITE_USE_SCHEDULES_API_V2="${VITE_USE_SCHEDULES_API_V2:-false}" \
             --tag "$NGINX_IMAGE" \
             --tag "$NGINX_BRANCH_IMAGE" \
             --cache-from type=gha,scope=nginx-prod \

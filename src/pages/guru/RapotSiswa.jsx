@@ -8,6 +8,10 @@ import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import { getAcademicAssessmentLabels } from '../../utils/academicAssessment'
 import { getKelasDisplayName, normalizeKelasKey, toNumberOrNull, round2, makeLocalId } from './laporan/laporanUtils'
+import {
+  scheduleService,
+  USE_SCHEDULES_API_V2
+} from '../../services/scheduleService'
 
 const RAPOT_TYPES = [
   { key: 'uts', labelKey: 'midterm' },
@@ -327,16 +331,24 @@ export default function RapotSiswa() {
           } else {
             siswaQuery = aliases.length === 1 ? siswaQuery.eq('kelas', aliases[0]) : siswaQuery.in('kelas', aliases)
           }
-          let jadwalQuery = supabase
-            .from('jadwal')
-            .select('mapel, kelas_id')
-            .in('kelas_id', aliases)
-          if (tahunPelajaran) jadwalQuery = jadwalQuery.eq('tahun_ajaran', tahunPelajaran)
+          const jadwalRequest = USE_SCHEDULES_API_V2
+            ? scheduleService.listTeacherSchedules({
+              kelas_id: selectedKelas,
+              tahun_ajaran: tahunPelajaran
+            })
+            : (() => {
+              let query = supabase
+                .from('jadwal')
+                .select('mapel, kelas_id')
+                .in('kelas_id', aliases)
+              if (tahunPelajaran) query = query.eq('tahun_ajaran', tahunPelajaran)
+              return query
+            })()
 
-          const batch = await supabase.batch([
+          const [batch, jadwalResult] = await Promise.all([
+            supabase.batch([
             { key: 'rapot', query: rapotQuery },
             { key: 'siswa', query: siswaQuery },
-            { key: 'jadwal', query: jadwalQuery },
             {
               key: 'mapelMaster',
               query: supabase
@@ -344,14 +356,16 @@ export default function RapotSiswa() {
                 .select('nama')
                 .order('nama')
             }
+            ]),
+            jadwalRequest
           ])
           if (batch.error && !batch.data) throw batch.error
           const rapotResult = batch.data?.rapot
           const siswaResult = batch.data?.siswa
-          const jadwalResult = batch.data?.jadwal
           const mapelMasterResult = batch.data?.mapelMaster
           if (rapotResult?.error) throw rapotResult.error
           if (siswaResult?.error) throw siswaResult.error
+          if (jadwalResult?.error) throw jadwalResult.error
           const rapotRowsForPeriod = toArray(rapotResult?.data ?? rapotResult)
           const rapotStudentIds = Array.from(new Set(rapotRowsForPeriod.map((row) => row.siswa_id).filter(Boolean)))
           const jadwalRows = jadwalResult?.error ? [] : toArray(jadwalResult?.data ?? jadwalResult)

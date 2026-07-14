@@ -100,6 +100,7 @@ jobs:
       STAGING_DEFAULT_TENANT_SLUG: ${{ vars.STAGING_DEFAULT_TENANT_SLUG || 'tenant-a' }}
       STAGING_USE_ASSIGNMENTS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENTS_API_V2 || 'false' }}
       STAGING_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
+      STAGING_USE_SCHEDULES_API_V2: ${{ vars.STAGING_USE_SCHEDULES_API_V2 || 'false' }}
     steps:
       - name: Checkout selected release
         uses: actions/checkout@v4
@@ -175,6 +176,7 @@ jobs:
             --build-arg VITE_GOOGLE_AUTH_ENABLED=false \
             --build-arg VITE_USE_ASSIGNMENTS_API_V2="$STAGING_USE_ASSIGNMENTS_API_V2" \
             --build-arg VITE_USE_ASSIGNMENT_UPLOADS_API_V2="$STAGING_USE_ASSIGNMENT_UPLOADS_API_V2" \
+            --build-arg VITE_USE_SCHEDULES_API_V2="$STAGING_USE_SCHEDULES_API_V2" \
             --tag "$NGINX_IMAGE" \
             --cache-from type=gha,scope=nginx-staging \
             --cache-to type=gha,mode=max,scope=nginx-staging \
@@ -225,6 +227,7 @@ jobs:
       STAGING_USE_UPLOADS_API_V2: ${{ vars.STAGING_USE_UPLOADS_API_V2 || 'false' }}
       STAGING_USE_ASSIGNMENTS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENTS_API_V2 || 'false' }}
       STAGING_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
+      STAGING_USE_SCHEDULES_API_V2: ${{ vars.STAGING_USE_SCHEDULES_API_V2 || 'false' }}
     steps:
       - name: Checkout selected release
         uses: actions/checkout@v4
@@ -298,6 +301,7 @@ jobs:
           API_V2_UPLOADS_ENABLED=$STAGING_USE_UPLOADS_API_V2
           VITE_USE_ASSIGNMENTS_API_V2=$STAGING_USE_ASSIGNMENTS_API_V2
           VITE_USE_ASSIGNMENT_UPLOADS_API_V2=$STAGING_USE_ASSIGNMENT_UPLOADS_API_V2
+          VITE_USE_SCHEDULES_API_V2=$STAGING_USE_SCHEDULES_API_V2
           EOF
           dotenv_secret APP_KEY "$STAGING_APP_KEY"
           dotenv_secret DB_USERNAME "$STAGING_DATABASE_USER"
@@ -348,6 +352,7 @@ jobs:
             echo "uploads_v2=$STAGING_USE_UPLOADS_API_V2"
             echo "assignments_v2=$STAGING_USE_ASSIGNMENTS_API_V2"
             echo "assignment_uploads_v2=$STAGING_USE_ASSIGNMENT_UPLOADS_API_V2"
+            echo "schedules_v2=$STAGING_USE_SCHEDULES_API_V2"
           } > staging-release-evidence.txt
 
       - name: Upload safe deployment evidence

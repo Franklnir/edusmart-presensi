@@ -21,6 +21,11 @@ import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import { assignmentService, submissionService } from '../../services/assignmentService'
+import {
+  scheduleErrorMessage,
+  scheduleService,
+  USE_SCHEDULES_API_V2
+} from '../../services/scheduleService'
 import { uploadService } from '../../services/uploadService'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
@@ -729,6 +734,18 @@ export default function TugasGuru() {
     const loadInitialData = async () => {
       if (!user?.id) return
       try {
+        if (USE_SCHEDULES_API_V2) {
+          const [schedulePayload, kelasRes] = await Promise.all([
+            scheduleService.listTeacherSchedules({ tahun_ajaran: periodFilter.tahunAjaran }),
+            supabase.from('kelas').select(KELAS_COLUMNS).order('grade').order('suffix')
+          ])
+          if (kelasRes.error) throw kelasRes.error
+
+          setKelasList(kelasRes.data || [])
+          setJadwalAll(filterSchedulesForSemester(schedulePayload.data || [], periodFilter.semester))
+          return
+        }
+
         let jadwalQuery = supabase.from('jadwal').select(JADWAL_GURU_COLUMNS).eq('guru_id', user.id)
         jadwalQuery = applyAcademicYearFilter(jadwalQuery)
 
@@ -753,11 +770,11 @@ export default function TugasGuru() {
         setJadwalAll(filterSchedulesForSemester(jadwalRes.data || [], periodFilter.semester))
       } catch (error) {
         console.error('Error loading data awal tugas:', error)
-        pushToast('error', 'Gagal memuat data awal tugas')
+        pushToast('error', scheduleErrorMessage(error, 'Gagal memuat data awal tugas'))
       }
     }
     loadInitialData()
-  }, [applyAcademicYearFilter, periodFilter.semester, user?.id, pushToast])
+  }, [applyAcademicYearFilter, periodFilter.semester, periodFilter.tahunAjaran, user?.id, pushToast])
 
   /* =========================
      2) Mapel list untuk form create

@@ -13,6 +13,9 @@ import {
 import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
+import { scheduleService } from '../../services/scheduleService'
+
+const USE_SCHEDULES_API_V2 = import.meta.env.VITE_USE_SCHEDULES_API_V2 === 'true'
 
 // --- HELPER FUNCTIONS ---
 
@@ -1565,11 +1568,7 @@ export default function JadwalGuru() {
           .select('kelas_id, wali_guru_id, wali_guru_nama')
           .eq('wali_guru_id', user.id), activeAcademicPeriod)
 
-        let jadwalQuery = supabase
-          .from('jadwal')
-          .select('id, kelas_id, mapel, hari, jam_mulai, jam_selesai, ruang')
-          .eq('guru_id', user.id)
-          .order('jam_mulai', { ascending: true })
+        let jadwalRequest
         
         let ekskulQuery = supabase
           .from('ekskul')
@@ -1581,9 +1580,24 @@ export default function JadwalGuru() {
           .select('id, nama, deskripsi')
           .eq('pembina_guru_id', user.id)
 
-        // Jadwal dipotong per tahun lalu difilter semester dari periode_berlaku.
-        if (activeAcademicPeriod.tahunAjaran) {
-          jadwalQuery = jadwalQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
+        if (USE_SCHEDULES_API_V2) {
+          jadwalRequest = scheduleService
+            .listTeacherSchedules({ tahun_ajaran: activeAcademicPeriod.tahunAjaran })
+            .then(({ data }) => ({ data, error: null }))
+            .catch((error) => ({ data: null, error }))
+        } else {
+          let jadwalQuery = supabase
+            .from('jadwal')
+            .select('id, kelas_id, mapel, hari, jam_mulai, jam_selesai, ruang')
+            .eq('guru_id', user.id)
+            .order('jam_mulai', { ascending: true })
+
+          // Jadwal dipotong per tahun lalu difilter semester dari periode_berlaku.
+          if (activeAcademicPeriod.tahunAjaran) {
+            jadwalQuery = jadwalQuery.eq('tahun_ajaran', activeAcademicPeriod.tahunAjaran)
+          }
+
+          jadwalRequest = jadwalQuery
         }
         ekskulQuery = applyAcademicSemesterFilter(ekskulQuery, activeAcademicPeriod)
         orgQuery = applyAcademicYearFilter(orgQuery, activeAcademicPeriod)
@@ -1606,7 +1620,7 @@ export default function JadwalGuru() {
           sertifikatQuery,
           strukturSekolahQuery,
           waliKelasQuery,
-          jadwalQuery,
+          jadwalRequest,
           ekskulQuery,
           orgQuery
         ])

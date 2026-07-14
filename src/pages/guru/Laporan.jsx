@@ -12,6 +12,10 @@ import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveF
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import {
+  scheduleService,
+  USE_SCHEDULES_API_V2
+} from '../../services/scheduleService'
+import {
   getAcademicAssessmentLabels,
   getAssessmentSlotLabel
 } from '../../utils/academicAssessment'
@@ -506,20 +510,25 @@ export default function LaporanRekap() {
     const load = async () => {
       if (!user?.id) return
       try {
-	        let jadwalQuery = supabase.from('jadwal').select('*').eq('guru_id', user.id)
-	        jadwalQuery = applyReportAcademicFilters(jadwalQuery)
-	        let tugasQuery = supabase.from('tugas').select('kelas, mapel').eq('created_by', user.id)
-	        tugasQuery = applyReportAcademicFilters(tugasQuery)
-	        let quizQuery = supabase.from('quizzes').select('kelas_id, mapel').eq('guru_id', user.id)
-	        quizQuery = applyReportAcademicFilters(quizQuery)
-	        const batch = await supabase.batch([
-	          { key: 'jadwal', query: jadwalQuery },
-	          { key: 'tugas', query: tugasQuery },
-	          { key: 'quiz', query: quizQuery }
-	        ])
-	        const jadwalResult = batch.data?.jadwal
-	        const tugasResult = batch.data?.tugas
-	        const quizResult = batch.data?.quiz
+        const jadwalRequest = USE_SCHEDULES_API_V2
+          ? scheduleService.listTeacherSchedules({ tahun_ajaran: reportPeriod.tahunAjaran })
+          : (() => {
+            let query = supabase.from('jadwal').select('*').eq('guru_id', user.id)
+            return applyReportAcademicFilters(query)
+          })()
+        let tugasQuery = supabase.from('tugas').select('kelas, mapel').eq('created_by', user.id)
+        tugasQuery = applyReportAcademicFilters(tugasQuery)
+        let quizQuery = supabase.from('quizzes').select('kelas_id, mapel').eq('guru_id', user.id)
+        quizQuery = applyReportAcademicFilters(quizQuery)
+        const [jadwalResult, batch] = await Promise.all([
+          jadwalRequest,
+          supabase.batch([
+            { key: 'tugas', query: tugasQuery },
+            { key: 'quiz', query: quizQuery }
+          ])
+        ])
+        const tugasResult = batch.data?.tugas
+        const quizResult = batch.data?.quiz
 	        if (jadwalResult?.error) throw jadwalResult.error
 	        if (tugasResult?.error) throw tugasResult.error
 	        if (quizResult?.error) throw quizResult.error
@@ -1672,11 +1681,18 @@ export default function LaporanRekap() {
       const startDate = `${dateStrings[0]}T00:00:00`
       const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
 
-      let jadwalKelasQuery = supabase
-        .from('jadwal')
-        .select('mapel, guru_id, periode_berlaku')
-        .eq('kelas_id', selectedWaliKelas)
-      jadwalKelasQuery = applyReportAcademicFilters(jadwalKelasQuery)
+      const jadwalKelasRequest = USE_SCHEDULES_API_V2
+        ? scheduleService.listSchedules({
+          kelas_id: selectedWaliKelas,
+          tahun_ajaran: reportPeriod.tahunAjaran
+        })
+        : (() => {
+          let query = supabase
+            .from('jadwal')
+            .select('mapel, guru_id, periode_berlaku')
+            .eq('kelas_id', selectedWaliKelas)
+          return applyReportAcademicFilters(query)
+        })()
 
       let tugasQuery = supabase
         .from('tugas')
@@ -1710,7 +1726,7 @@ export default function LaporanRekap() {
         absensiResult
       ] = await Promise.all([
         siswaQuery,
-        jadwalKelasQuery,
+        jadwalKelasRequest,
         tugasQuery,
         quizQuery,
         absensiQuery
@@ -2413,8 +2429,18 @@ export default function LaporanRekap() {
         const startDate = `${dateStrings[0]}T00:00:00`
         const endDate = `${dateStrings[dateStrings.length - 1]}T23:59:59`
 
-        let jadwalDetailQuery = supabase.from('jadwal').select('mapel, guru_id, periode_berlaku').eq('kelas_id', selectedWaliKelas)
-        jadwalDetailQuery = applyReportAcademicFilters(jadwalDetailQuery)
+        const jadwalDetailRequest = USE_SCHEDULES_API_V2
+          ? scheduleService.listSchedules({
+            kelas_id: selectedWaliKelas,
+            tahun_ajaran: reportPeriod.tahunAjaran
+          })
+          : (() => {
+            let query = supabase
+              .from('jadwal')
+              .select('mapel, guru_id, periode_berlaku')
+              .eq('kelas_id', selectedWaliKelas)
+            return applyReportAcademicFilters(query)
+          })()
         let tugasDetailQuery = supabase
           .from('tugas')
           .select('id, mapel')
@@ -2431,7 +2457,7 @@ export default function LaporanRekap() {
         quizDetailQuery = applyReportAcademicFilters(quizDetailQuery)
 
         const [jadwalRes, tugasRes, quizRes] = await Promise.all([
-          jadwalDetailQuery,
+          jadwalDetailRequest,
           tugasDetailQuery,
           quizDetailQuery
         ])

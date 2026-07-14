@@ -5,6 +5,11 @@ import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { attendanceService } from '../../services/attendanceService'
+import {
+  scheduleErrorMessage,
+  scheduleService,
+  USE_SCHEDULES_API_V2
+} from '../../services/scheduleService'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
@@ -1004,7 +1009,10 @@ function AbsensiGuru() {
 
   /* ===== Subscription Jadwal (re-load kalau ada perubahan) ===== */
   useEffect(() => {
-    if (!user?.id) return
+    // The legacy realtime channel reads the table directly. V2 intentionally
+    // relies on its authenticated HTTP contract until device/event transport
+    // is migrated to a domain-specific stream.
+    if (!user?.id || USE_SCHEDULES_API_V2) return
 
     const jadwalSubscription = supabase
       .channel('jadwal-changes')
@@ -1174,6 +1182,33 @@ function AbsensiGuru() {
     if (!user?.id) return
 
     try {
+      if (USE_SCHEDULES_API_V2) {
+        const [schedulePayload, guruRes] = await Promise.all([
+          scheduleService.listTeacherSchedules({ tahun_ajaran: periodFilter.tahunAjaran }),
+          supabase
+            .from('profiles')
+            .select(GURU_COLUMNS)
+            .eq('role', 'guru')
+            .order('nama')
+        ])
+
+        if (guruRes.error) {
+          console.error('Error loading guru list:', guruRes.error)
+        } else {
+          setGuruList(guruRes.data || [])
+        }
+
+        const rows = schedulePayload.data || []
+        setJadwalAll(rows)
+        if (selectedScheduleId && !rows.some((jadwal) => jadwal.id === selectedScheduleId)) {
+          setSelectedScheduleId('')
+          setCurrentSchedule(null)
+          setAllowSelfAbsen(false)
+        }
+        setLastUpdate(new Date())
+        return
+      }
+
       let jadwalQuery = supabase
         .from('jadwal')
         .select(JADWAL_COLUMNS)
@@ -1220,7 +1255,7 @@ function AbsensiGuru() {
       }
     } catch (error) {
       console.error('Exception loading initial teaching data:', error)
-      pushToast('error', 'Terjadi kesalahan saat memuat data awal absensi')
+      pushToast('error', scheduleErrorMessage(error, 'Terjadi kesalahan saat memuat data awal absensi'))
     }
   }
 
@@ -1228,6 +1263,22 @@ function AbsensiGuru() {
     if (!user?.id) return
 
     try {
+      if (USE_SCHEDULES_API_V2) {
+        const schedulePayload = await scheduleService.listTeacherSchedules({
+          tahun_ajaran: periodFilter.tahunAjaran
+        })
+        const rows = schedulePayload.data || []
+
+        setJadwalAll(rows)
+        if (selectedScheduleId && !rows.some((jadwal) => jadwal.id === selectedScheduleId)) {
+          setSelectedScheduleId('')
+          setCurrentSchedule(null)
+          setAllowSelfAbsen(false)
+        }
+        setLastUpdate(new Date())
+        return
+      }
+
       let query = supabase
         .from('jadwal')
         .select(JADWAL_COLUMNS)
@@ -1255,7 +1306,7 @@ function AbsensiGuru() {
       setLastUpdate(new Date())
     } catch (error) {
       console.error('Exception loading jadwal:', error)
-      pushToast('error', 'Terjadi kesalahan saat memuat jadwal')
+      pushToast('error', scheduleErrorMessage(error, 'Terjadi kesalahan saat memuat jadwal'))
     }
   }
 
