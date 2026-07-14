@@ -1,154 +1,104 @@
 import { apiClient } from '../lib/api/client'
 import { generateRequestId } from '../lib/api/requestId'
 
+const responsePayload = (result) => result.payload || { data: result.data }
+
+const mutationOptions = (method, body = {}) => {
+  const key = body.idempotency_key || generateRequestId()
+  return {
+    method,
+    headers: { 'Idempotency-Key': key },
+    body: { ...body, idempotency_key: key }
+  }
+}
+
+const pick = (source, allowed) => Object.fromEntries(
+  allowed.filter((key) => source[key] !== undefined).map((key) => [key, source[key]])
+)
+
+const assignmentPayload = (source) => pick(source, [
+  'kelas',
+  'judul',
+  'mapel',
+  'mulai',
+  'deadline',
+  'keterangan',
+  'attachment_ids',
+  'link',
+  'tahun_ajaran',
+  'semester',
+  'angkatan',
+  'status',
+  'idempotency_key'
+])
+
+const submissionPayload = (source) => pick(source, [
+  'tugas_id',
+  'attachment_ids',
+  'link_url',
+  'file_name',
+  'komentar_siswa',
+  'idempotency_key'
+])
+
 export const assignmentService = {
   async getAssignments(params = {}) {
-    try {
-      const response = await apiClient.get('/api/v2/assignments', {
-        params,
-        headers: {
-          'X-Request-ID': generateRequestId()
-        }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error fetching assignments:', error)
-      throw error
-    }
+    return responsePayload(await apiClient('/api/v2/assignments', { method: 'GET', params }))
   },
 
   async getAssignment(id) {
-    try {
-      const response = await apiClient.get(`/api/v2/assignments/${id}`, {
-        headers: { 'X-Request-ID': generateRequestId() }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error fetching assignment:', error)
-      throw error
-    }
+    return responsePayload(await apiClient(`/api/v2/assignments/${id}`, { method: 'GET' }))
   },
 
   async storeAssignment(data) {
-    try {
-      const response = await apiClient.post('/api/v2/assignments', data, {
-        headers: { 'X-Request-ID': generateRequestId() }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error storing assignment:', error)
-      throw error
-    }
+    const payload = assignmentPayload(data)
+    return responsePayload(await apiClient('/api/v2/assignments', mutationOptions('POST', payload)))
   },
 
   async updateAssignment(id, data) {
-    try {
-      const response = await apiClient.patch(`/api/v2/assignments/${id}`, data, {
-        headers: { 'X-Request-ID': generateRequestId() }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error updating assignment:', error)
-      throw error
-    }
+    const payload = assignmentPayload(data)
+    return responsePayload(await apiClient(`/api/v2/assignments/${id}`, mutationOptions('PATCH', payload)))
   },
 
   async deleteAssignment(id) {
-    try {
-      const response = await apiClient.delete(`/api/v2/assignments/${id}`, {
-        headers: { 'X-Request-ID': generateRequestId() }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error deleting assignment:', error)
-      throw error
-    }
+    return responsePayload(await apiClient(`/api/v2/assignments/${id}`, { method: 'DELETE' }))
   }
 }
 
 export const submissionService = {
   async getSubmissions(params = {}) {
-    try {
-      const response = await apiClient.get('/api/v2/submissions', {
-        params,
-        headers: { 'X-Request-ID': generateRequestId() }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error fetching submissions:', error)
-      throw error
-    }
+    return responsePayload(await apiClient('/api/v2/submissions', { method: 'GET', params }))
   },
 
   async getSubmission(id) {
-    try {
-      const response = await apiClient.get(`/api/v2/submissions/${id}`, {
-        headers: { 'X-Request-ID': generateRequestId() }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error fetching submission:', error)
-      throw error
-    }
+    return responsePayload(await apiClient(`/api/v2/submissions/${id}`, { method: 'GET' }))
   },
 
   async storeSubmission(data) {
-    try {
-      const response = await apiClient.post('/api/v2/submissions', data, {
-        headers: { 'X-Request-ID': generateRequestId() }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error storing submission:', error)
-      throw error
-    }
+    const payload = submissionPayload(data)
+    return responsePayload(await apiClient('/api/v2/submissions', mutationOptions('POST', payload)))
   },
 
   async updateSubmission(id, data) {
-    try {
-      const response = await apiClient.patch(`/api/v2/submissions/${id}`, data, {
-        headers: { 'X-Request-ID': generateRequestId() }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error updating submission:', error)
-      throw error
-    }
+    const payload = submissionPayload(data)
+    delete payload.tugas_id
+    return responsePayload(await apiClient(`/api/v2/submissions/${id}`, mutationOptions('PATCH', payload)))
   },
 
   async gradeSubmission(id, data) {
-    try {
-      const response = await apiClient.patch(`/api/v2/submissions/${id}/grade`, data, {
-        headers: { 'X-Request-ID': generateRequestId() }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error grading submission:', error)
-      throw error
-    }
+    const payload = pick(data, ['nilai', 'status', 'idempotency_key'])
+    return responsePayload(await apiClient(`/api/v2/submissions/${id}/grade`, mutationOptions('PATCH', payload)))
   },
 
   async gradeByUser(data) {
-    try {
-      const response = await apiClient.post(`/api/v2/submissions/grade-by-user`, data, {
-        headers: { 'X-Request-ID': generateRequestId() }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error grading submission by user:', error)
-      throw error
-    }
+    const payload = pick(data, ['tugas_id', 'user_id', 'nilai', 'idempotency_key'])
+    return responsePayload(await apiClient('/api/v2/submissions/grade-by-user', mutationOptions('POST', payload)))
   },
 
   async deleteSubmission(id) {
-    try {
-      const response = await apiClient.delete(`/api/v2/submissions/${id}`, {
-        headers: { 'X-Request-ID': generateRequestId() }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error deleting submission:', error)
-      throw error
-    }
+    return responsePayload(await apiClient(
+      `/api/v2/submissions/${id}`,
+      mutationOptions('DELETE')
+    ))
   }
 }

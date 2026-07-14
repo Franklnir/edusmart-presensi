@@ -56,18 +56,9 @@ export function useStudentAttendanceActions({
     const useApiV2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
 
     if (useApiV2) {
-      try {
-        await attendanceService.storeAttendance({
-          ...payload,
-          idempotency_key: crypto.randomUUID()
-        })
-      } catch (err) {
-        if (err.response?.data?.code === 'ATTENDANCE_ALREADY_EXISTS') {
-           // Ignore or throw custom error
-        } else {
-           throw err
-        }
-      }
+      const error = new Error('Absen mandiri API V2 belum tersedia; gunakan QR atau ajukan izin.')
+      error.code = 'ATTENDANCE_SELF_SERVICE_UNAVAILABLE'
+      throw error
     } else {
       const { error } = await supabase.from('absensi').upsert(payload, {
         onConflict: 'kelas,tanggal,mapel,uid'
@@ -109,17 +100,31 @@ export function useStudentAttendanceActions({
 
     try {
       setIsSubmitting(true)
-      const { error } = await supabase.from('absensi_ajuan').insert({
+      const useApiV2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
+
+      const payload = {
         kelas: profile.kelas,
         tanggal: tgl,
-        uid: userId,
-        nama: profile.nama,
-        alasan: izinReason || 'Izin (Tanpa Keterangan)',
         mapel,
-        ...academicPeriodPayload
-      })
+        alasan: izinReason || 'Izin (Tanpa Keterangan)',
+        ...academicPeriodPayload,
+        idempotency_key: crypto.randomUUID()
+      }
 
-      if (error) throw error
+      if (useApiV2) {
+        await attendanceService.storeAttendanceRequest(payload)
+      } else {
+        const { error } = await supabase.from('absensi_ajuan').insert({
+          kelas: profile.kelas,
+          tanggal: tgl,
+          uid: userId,
+          nama: profile.nama,
+          alasan: izinReason || 'Izin (Tanpa Keterangan)',
+          mapel,
+          ...academicPeriodPayload
+        })
+        if (error) throw error
+      }
 
       pushToast(
         'success',
@@ -204,7 +209,9 @@ export function useStudentAttendanceActions({
       await saveAbsensi(st, `Absen mandiri (${st})`)
     } catch (err) {
       console.error('Error submit absensi siswa:', err)
-      pushToast('error', 'Gagal menyimpan absensi')
+      pushToast('error', err?.code === 'ATTENDANCE_SELF_SERVICE_UNAVAILABLE'
+        ? err.message
+        : 'Gagal menyimpan absensi')
     } finally {
       setIsSubmitting(false)
     }

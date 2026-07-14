@@ -1,73 +1,49 @@
 import { apiClient } from '../lib/api/client'
 import { generateRequestId } from '../lib/api/requestId'
 
+const responsePayload = (result) => result.payload || { data: result.data }
+
+const mutationOptions = (method, body = {}) => {
+  const key = body.idempotency_key || generateRequestId()
+  return {
+    method,
+    headers: { 'Idempotency-Key': key },
+    body: { ...body, idempotency_key: key }
+  }
+}
+
 export const attendanceService = {
-  /**
-   * Fetch attendances with optional filters
-   */
   async getAttendances(params = {}) {
-    try {
-      const response = await apiClient.get('/api/v2/attendance', {
-        params,
-        headers: {
-          'X-Request-ID': generateRequestId()
-        }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error fetching attendances:', error)
-      throw error
-    }
+    return responsePayload(await apiClient('/api/v2/attendance', { method: 'GET', params }))
   },
 
-  /**
-   * Store/Upsert an attendance
-   */
   async storeAttendance(data) {
-    try {
-      const response = await apiClient.post('/api/v2/attendance', data, {
-        headers: {
-          'X-Request-ID': generateRequestId()
-        }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error storing attendance:', error)
-      throw error
-    }
+    return responsePayload(await apiClient('/api/v2/attendance', mutationOptions('POST', data)))
   },
 
-  /**
-   * Update an attendance record
-   */
   async updateAttendance(id, data) {
-    try {
-      const response = await apiClient.patch(`/api/v2/attendance/${id}`, data, {
-        headers: {
-          'X-Request-ID': generateRequestId()
-        }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error updating attendance:', error)
-      throw error
-    }
+    return responsePayload(await apiClient(`/api/v2/attendance/${id}`, mutationOptions('PATCH', data)))
   },
 
-  /**
-   * Delete an attendance record
-   */
-  async deleteAttendance(id) {
-    try {
-      const response = await apiClient.delete(`/api/v2/attendance/${id}`, {
-        headers: {
-          'X-Request-ID': generateRequestId()
-        }
-      })
-      return response.data
-    } catch (error) {
-      console.error('Error deleting attendance:', error)
-      throw error
-    }
+  async getAttendanceRequests(params = {}) {
+    return responsePayload(await apiClient('/api/v2/attendance-requests', { method: 'GET', params }))
+  },
+
+  async storeAttendanceRequest(data) {
+    return responsePayload(await apiClient('/api/v2/attendance-requests', mutationOptions('POST', data)))
+  },
+
+  async updateAttendanceRequest(id, data) {
+    return responsePayload(await apiClient(
+      `/api/v2/attendance-requests/${id}`,
+      mutationOptions('PATCH', data)
+    ))
+  },
+
+  async deleteAttendanceRequest(id) {
+    return responsePayload(await apiClient(
+      `/api/v2/attendance-requests/${id}`,
+      mutationOptions('DELETE')
+    ))
   }
 }

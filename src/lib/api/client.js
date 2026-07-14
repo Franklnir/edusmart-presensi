@@ -133,7 +133,7 @@ export const apiClient = async (path, options = {}) => {
         )
       }
 
-      return { data: data?.data ?? data, response, requestId }
+      return { data: data?.data ?? data, payload: data, response, requestId }
     } catch (error) {
       if (error.name === 'AbortError') {
         throw makeError('Request dibatalkan', 0, 'REQUEST_ABORTED', { requestId })

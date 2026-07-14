@@ -1,9 +1,10 @@
-﻿// src/pages/guru/AbsensiGuru.jsx
+// src/pages/guru/AbsensiGuru.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Maximize2, QrCode, RefreshCw, ShieldCheck, UserCheck, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import { attendanceService } from '../../services/attendanceService'
 import ProfileAvatar from '../../components/ProfileAvatar'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
@@ -43,7 +44,6 @@ import {
   buildMonthCalendar,
   loadQRCode,
   buildQrScanValue,
-  initials,
 } from './absensi/absensiGuruUtils'
 
 
@@ -797,7 +797,6 @@ function AbsensiGuru() {
   const [ajuan, setAjuan] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [currentSchedule, setCurrentSchedule] = useState(null)
-  const [todayName, setTodayName] = useState('')
   const [loadingActions, setLoadingActions] = useState({})
   const [allowSelfAbsen, setAllowSelfAbsen] = useState(false)
 
@@ -1482,9 +1481,10 @@ function AbsensiGuru() {
 
     const schedule = selectedScheduleObj.schedule
     setCurrentSchedule(schedule)
-    setTodayName(getDayName(tgl))
 
     try {
+      const useApiV2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
+
       let absenQuery = supabase
           .from('absensi')
           .select(ABSENSI_COLUMNS)
@@ -1516,22 +1516,15 @@ function AbsensiGuru() {
         settingsQuery = settingsQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
       }
 
-      const { data: absensiBatch } = await supabase.batch([
+      const batchQueries = [
         { key: 'settings', query: settingsQuery },
         {
           key: 'students',
           query: (() => {
-            // For live/current-period attendance we always use profiles.kelas
-            // so teachers see the real class list right now.  We only switch
-            // to student_class_histories when the teacher is *viewing* a past
-            // period (archive mode) — in that case profiles.kelas already
-            // reflects the new class after promotion, so it would show the
-            // wrong roster.
             const isArchivePeriod =
               periodFilter.tahunAjaran &&
               periodFilter.tahunAjaran !== activeAcademicPeriod.tahunAjaran
             if (isArchivePeriod) {
-              // Return a minimal query; we'll resolve via history after the batch.
               return supabase.from('profiles').select(STUDENT_COLUMNS).eq('role', 'siswa').eq('kelas', '__history_lookup__').limit(0)
             }
             return supabase
@@ -1542,8 +1535,39 @@ function AbsensiGuru() {
               .order('nama')
           })()
         },
-        { key: 'absen', query: absenQuery },
-        { key: 'reqs', query: reqsQuery }
+      ]
+
+      if (!useApiV2) {
+        batchQueries.push({ key: 'absen', query: absenQuery })
+        batchQueries.push({ key: 'reqs', query: reqsQuery })
+      }
+
+      const [{ data: absensiBatch }, reqsV2, absenV2] = await Promise.all([
+        supabase.batch(batchQueries),
+        useApiV2
+          ? attendanceService.getAttendanceRequests({
+              kelas,
+              tanggal: tgl,
+              mapel: schedule.mapel,
+              tahun_ajaran: periodFilter.tahunAjaran || undefined,
+              per_page: 500
+            }).catch(err => {
+              console.error('Error fetching V2 reqs:', err)
+              return { data: [] }
+            })
+          : Promise.resolve(null),
+        useApiV2
+          ? attendanceService.getAttendances({
+              kelas,
+              tanggal: tgl,
+              mapel: schedule.mapel,
+              tahun_ajaran: periodFilter.tahunAjaran || undefined,
+              per_page: 500
+            }).catch(err => {
+              console.error('Error fetching V2 absen:', err)
+              return { data: [] }
+            })
+          : Promise.resolve(null)
       ])
 
       // For archive periods resolve the student list from class history
@@ -1609,7 +1633,7 @@ function AbsensiGuru() {
         setSiswa(sortStudentsByAttendanceOrder(students || []))
       }
 
-      const { data: absen, error: absenError } = absenRes
+      const { data: absen, error: absenError } = useApiV2 ? { data: absenV2.data, error: null } : absenRes
       if (absenError) {
         console.error('Error loading absensi:', absenError)
         pushLoadErrorToast('load-absensi', 'Gagal memuat data absensi')
@@ -1618,7 +1642,7 @@ function AbsensiGuru() {
         setAbsensi(absen || [])
       }
 
-      const { data: reqs, error: reqsError } = reqsRes
+      const { data: reqs, error: reqsError } = useApiV2 ? { data: reqsV2.data, error: null } : reqsRes
       if (reqsError) {
         console.error('Error loading ajuan:', reqsError)
         pushToast('error', 'Gagal memuat data ajuan izin')
@@ -1715,18 +1739,36 @@ function AbsensiGuru() {
         ...academicPeriodPayload
       }
 
-      const { data, error } = await supabase
-        .from('absensi')
-        .upsert(payload, {
-          onConflict: 'kelas,tanggal,uid,mapel'
-        })
+      const useApiV2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
+      let error = null
+      let responseData = null
+
+      if (useApiV2) {
+        try {
+          const res = await attendanceService.storeAttendance({
+            ...payload,
+            idempotency_key: crypto.randomUUID()
+          })
+          responseData = res.data
+        } catch (err) {
+          error = err
+        }
+      } else {
+        const result = await supabase
+          .from('absensi')
+          .upsert(payload, {
+            onConflict: 'kelas,tanggal,uid,mapel'
+          })
+        error = result.error
+        responseData = result.data
+      }
 
       if (error) {
         console.error('Error setting status:', error)
         const msg = error?.message ? `Gagal mengupdate status absensi: ${error.message}` : 'Gagal mengupdate status absensi'
         pushToast('error', msg)
       } else {
-        upsertAbsensiState(data)
+        if (responseData) upsertAbsensiState(responseData)
         pushToast('success', `Status ${st} berhasil disimpan untuk ${siswaData.nama}`)
       }
     } catch (e) {
@@ -1741,10 +1783,19 @@ function AbsensiGuru() {
     if (!id) return
 
     try {
-      const { error } = await supabase
-        .from('absensi')
-        .delete()
-        .eq('id', id)
+      const useApiV2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
+      let error = null
+
+      if (useApiV2) {
+        pushToast('error', 'API V2 tidak mengizinkan hard-delete presensi. Ubah status presensi bila perlu koreksi.')
+        return
+      } else {
+        const result = await supabase
+          .from('absensi')
+          .delete()
+          .eq('id', id)
+        error = result.error
+      }
 
       if (error) {
         console.error('Error deleting absensi:', error)
@@ -1802,7 +1853,8 @@ function AbsensiGuru() {
         })
 
       if (isMissingAllowSelfAbsenColumnError(error)) {
-        const { allow_self_absen: _allowSelfAbsen, ...legacyPayload } = payload
+        const legacyPayload = { ...payload }
+        delete legacyPayload.allow_self_absen
         const retry = await supabase
           .from('absensi_settings')
           .upsert(legacyPayload, {
@@ -2254,31 +2306,18 @@ function AbsensiGuru() {
     }
   }
 
-  const openDetailIzinModal = (a) => {
-    setSelectedAjuan(a)
-    setIsDetailIzinModalOpen(true)
-  }
-
   const keputusanAjuan = async (a, action) => {
+    setSelectedAjuan(a)
     setLoadingActions(prev => ({ ...prev, [`ajuan-${a.id}`]: true }))
 
     try {
-      if (action === 'izin') {
-        await setStatus(a.uid, 'Izin', a.alasan)
-      } else if (action === 'sakit') {
-        await setStatus(a.uid, 'Sakit', a.alasan || 'Sakit (Ajuan)')
-      }
-
       if (action === 'izin' || action === 'sakit' || action === 'tolak') {
-        const { error } = await supabase
-          .from('absensi_ajuan')
-          .delete()
-          .eq('id', a.id)
+        const useApiV2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
+        const backendAction = action === 'tolak' ? 'reject' : action
 
-        if (error) {
-          console.error('Error deleting ajuan:', error)
-          pushToast('error', 'Gagal memproses ajuan')
-        } else {
+        if (useApiV2) {
+          await attendanceService.updateAttendanceRequest(a.id, { action: backendAction })
+
           setIsDetailIzinModalOpen(false)
           setAjuan(prev => prev.filter(x => x.id !== a.id))
           setLastUpdate(new Date())
@@ -2287,6 +2326,43 @@ function AbsensiGuru() {
           if (action === 'sakit') teks = 'Ajuan diterima sebagai Sakit'
           if (action === 'tolak') teks = 'Ajuan ditolak'
           pushToast('success', teks)
+
+          // Refresh absen list to get the new status
+          // Actually setting the local state directly is faster for the UI
+          if (action === 'izin' || action === 'sakit') {
+             const st = action === 'izin' ? 'Izin' : 'Sakit'
+             upsertAbsensiState({
+                uid: a.uid,
+                status: st,
+                komentar: a.alasan || `${st} (Ajuan)`,
+                oleh: user.id
+             })
+          }
+        } else {
+          if (action === 'izin') {
+            await setStatus(a.uid, 'Izin', a.alasan)
+          } else if (action === 'sakit') {
+            await setStatus(a.uid, 'Sakit', a.alasan || 'Sakit (Ajuan)')
+          }
+
+          const { error } = await supabase
+            .from('absensi_ajuan')
+            .delete()
+            .eq('id', a.id)
+
+          if (error) {
+            console.error('Error deleting ajuan:', error)
+            pushToast('error', 'Gagal memproses ajuan')
+          } else {
+            setIsDetailIzinModalOpen(false)
+            setAjuan(prev => prev.filter(x => x.id !== a.id))
+            setLastUpdate(new Date())
+            let teks = 'Ajuan diproses'
+            if (action === 'izin') teks = 'Ajuan diterima sebagai Izin'
+            if (action === 'sakit') teks = 'Ajuan diterima sebagai Sakit'
+            if (action === 'tolak') teks = 'Ajuan ditolak'
+            pushToast('success', teks)
+          }
         }
       }
     } catch (error) {

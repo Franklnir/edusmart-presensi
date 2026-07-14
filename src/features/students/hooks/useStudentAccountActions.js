@@ -1,5 +1,4 @@
 import { useCallback, useState } from 'react'
-import { supabase } from '../../../lib/supabase'
 import { studentService } from '../services/studentService'
 
 const buildEmptyStudentForm = () => ({
@@ -162,10 +161,7 @@ export function useStudentAccountActions({
       async () => {
         try {
           const reason = alasanNonaktif.trim()
-          const res = await studentService.updateStudent(siswaToNonaktif.id, {
-            status: 'nonaktif',
-            alasan_nonaktif: reason,
-          })
+          const res = await studentService.deactivateStudent(siswaToNonaktif.id, reason)
 
           if (res.error) throw res.error
           const data = res.data
@@ -217,10 +213,7 @@ export function useStudentAccountActions({
             ? getNamaKelas(siswaToMutasi.kelas)
             : siswaToMutasi.kelas
           const reason = `Mutasi/Pindah sekolah. Kelas terakhir: ${lastClassName || '-'}. ${alasanMutasi.trim()}`
-          const res = await studentService.updateStudent(siswaToMutasi.id, {
-            status: 'mutasi',
-            alasan_nonaktif: reason,
-          })
+          const res = await studentService.deactivateStudent(siswaToMutasi.id, 'mutasi')
 
           if (res.error) throw res.error
           const data = res.data
@@ -283,10 +276,7 @@ export function useStudentAccountActions({
       'Konfirmasi Akhir Aktifkan Siswa',
       async () => {
         try {
-          const res = await studentService.updateStudent(siswaToAktifkan.id, {
-            status: 'active',
-            alasan_nonaktif: null,
-          })
+          const res = await studentService.activateStudent(siswaToAktifkan.id)
 
           if (res.error) throw res.error
           const data = res.data
