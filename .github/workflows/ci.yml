@@ -88,8 +88,7 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       (
         github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/backup/vps-ready-20260430' ||
-        github.ref == 'refs/heads/staging'
+        github.ref == 'refs/heads/backup/vps-ready-20260430'
       )
     outputs:
       backend_image: ${{ steps.images.outputs.backend_image }}
@@ -145,6 +144,7 @@ jobs:
           set -euo pipefail
           docker buildx build \
             --file backend/docker/Dockerfile.prod \
+            --build-arg APP_RELEASE_SHA="$GITHUB_SHA" \
             --tag "$BACKEND_IMAGE" \
             --tag "$BACKEND_BRANCH_IMAGE" \
             --cache-from type=gha,scope=backend-prod \
@@ -164,8 +164,8 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
           VITE_GOOGLE_AUTH_LOGIN_URL: ${{ vars.VITE_GOOGLE_AUTH_LOGIN_URL }}
           VITE_GOOGLE_AUTH_LINK_URL: ${{ vars.VITE_GOOGLE_AUTH_LINK_URL }}
-          VITE_USE_ASSIGNMENTS_API_V2: ${{ github.ref == 'refs/heads/staging' && vars.VITE_USE_ASSIGNMENTS_API_V2 || 'false' }}
-          VITE_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ github.ref == 'refs/heads/staging' && vars.VITE_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
+          VITE_USE_ASSIGNMENTS_API_V2: "false"
+          VITE_USE_ASSIGNMENT_UPLOADS_API_V2: "false"
         run: |
           set -euo pipefail
           docker buildx build \
@@ -226,13 +226,12 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       (
         github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/backup/vps-ready-20260430' ||
-        github.ref == 'refs/heads/staging'
+        github.ref == 'refs/heads/backup/vps-ready-20260430'
       )
     concurrency:
-      group: ${{ github.ref == 'refs/heads/staging' && 'staging-deploy' || 'production-deploy' }}
+      group: production-deploy
       cancel-in-progress: false
-    environment: ${{ github.ref == 'refs/heads/staging' && 'staging' || 'production' }}
+    environment: production
 
     steps:
       - name: Validate deploy secrets

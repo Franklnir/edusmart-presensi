@@ -1,0 +1,358 @@
+name: Isolated Staging
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Full immutable commit SHA; blank uses the workflow commit
+        required: false
+        type: string
+      operation:
+        description: Deploy the selected SHA or roll back to the recorded previous SHA
+        required: true
+        default: deploy
+        type: choice
+        options: [deploy, rollback]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: isolated-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    name: Staging Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout selected release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha || github.sha }}
+
+      - name: Verify immutable release lineage
+        run: |
+          set -euo pipefail
+          release_sha="$(git rev-parse HEAD)"
+          test "$release_sha" = "$(git rev-parse '${{ inputs.release_sha || github.sha }}')"
+          git merge-base --is-ancestor 9adf23a0 "$release_sha"
+          echo "RELEASE_SHA=$release_sha" >> "$GITHUB_ENV"
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer:v2
+          extensions: mbstring, pdo_pgsql, pgsql, pdo_sqlite, sqlite3, dom, curl, fileinfo, zip
+          coverage: none
+
+      - name: Validate and audit Composer dependencies
+        working-directory: backend
+        run: |
+          composer validate --strict
+          composer audit --locked --no-interaction
+          composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Verify PHP extensions
+        run: |
+          php -m
+          php -m | grep -qi '^zip$'
+
+      - name: Backend tests and Pint
+        working-directory: backend
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force
+          php artisan test
+          ./vendor/bin/pint --test
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+
+      - name: Frontend audit, tests, and build
+        run: |
+          npm ci --legacy-peer-deps
+          npm audit --audit-level=high
+          npm run test
+          npm run build
+
+  build:
+    name: Build SHA-tagged Staging Images
+    runs-on: ubuntu-latest
+    needs: quality
+    environment: staging
+    outputs:
+      release_sha: ${{ steps.release.outputs.release_sha }}
+      backend_image: ${{ steps.release.outputs.backend_image }}
+      nginx_image: ${{ steps.release.outputs.nginx_image }}
+      caddy_image: ${{ steps.release.outputs.caddy_image }}
+    env:
+      STAGING_API_BASE_URL: ${{ vars.STAGING_API_BASE_URL }}
+      STAGING_BACKEND_HOST: ${{ vars.STAGING_BACKEND_HOST }}
+      STAGING_TENANT_ROOT_DOMAIN: ${{ vars.STAGING_TENANT_ROOT_DOMAIN }}
+      STAGING_DEFAULT_TENANT_SLUG: ${{ vars.STAGING_DEFAULT_TENANT_SLUG || 'tenant-a' }}
+      STAGING_USE_ASSIGNMENTS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENTS_API_V2 || 'false' }}
+      STAGING_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
+    steps:
+      - name: Checkout selected release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha || github.sha }}
+
+      - name: Validate frontend staging target
+        run: |
+          set -euo pipefail
+          for name in STAGING_API_BASE_URL STAGING_BACKEND_HOST STAGING_TENANT_ROOT_DOMAIN; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing staging variable::${name} is required"
+              exit 1
+            fi
+          done
+          case "$STAGING_API_BASE_URL" in
+            https://sismu.biz.id*|https://origin.sismu.biz.id*)
+              echo "::error title=Production target forbidden::Staging frontend cannot use a production API"
+              exit 1
+              ;;
+          esac
+          test "$STAGING_API_BASE_URL" = "https://$STAGING_BACKEND_HOST"
+
+      - name: Define immutable image tags
+        id: release
+        run: |
+          set -euo pipefail
+          release_sha="$(git rev-parse HEAD)"
+          repo="${GITHUB_REPOSITORY,,}"
+          backend_image="ghcr.io/$repo/backend:$release_sha"
+          nginx_image="ghcr.io/$repo/nginx:$release_sha"
+          caddy_image="ghcr.io/$repo/caddy:$release_sha"
+          {
+            echo "release_sha=$release_sha"
+            echo "backend_image=$backend_image"
+            echo "nginx_image=$nginx_image"
+            echo "caddy_image=$caddy_image"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "RELEASE_SHA=$release_sha"
+            echo "BACKEND_IMAGE=$backend_image"
+            echo "NGINX_IMAGE=$nginx_image"
+            echo "CADDY_IMAGE=$caddy_image"
+          } >> "$GITHUB_ENV"
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build backend image
+        run: |
+          docker buildx build \
+            --file backend/docker/Dockerfile.prod \
+            --build-arg APP_RELEASE_SHA="$RELEASE_SHA" \
+            --tag "$BACKEND_IMAGE" \
+            --cache-from type=gha,scope=backend-staging \
+            --cache-to type=gha,mode=max,scope=backend-staging \
+            --push .
+
+      - name: Build frontend/nginx image
+        run: |
+          docker buildx build \
+            --file deploy/nginx/Dockerfile.prod \
+            --build-arg VITE_API_URL="$STAGING_API_BASE_URL" \
+            --build-arg VITE_ROOT_DOMAIN="$STAGING_TENANT_ROOT_DOMAIN" \
+            --build-arg VITE_TENANT_SLUG="$STAGING_DEFAULT_TENANT_SLUG" \
+            --build-arg VITE_GOOGLE_AUTH_ENABLED=false \
+            --build-arg VITE_USE_ASSIGNMENTS_API_V2="$STAGING_USE_ASSIGNMENTS_API_V2" \
+            --build-arg VITE_USE_ASSIGNMENT_UPLOADS_API_V2="$STAGING_USE_ASSIGNMENT_UPLOADS_API_V2" \
+            --tag "$NGINX_IMAGE" \
+            --cache-from type=gha,scope=nginx-staging \
+            --cache-to type=gha,mode=max,scope=nginx-staging \
+            --push .
+
+      - name: Build Caddy image
+        run: |
+          docker buildx build \
+            --file deploy/caddy/Dockerfile \
+            --tag "$CADDY_IMAGE" \
+            --cache-from type=gha,scope=caddy-staging \
+            --cache-to type=gha,mode=max,scope=caddy-staging \
+            --push .
+
+  deploy:
+    name: Deploy Isolated Staging
+    runs-on: ubuntu-latest
+    needs: build
+    environment: staging
+    env:
+      RELEASE_SHA: ${{ needs.build.outputs.release_sha }}
+      EDUSMART_BACKEND_IMAGE: ${{ needs.build.outputs.backend_image }}
+      EDUSMART_NGINX_IMAGE: ${{ needs.build.outputs.nginx_image }}
+      EDUSMART_CADDY_IMAGE: ${{ needs.build.outputs.caddy_image }}
+      DEPLOY_OPERATION: ${{ inputs.operation || 'deploy' }}
+      STAGING_VPS_HOST: ${{ secrets.STAGING_VPS_HOST }}
+      STAGING_VPS_PORT: ${{ vars.STAGING_VPS_PORT || '22' }}
+      STAGING_VPS_USER: ${{ secrets.STAGING_VPS_USER }}
+      STAGING_VPS_SSH_KEY: ${{ secrets.STAGING_VPS_SSH_KEY }}
+      STAGING_VPS_KNOWN_HOSTS: ${{ secrets.STAGING_VPS_KNOWN_HOSTS }}
+      STAGING_APP_DIRECTORY: ${{ secrets.STAGING_APP_DIRECTORY }}
+      STAGING_FRONTEND_HOST: ${{ vars.STAGING_FRONTEND_HOST }}
+      STAGING_BACKEND_HOST: ${{ vars.STAGING_BACKEND_HOST }}
+      STAGING_STORAGE_HOST: ${{ vars.STAGING_STORAGE_HOST }}
+      STAGING_TENANT_ROOT_DOMAIN: ${{ vars.STAGING_TENANT_ROOT_DOMAIN }}
+      STAGING_DEFAULT_TENANT_SLUG: ${{ vars.STAGING_DEFAULT_TENANT_SLUG || 'tenant-a' }}
+      STAGING_ACME_EMAIL: ${{ vars.STAGING_ACME_EMAIL }}
+      STAGING_APP_KEY: ${{ secrets.STAGING_APP_KEY }}
+      STAGING_DATABASE_NAME: ${{ vars.STAGING_DATABASE_NAME }}
+      STAGING_DATABASE_USER: ${{ secrets.STAGING_DATABASE_USER }}
+      STAGING_DATABASE_PASSWORD: ${{ secrets.STAGING_DATABASE_PASSWORD }}
+      STAGING_REDIS_PASSWORD: ${{ secrets.STAGING_REDIS_PASSWORD }}
+      STAGING_STORAGE_ACCESS_KEY: ${{ secrets.STAGING_STORAGE_ACCESS_KEY }}
+      STAGING_STORAGE_SECRET_KEY: ${{ secrets.STAGING_STORAGE_SECRET_KEY }}
+      STAGING_STORAGE_BUCKET: ${{ vars.STAGING_STORAGE_BUCKET }}
+      STAGING_EDGE_PROXY_SECRET: ${{ secrets.STAGING_EDGE_PROXY_SECRET }}
+      STAGING_TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
+      STAGING_USE_UPLOADS_API_V2: ${{ vars.STAGING_USE_UPLOADS_API_V2 || 'false' }}
+      STAGING_USE_ASSIGNMENTS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENTS_API_V2 || 'false' }}
+      STAGING_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
+    steps:
+      - name: Checkout selected release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha || github.sha }}
+
+      - name: Fail closed when staging configuration is incomplete
+        run: |
+          set -euo pipefail
+          required=(
+            STAGING_VPS_HOST STAGING_VPS_USER STAGING_VPS_SSH_KEY STAGING_VPS_KNOWN_HOSTS STAGING_APP_DIRECTORY
+            STAGING_FRONTEND_HOST STAGING_BACKEND_HOST STAGING_STORAGE_HOST STAGING_TENANT_ROOT_DOMAIN STAGING_ACME_EMAIL
+            STAGING_APP_KEY STAGING_DATABASE_NAME STAGING_DATABASE_USER STAGING_DATABASE_PASSWORD STAGING_REDIS_PASSWORD
+            STAGING_STORAGE_ACCESS_KEY STAGING_STORAGE_SECRET_KEY STAGING_STORAGE_BUCKET STAGING_EDGE_PROXY_SECRET STAGING_TEST_PASSWORD
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing isolated staging configuration::${name} is required; no production fallback is allowed"
+              exit 1
+            fi
+          done
+          case "$STAGING_APP_DIRECTORY" in
+            *staging*) ;;
+            *) echo "::error title=Unsafe app directory::Staging app directory must contain 'staging'"; exit 1 ;;
+          esac
+          for value in "$STAGING_FRONTEND_HOST" "$STAGING_BACKEND_HOST" "$STAGING_STORAGE_HOST"; do
+            case "$value" in
+              sismu.biz.id|origin.sismu.biz.id) echo "::error title=Production target forbidden::A staging host points to production"; exit 1 ;;
+            esac
+          done
+
+      - name: Materialize masked staging environment
+        run: |
+          set -euo pipefail
+          umask 077
+          dotenv_secret() {
+            name="$1"
+            value="$2"
+            if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+              echo "::error title=Invalid staging secret::${name} must be a single-line value"
+              exit 1
+            fi
+            value="${value//\\/\\\\}"
+            value="${value//\'/\\\'}"
+            printf "%s='%s'\n" "$name" "$value" >> .env.staging
+          }
+          cat > .env.staging <<EOF
+          COMPOSE_PROJECT_NAME=edusmart_staging_primary
+          RELEASE_SHA=$RELEASE_SHA
+          EDUSMART_BACKEND_IMAGE=$EDUSMART_BACKEND_IMAGE
+          EDUSMART_NGINX_IMAGE=$EDUSMART_NGINX_IMAGE
+          EDUSMART_CADDY_IMAGE=$EDUSMART_CADDY_IMAGE
+          STAGING_POSTGRES_IMAGE=postgres:16.9-alpine
+          STAGING_REDIS_IMAGE=redis:7.4.2-alpine
+          STAGING_MINIO_IMAGE=minio/minio:RELEASE.2025-04-22T22-12-26Z
+          STAGING_MINIO_MC_IMAGE=minio/mc:RELEASE.2025-04-16T18-13-26Z
+          STAGING_FRONTEND_HOST=$STAGING_FRONTEND_HOST
+          STAGING_BACKEND_HOST=$STAGING_BACKEND_HOST
+          STAGING_STORAGE_HOST=$STAGING_STORAGE_HOST
+          STAGING_TENANT_ROOT_DOMAIN=$STAGING_TENANT_ROOT_DOMAIN
+          STAGING_DEFAULT_TENANT_SLUG=$STAGING_DEFAULT_TENANT_SLUG
+          STAGING_ACME_EMAIL=$STAGING_ACME_EMAIL
+          STAGING_SESSION_DOMAIN=
+          DB_DATABASE=$STAGING_DATABASE_NAME
+          REDIS_PREFIX=edusmart:staging:primary:
+          CACHE_PREFIX=edusmart:staging:primary:cache:
+          HORIZON_PREFIX=edusmart:staging:primary:horizon:
+          STAGING_STORAGE_BUCKET=$STAGING_STORAGE_BUCKET
+          STAGING_STORAGE_REGION=us-east-1
+          STAGING_STORAGE_RETENTION_DAYS=14
+          API_V2_UPLOADS_ENABLED=$STAGING_USE_UPLOADS_API_V2
+          VITE_USE_ASSIGNMENTS_API_V2=$STAGING_USE_ASSIGNMENTS_API_V2
+          VITE_USE_ASSIGNMENT_UPLOADS_API_V2=$STAGING_USE_ASSIGNMENT_UPLOADS_API_V2
+          EOF
+          dotenv_secret APP_KEY "$STAGING_APP_KEY"
+          dotenv_secret DB_USERNAME "$STAGING_DATABASE_USER"
+          dotenv_secret DB_PASSWORD "$STAGING_DATABASE_PASSWORD"
+          dotenv_secret REDIS_PASSWORD "$STAGING_REDIS_PASSWORD"
+          dotenv_secret TENANT_EDGE_PROXY_SECRET "$STAGING_EDGE_PROXY_SECRET"
+          dotenv_secret STAGING_TEST_PASSWORD "$STAGING_TEST_PASSWORD"
+          dotenv_secret STAGING_STORAGE_ACCESS_KEY "$STAGING_STORAGE_ACCESS_KEY"
+          dotenv_secret STAGING_STORAGE_SECRET_KEY "$STAGING_STORAGE_SECRET_KEY"
+          deploy/staging/preflight.sh .env.staging
+
+      - name: Prepare verified SSH identity
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$STAGING_VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/staging_key
+          printf '%s\n' "$STAGING_VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/staging_key ~/.ssh/known_hosts
+
+      - name: Pull and transfer immutable images
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i ~/.ssh/staging_key -p "$STAGING_VPS_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          images=("$EDUSMART_BACKEND_IMAGE" "$EDUSMART_NGINX_IMAGE" "$EDUSMART_CADDY_IMAGE")
+          for image in "${images[@]}"; do docker pull "$image"; done
+          docker save "${images[@]}" | gzip -1 | ssh "${ssh_opts[@]}" "$STAGING_VPS_USER@$STAGING_VPS_HOST" 'gunzip | docker load'
+
+      - name: Transfer isolated stack and deploy
+        run: |
+          set -euo pipefail
+          ssh_opts=(-i ~/.ssh/staging_key -p "$STAGING_VPS_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          scp_opts=(-i ~/.ssh/staging_key -P "$STAGING_VPS_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          tar -czf staging-release.tgz docker-compose.staging.yml .env.staging deploy/staging
+          ssh "${ssh_opts[@]}" "$STAGING_VPS_USER@$STAGING_VPS_HOST" "install -d -m 700 '$STAGING_APP_DIRECTORY'"
+          scp "${scp_opts[@]}" staging-release.tgz "$STAGING_VPS_USER@$STAGING_VPS_HOST:$STAGING_APP_DIRECTORY/staging-release.tgz"
+          ssh "${ssh_opts[@]}" "$STAGING_VPS_USER@$STAGING_VPS_HOST" \
+            "cd '$STAGING_APP_DIRECTORY' && tar -xzf staging-release.tgz && rm staging-release.tgz && chmod 700 deploy/staging/*.sh && if [ '$DEPLOY_OPERATION' = rollback ]; then deploy/staging/rollback.sh .env.staging; else deploy/staging/deploy.sh .env.staging; fi"
+
+      - name: Record safe deployment evidence
+        run: |
+          {
+            echo "release_sha=$RELEASE_SHA"
+            echo "operation=$DEPLOY_OPERATION"
+            echo "backend_replicas=2"
+            echo "uploads_v2=$STAGING_USE_UPLOADS_API_V2"
+            echo "assignments_v2=$STAGING_USE_ASSIGNMENTS_API_V2"
+            echo "assignment_uploads_v2=$STAGING_USE_ASSIGNMENT_UPLOADS_API_V2"
+          } > staging-release-evidence.txt
+
+      - name: Upload safe deployment evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-release-${{ needs.build.outputs.release_sha }}
+          path: staging-release-evidence.txt
+          retention-days: 14

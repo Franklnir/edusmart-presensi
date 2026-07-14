@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - staging-cloudflare
+      - staging
     paths:
       - ".github/workflows/cloudflare-pages-staging.yml"
       - "package.json"
@@ -25,28 +25,28 @@ jobs:
   deploy:
     name: Deploy Frontend Staging
     runs-on: ubuntu-latest
-    environment: cloudflare-pages-staging
+    environment: staging
 
     env:
       NODE_VERSION: "20.19.0"
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'sismu-frontend-staging' }}
-      CLOUDFLARE_PAGES_BACKEND_ORIGIN: ${{ vars.CLOUDFLARE_PAGES_BACKEND_ORIGIN || 'https://origin.sismu.biz.id' }}
-      CLOUDFLARE_PAGES_EDGE_PROXY_SECRET: ${{ secrets.CLOUDFLARE_PAGES_EDGE_PROXY_SECRET }}
-      CLOUDFLARE_PAGES_PLATFORM_API_HOST: ${{ vars.CLOUDFLARE_PAGES_PLATFORM_API_HOST || 'sismu.biz.id' }}
-      VITE_API_URL: ${{ vars.CLOUDFLARE_PAGES_STAGING_API_URL || 'https://sismu.biz.id' }}
-      VITE_ROOT_DOMAIN: ${{ vars.VITE_ROOT_DOMAIN || 'sismu.biz.id' }}
-      VITE_ADMIN_SUBDOMAIN: ${{ vars.VITE_ADMIN_SUBDOMAIN || 'admin26' }}
-      VITE_TENANT_SLUG: ${{ vars.VITE_TENANT_SLUG }}
-      VITE_REALTIME_POLL_MS: ${{ vars.VITE_REALTIME_POLL_MS || '4000' }}
-      VITE_REALTIME_POLL_HIDDEN_MS: ${{ vars.VITE_REALTIME_POLL_HIDDEN_MS || '12000' }}
-      VITE_GOOGLE_AUTH_ENABLED: ${{ vars.VITE_GOOGLE_AUTH_ENABLED || 'false' }}
-      VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
-      VITE_GOOGLE_AUTH_LOGIN_URL: ${{ vars.VITE_GOOGLE_AUTH_LOGIN_URL || 'https://sismu.biz.id/api/auth/google/redirect' }}
-      VITE_GOOGLE_AUTH_LINK_URL: ${{ vars.VITE_GOOGLE_AUTH_LINK_URL || 'https://sismu.biz.id/api/auth/google/link' }}
-      VITE_USE_ASSIGNMENTS_API_V2: ${{ vars.VITE_USE_ASSIGNMENTS_API_V2 || 'false' }}
-      VITE_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ vars.VITE_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.STAGING_CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.STAGING_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.STAGING_FRONTEND_PROJECT }}
+      CLOUDFLARE_PAGES_BACKEND_ORIGIN: ${{ vars.STAGING_BACKEND_ORIGIN }}
+      CLOUDFLARE_PAGES_EDGE_PROXY_SECRET: ${{ secrets.STAGING_EDGE_PROXY_SECRET }}
+      CLOUDFLARE_PAGES_PLATFORM_API_HOST: ${{ vars.STAGING_FRONTEND_HOST }}
+      VITE_API_URL: ${{ vars.STAGING_API_BASE_URL }}
+      VITE_ROOT_DOMAIN: ${{ vars.STAGING_TENANT_ROOT_DOMAIN }}
+      VITE_ADMIN_SUBDOMAIN: ${{ vars.STAGING_ADMIN_SUBDOMAIN || 'admin26' }}
+      VITE_TENANT_SLUG: ${{ vars.STAGING_DEFAULT_TENANT_SLUG || 'tenant-a' }}
+      VITE_REALTIME_POLL_MS: "4000"
+      VITE_REALTIME_POLL_HIDDEN_MS: "12000"
+      VITE_GOOGLE_AUTH_ENABLED: "false"
+      VITE_GOOGLE_CLIENT_ID: ""
+      VITE_GOOGLE_AUTH_LOGIN_URL: /api/auth/google/redirect
+      VITE_GOOGLE_AUTH_LINK_URL: /api/auth/google/link
+      VITE_USE_ASSIGNMENTS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENTS_API_V2 || 'false' }}
+      VITE_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
 
     steps:
       - name: Checkout
@@ -62,11 +62,19 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_PAGES_EDGE_PROXY_SECRET; do
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_PAGES_EDGE_PROXY_SECRET CLOUDFLARE_PAGES_PROJECT_NAME CLOUDFLARE_PAGES_BACKEND_ORIGIN CLOUDFLARE_PAGES_PLATFORM_API_HOST VITE_API_URL VITE_ROOT_DOMAIN; do
             if [ -z "${!name:-}" ]; then
               echo "::error title=Missing Cloudflare secret::${name} is required"
               missing=1
             fi
+          done
+          for value in "$CLOUDFLARE_PAGES_BACKEND_ORIGIN" "$CLOUDFLARE_PAGES_PLATFORM_API_HOST" "$VITE_API_URL"; do
+            case "$value" in
+              https://sismu.biz.id*|https://origin.sismu.biz.id*|sismu.biz.id|origin.sismu.biz.id)
+                echo "::error title=Production target forbidden::Staging Cloudflare configuration points to production"
+                missing=1
+                ;;
+            esac
           done
           exit "$missing"
 
@@ -101,10 +109,10 @@ jobs:
           const fs = require('fs')
 
           const worker = String.raw`
-          const BACKEND_ORIGIN = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_BACKEND_ORIGIN || 'https://origin.sismu.biz.id')}
+          const BACKEND_ORIGIN = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_BACKEND_ORIGIN || '')}
           const EDGE_PROXY_SECRET = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_EDGE_PROXY_SECRET || '')}
-          const PLATFORM_API_HOST = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_PLATFORM_API_HOST || 'sismu.biz.id')}
-          const ROOT_DOMAIN = ${JSON.stringify(process.env.VITE_ROOT_DOMAIN || 'sismu.biz.id')}
+          const PLATFORM_API_HOST = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_PLATFORM_API_HOST || '')}
+          const ROOT_DOMAIN = ${JSON.stringify(process.env.VITE_ROOT_DOMAIN || '')}
           const ORIGIN_TRANSIENT_STATUSES = new Set([502, 503, 504, 520, 521, 522, 523, 524])
           const SAFE_RETRY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
