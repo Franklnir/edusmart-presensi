@@ -38,6 +38,8 @@ class AppServiceProvider extends ServiceProvider
         $frontendUrl = $this->safeFrontendBaseUrl();
         $passwordMinLength = max(12, (int) env('PASSWORD_MIN_LENGTH', 12));
 
+        Gate::policy(\App\Models\Absensi::class, \App\Policies\AbsensiPolicy::class);
+
         PasswordRule::defaults(static fn () => PasswordRule::min($passwordMinLength)
             ->letters()
             ->mixedCase()

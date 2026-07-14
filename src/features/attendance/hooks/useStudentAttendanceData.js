@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase'
 import { fetchAbsensiSettings } from '../../../utils/absensiSettings'
 import { filterSchedulesForSemester } from '../../../utils/schedulePeriodScope'
 import { getDayName, getToday, toMinutes } from '../utils/attendanceDate'
+import { attendanceService } from '../../../services/attendanceService'
 
 const HARI_ORDER = [
   'Senin',
@@ -55,18 +56,32 @@ export function useStudentAttendanceData({
     try {
       const today = getToday()
 
-      let query = supabase
-        .from('absensi')
-        .select('status')
-        .eq('uid', userId)
-        .eq('tanggal', today)
+      const useApiV2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
+      let data = []
 
-      if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
-      if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
+      if (useApiV2) {
+        const response = await attendanceService.getAttendances({
+          uid: userId,
+          tanggal: today,
+          tahun_ajaran: periodFilter.tahunAjaran || undefined,
+          semester: periodFilter.semester || undefined,
+          per_page: 100
+        })
+        data = response.data || []
+      } else {
+        let query = supabase
+          .from('absensi')
+          .select('status')
+          .eq('uid', userId)
+          .eq('tanggal', today)
 
-      const { data, error } = await query
+        if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+        if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
 
-      if (error) throw error
+        const res = await query
+        if (res.error) throw res.error
+        data = res.data || []
+      }
 
       const statistik = { Hadir: 0, Izin: 0, Sakit: 0, Alpha: 0 }
       ; (data || []).forEach((item) => {
@@ -136,23 +151,43 @@ export function useStudentAttendanceData({
       ))
       let absensiRows = []
       if (mapels.length > 0) {
-        let absensiQuery = supabase
-          .from('absensi')
-          .select('mapel, status, waktu')
-          .eq('kelas', profile.kelas)
-          .eq('tanggal', today)
-          .eq('uid', userId)
-          .in('mapel', mapels)
-          .order('waktu', { ascending: false })
+        const useApiV2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
 
-        if (periodFilter.tahunAjaran) absensiQuery = absensiQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
-        if (periodFilter.semester) absensiQuery = absensiQuery.eq('semester', periodFilter.semester)
-
-        const { data, error } = await absensiQuery
-        if (error) {
-          console.warn('Error load status absensi jadwal:', error)
+        if (useApiV2) {
+          try {
+             // For V2, we might not be able to easily query with `in('mapel', mapels)`.
+             // But we can just query by tanggal and uid, which gets ALL mapels for the user today.
+             const response = await attendanceService.getAttendances({
+                uid: userId,
+                tanggal: today,
+                kelas: profile.kelas,
+                tahun_ajaran: periodFilter.tahunAjaran || undefined,
+                semester: periodFilter.semester || undefined,
+                per_page: 200
+             })
+             absensiRows = response.data || []
+          } catch (error) {
+             console.warn('Error load status absensi jadwal:', error)
+          }
         } else {
-          absensiRows = data || []
+          let absensiQuery = supabase
+            .from('absensi')
+            .select('mapel, status, waktu')
+            .eq('kelas', profile.kelas)
+            .eq('tanggal', today)
+            .eq('uid', userId)
+            .in('mapel', mapels)
+            .order('waktu', { ascending: false })
+
+          if (periodFilter.tahunAjaran) absensiQuery = absensiQuery.eq('tahun_ajaran', periodFilter.tahunAjaran)
+          if (periodFilter.semester) absensiQuery = absensiQuery.eq('semester', periodFilter.semester)
+
+          const { data, error } = await absensiQuery
+          if (error) {
+            console.warn('Error load status absensi jadwal:', error)
+          } else {
+            absensiRows = data || []
+          }
         }
       }
 
@@ -290,19 +325,34 @@ export function useStudentAttendanceData({
   const loadRingkasDanStatus = useCallback(async () => {
     if (!profile?.kelas || !userId || !mapel || !tgl) return
     try {
-      let query = supabase
-        .from('absensi')
-        .select('uid, status')
-        .eq('kelas', profile.kelas)
-        .eq('tanggal', tgl)
-        .eq('mapel', mapel)
+      const useApiV2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
+      let data = []
 
-      if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
-      if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
+      if (useApiV2) {
+         const response = await attendanceService.getAttendances({
+            kelas: profile.kelas,
+            tanggal: tgl,
+            mapel: mapel,
+            tahun_ajaran: periodFilter.tahunAjaran || undefined,
+            semester: periodFilter.semester || undefined,
+            per_page: 500
+         })
+         data = response.data || []
+      } else {
+        let query = supabase
+          .from('absensi')
+          .select('uid, status')
+          .eq('kelas', profile.kelas)
+          .eq('tanggal', tgl)
+          .eq('mapel', mapel)
 
-      const { data, error } = await query
+        if (periodFilter.tahunAjaran) query = query.eq('tahun_ajaran', periodFilter.tahunAjaran)
+        if (periodFilter.semester) query = query.eq('semester', periodFilter.semester)
 
-      if (error) throw error
+        const res = await query
+        if (res.error) throw res.error
+        data = res.data || []
+      }
 
       const agg = { H: 0, I: 0, S: 0, A: 0 }
       let myStatus = null

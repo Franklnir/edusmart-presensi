@@ -162,20 +162,20 @@ export function useStudentAccountActions({
       async () => {
         try {
           const reason = alasanNonaktif.trim()
-          const { data, error } = await supabase.admin.updateUserStatus(siswaToNonaktif.id, {
-            role: 'siswa',
+          const res = await studentService.updateStudent(siswaToNonaktif.id, {
             status: 'nonaktif',
-            reason,
+            alasan_nonaktif: reason,
           })
 
-          if (error) throw error
+          if (res.error) throw res.error
+          const data = res.data
 
           pushToast('success', 'Siswa berhasil dinonaktifkan')
 
           if (detailUser && detailUser.id === siswaToNonaktif.id) {
             setDetailUser((prev) => prev ? ({
               ...prev,
-              ...(data?.profile || {}),
+              ...(data || {}),
               status: 'nonaktif',
               alasan_nonaktif: reason,
             }) : prev)
@@ -217,20 +217,20 @@ export function useStudentAccountActions({
             ? getNamaKelas(siswaToMutasi.kelas)
             : siswaToMutasi.kelas
           const reason = `Mutasi/Pindah sekolah. Kelas terakhir: ${lastClassName || '-'}. ${alasanMutasi.trim()}`
-          const { data, error } = await supabase.admin.updateUserStatus(siswaToMutasi.id, {
-            role: 'siswa',
+          const res = await studentService.updateStudent(siswaToMutasi.id, {
             status: 'mutasi',
-            reason,
+            alasan_nonaktif: reason,
           })
 
-          if (error) throw error
+          if (res.error) throw res.error
+          const data = res.data
 
           pushToast('success', 'Siswa berhasil dimutasi. Data tetap tersimpan dan relasi aktif sudah disinkronkan.')
 
           if (detailUser && detailUser.id === siswaToMutasi.id) {
             setDetailUser((prev) => prev ? ({
               ...prev,
-              ...(data?.profile || {}),
+              ...(data || {}),
               status: 'mutasi',
               alasan_nonaktif: reason,
               rfid_uid: null,
@@ -283,19 +283,20 @@ export function useStudentAccountActions({
       'Konfirmasi Akhir Aktifkan Siswa',
       async () => {
         try {
-          const { data, error } = await supabase.admin.updateUserStatus(siswaToAktifkan.id, {
-            role: 'siswa',
+          const res = await studentService.updateStudent(siswaToAktifkan.id, {
             status: 'active',
+            alasan_nonaktif: null,
           })
 
-          if (error) throw error
+          if (res.error) throw res.error
+          const data = res.data
 
           pushToast('success', 'Siswa berhasil diaktifkan')
 
           if (detailUser && detailUser.id === siswaToAktifkan.id) {
             setDetailUser((prev) => prev ? ({
               ...prev,
-              ...(data?.profile || {}),
+              ...(data || {}),
               status: 'active',
               alasan_nonaktif: null,
             }) : prev)

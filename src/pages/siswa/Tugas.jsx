@@ -20,6 +20,7 @@ import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import useStudentPeriodClass from '../../hooks/useStudentPeriodClass'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
+import { assignmentService, submissionService } from '../../services/assignmentService'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
   ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES,
@@ -701,23 +702,46 @@ export default function TugasSiswa() {
       setIsListLoading(true)
       const now = new Date()
 
-      // tugas untuk kelas siswa
-      let query = supabase.from('tugas').select(TUGAS_LIST_COLUMNS).eq('kelas', kelas)
-      query = applyAcademicSemesterFilter(query)
-      const normalizedSearch = debouncedSearchTerm.trim().toLowerCase()
+      let tugasData = []
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        const params = {
+          kelas,
+          per_page: 'all'
+        }
+        if (selectedMapel) params.mapel = selectedMapel
+        if (timeRange === 'week') {
+          const weekAgo = new Date(now)
+          weekAgo.setDate(now.getDate() - 7)
+          params.created_after = weekAgo.toISOString()
+        }
+        try {
+          const res = await assignmentService.getAssignments(params)
+          tugasData = res.data
+        } catch (e) {
+          throw e
+        }
+      } else {
+        // tugas untuk kelas siswa
+        let query = supabase.from('tugas').select(TUGAS_LIST_COLUMNS).eq('kelas', kelas)
+        query = applyAcademicSemesterFilter(query)
+        
+        if (selectedMapel) query = query.eq('mapel', selectedMapel)
 
-      if (selectedMapel) query = query.eq('mapel', selectedMapel)
+        if (timeRange === 'week') {
+          const weekAgo = new Date(now)
+          weekAgo.setDate(now.getDate() - 7)
+          query = query.gte('created_at', weekAgo.toISOString())
+        }
 
-      if (timeRange === 'week') {
-        const weekAgo = new Date(now)
-        weekAgo.setDate(now.getDate() - 7)
-        query = query.gte('created_at', weekAgo.toISOString())
+        query = query.order('created_at', { ascending: false })
+        if (!hasActiveTaskFilter) query = query.limit(DEFAULT_TASK_LIST_LIMIT)
+        const { data: qData, error } = await query
+        if (error) throw error
+        tugasData = qData
       }
-
-      query = query.order('created_at', { ascending: false })
-      if (!hasActiveTaskFilter) query = query.limit(DEFAULT_TASK_LIST_LIMIT)
-      const { data: tugasData, error } = await query
-      if (error) throw error
+      
+      const normalizedSearch = debouncedSearchTerm.trim().toLowerCase()
+      
       if (requestId !== listRequestSeqRef.current) return
 
       let tugasArr = sortTasksByNewest(tugasData || [])
@@ -747,14 +771,25 @@ export default function TugasSiswa() {
 
       // ambil jawaban milik siswa ini untuk tugas-tugas tersebut
       const tugasIds = tugasArr.map((t) => t.id)
-      let jawabanQuery = supabase
-        .from('tugas_jawaban')
-        .select(TUGAS_JAWABAN_LIST_COLUMNS)
-        .eq('user_id', user.id)
-        .in('tugas_id', tugasIds)
-      const { data: jawabanData, error: jErr } = await jawabanQuery
+      let jawabanData = []
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        try {
+          const res = await submissionService.getSubmissions({ tugas_id: tugasIds, user_id: user.id, per_page: 'all' })
+          jawabanData = res.data
+        } catch (e) {
+          throw e
+        }
+      } else {
+        let jawabanQuery = supabase
+          .from('tugas_jawaban')
+          .select(TUGAS_JAWABAN_LIST_COLUMNS)
+          .eq('user_id', user.id)
+          .in('tugas_id', tugasIds)
+        const { data: qData, error: jErr } = await jawabanQuery
 
-      if (jErr) throw jErr
+        if (jErr) throw jErr
+        jawabanData = qData
+      }
       if (requestId !== listRequestSeqRef.current) return
 
       const jawabanArr = jawabanData || []
@@ -1244,16 +1279,25 @@ export default function TugasSiswa() {
 
       if (existing?.id) {
         if (currentLink || existingPhotos.length > 0) {
-          const { error } = await supabase
-            .from('tugas_jawaban')
-            .update({
+          if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+            await submissionService.gradeByUser({
+              tugas_id: selectedTugas.id,
+              user_id: user.id,
               file_url: existingPhotos[0] || null,
               file_urls: existingPhotos.length > 0 ? existingPhotos : null
             })
-            .eq('id', existing.id)
-            .eq('user_id', user.id)
+          } else {
+            const { error } = await supabase
+              .from('tugas_jawaban')
+              .update({
+                file_url: existingPhotos[0] || null,
+                file_urls: existingPhotos.length > 0 ? existingPhotos : null
+              })
+              .eq('id', existing.id)
+              .eq('user_id', user.id)
 
-          if (error) throw error
+            if (error) throw error
+          }
 
           setDetail((prev) => {
             if (!prev) return prev
@@ -1268,13 +1312,17 @@ export default function TugasSiswa() {
             return { ...prev, myJawaban: nextJawaban, myStatus: nextStatus }
           })
         } else {
-          const { error } = await supabase
-            .from('tugas_jawaban')
-            .delete()
-            .eq('id', existing.id)
-            .eq('user_id', user.id)
+          if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+            await submissionService.deleteSubmission(existing.id)
+          } else {
+            const { error } = await supabase
+              .from('tugas_jawaban')
+              .delete()
+              .eq('id', existing.id)
+              .eq('user_id', user.id)
 
-          if (error) throw error
+            if (error) throw error
+          }
 
           setDetail((prev) => (prev ? { ...prev, myJawaban: null, myStatus: 'belum' } : prev))
         }
@@ -1370,8 +1418,12 @@ export default function TugasSiswa() {
         ...academicPeriodPayload
       }
 
-      const { error } = await supabase.assignments.submitAnswer(payload)
-      if (error) throw error
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        await submissionService.storeSubmission(payload)
+      } else {
+        const { error } = await supabase.assignments.submitAnswer(payload)
+        if (error) throw error
+      }
 
       const nextFiles = answerFiles
       const staleFiles = existingFiles.filter((value) => value && !nextFiles.includes(value))

@@ -31,6 +31,9 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { formatDateTime } from '../../lib/time'
 import { useBrowserNfc } from '../../components/browser-nfc/BrowserNfcProvider'
 import { normalizeBrowserNfcUid } from '../../utils/browserNfc'
+import { attendanceService } from '../../services/attendanceService'
+
+const USE_ATTENDANCE_API_V2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
 
 /* ========= Helpers ========= */
 
@@ -929,21 +932,44 @@ export default function Scan() {
 	            return
 	          }
 
-	          const { error: errAbsen } = await supabase.from('absensi').upsert(
-            {
-              kelas: student.kelas,
-              tanggal: todayIso,
-              uid: student.id,
-              mapel: jadwalAktif.mapel,
-              status: 'Hadir',
-              nama: student.nama,
-              oleh: 'ADMIN_SCANNER_LANGSUNG',
-              waktu: now.toISOString()
-            },
-            { onConflict: 'kelas,tanggal,mapel,uid' }
-          )
+	          if (USE_ATTENDANCE_API_V2) {
+            try {
+              await attendanceService.storeAttendance({
+                uid: student.id,
+                kelas: student.kelas,
+                tanggal: todayIso,
+                status: 'Hadir',
+                mapel: jadwalAktif.mapel,
+                nama: student.nama,
+                oleh: 'ADMIN_SCANNER_LANGSUNG',
+                waktu: now.toISOString(),
+                idempotency_key: `scan-${student.id}-${todayIso}-${jadwalAktif.mapel}`
+              })
+            } catch (err) {
+              console.error('API V2 attendance store error:', err)
+              // API V2 uses 409 for conflicts when no idempotency key is matched but duplicates exist, 
+              // which is fine as it means already scanned.
+              if (err.response?.status !== 409) {
+                throw new Error(err.response?.data?.message || 'Gagal menyimpan absensi V2')
+              }
+            }
+          } else {
+            const { error: errAbsen } = await supabase.from('absensi').upsert(
+              {
+                kelas: student.kelas,
+                tanggal: todayIso,
+                uid: student.id,
+                mapel: jadwalAktif.mapel,
+                status: 'Hadir',
+                nama: student.nama,
+                oleh: 'ADMIN_SCANNER_LANGSUNG',
+                waktu: now.toISOString()
+              },
+              { onConflict: 'kelas,tanggal,mapel,uid' }
+            )
 
-          if (errAbsen) throw errAbsen
+            if (errAbsen) throw errAbsen
+          }
 
           // Update scan status if applicable
           if (options.fromRealtime && options.scanRowId) {

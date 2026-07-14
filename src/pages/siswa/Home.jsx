@@ -16,6 +16,7 @@ import {
   normalizeSemester,
   resolveAcademicPeriod
 } from '../../utils/academicPeriod'
+import { assignmentService, submissionService } from '../../services/assignmentService'
 import { logError } from '../../utils/logger'
 
 const DASHBOARD_TASK_LIMIT = 6
@@ -916,30 +917,58 @@ export default function SHome() {
         return
       }
       setDashboardClass(kelas)
-      const [
-        { data: overdueData, error: overdueError },
-        { data: upcomingData, error: upcomingError },
-      ] = await Promise.all([
-        supabase
-          .from('tugas')
-          .select(DASHBOARD_TASK_COLUMNS)
-          .eq('kelas', kelas)
-          .eq('tahun_ajaran', period.tahunAjaran)
-          .lt('deadline', nowIso)
-          .order('deadline', { ascending: false })
-          .limit(DASHBOARD_TASK_QUERY_LIMIT),
-        supabase
-          .from('tugas')
-          .select(DASHBOARD_TASK_COLUMNS)
-          .eq('kelas', kelas)
-          .eq('tahun_ajaran', period.tahunAjaran)
-          .gte('deadline', nowIso)
-          .order('deadline', { ascending: true })
-          .limit(DASHBOARD_TASK_QUERY_LIMIT),
-      ])
+      let overdueData = []
+      let upcomingData = []
+      
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        try {
+          // get active status and expired status
+          const res = await assignmentService.getAssignments({
+            kelas,
+            tahun_ajaran: period.tahunAjaran,
+            per_page: 'all'
+          })
+          const allData = res.data || []
+          overdueData = allData.filter(t => new Date(t.deadline) < new Date(nowIso))
+          upcomingData = allData.filter(t => new Date(t.deadline) >= new Date(nowIso))
+          
+          overdueData.sort((a, b) => new Date(b.deadline) - new Date(a.deadline))
+          upcomingData.sort((a, b) => new Date(a.deadline) - new Date(b.deadline))
+          
+          overdueData = overdueData.slice(0, DASHBOARD_TASK_QUERY_LIMIT)
+          upcomingData = upcomingData.slice(0, DASHBOARD_TASK_QUERY_LIMIT)
+        } catch (e) {
+          throw e
+        }
+      } else {
+        const [
+          { data: qOverdue, error: overdueError },
+          { data: qUpcoming, error: upcomingError },
+        ] = await Promise.all([
+          supabase
+            .from('tugas')
+            .select(DASHBOARD_TASK_COLUMNS)
+            .eq('kelas', kelas)
+            .eq('tahun_ajaran', period.tahunAjaran)
+            .lt('deadline', nowIso)
+            .order('deadline', { ascending: false })
+            .limit(DASHBOARD_TASK_QUERY_LIMIT),
+          supabase
+            .from('tugas')
+            .select(DASHBOARD_TASK_COLUMNS)
+            .eq('kelas', kelas)
+            .eq('tahun_ajaran', period.tahunAjaran)
+            .gte('deadline', nowIso)
+            .order('deadline', { ascending: true })
+            .limit(DASHBOARD_TASK_QUERY_LIMIT),
+        ])
 
-      if (overdueError) throw overdueError
-      if (upcomingError) throw upcomingError
+        if (overdueError) throw overdueError
+        if (upcomingError) throw upcomingError
+        
+        overdueData = qOverdue || []
+        upcomingData = qUpcoming || []
+      }
       if (requestId !== tugasLoadSeqRef.current) return
 
       const byId = new Map()
@@ -955,13 +984,24 @@ export default function SHome() {
       }
 
       const tugasIds = taskRows.map((row) => row.id)
-      const { data: jawabanData, error: jawabanError } = await supabase
-        .from('tugas_jawaban')
-        .select('tugas_id')
-        .eq('user_id', userId)
-        .in('tugas_id', tugasIds)
+      let jawabanData = []
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        try {
+          const res = await submissionService.getSubmissions({ tugas_id: tugasIds, user_id: userId, per_page: 'all' })
+          jawabanData = res.data
+        } catch (e) {
+          throw e
+        }
+      } else {
+        const { data: qData, error: jawabanError } = await supabase
+          .from('tugas_jawaban')
+          .select('tugas_id')
+          .eq('user_id', userId)
+          .in('tugas_id', tugasIds)
 
-      if (jawabanError) throw jawabanError
+        if (jawabanError) throw jawabanError
+        jawabanData = qData
+      }
       if (requestId !== tugasLoadSeqRef.current) return
 
       const answeredIds = new Set((jawabanData || []).map((row) => row.tugas_id))

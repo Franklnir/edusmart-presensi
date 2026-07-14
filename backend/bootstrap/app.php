@@ -15,6 +15,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\HandleCors;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 
@@ -25,7 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
         then: function () {
-            \Illuminate\Support\Facades\Route::middleware(['api', 'auth:sanctum', ResolveTenant::class, EnsureTenantMatchesProfile::class])
+            Route::middleware(['api', 'auth:sanctum', ResolveTenant::class, EnsureTenantMatchesProfile::class])
                 ->prefix('api/v2')
                 ->group(base_path('routes/api_v2.php'));
         }

@@ -583,9 +583,33 @@ Payload utama:
 Quiz membaca scope periode akademik dari query atau periode aktif. Submission
 menyimpan snapshot agar nilai tidak berubah salah saat periode berganti.
 
-### Tugas dan Reports
+### Tugas dan Reports (Legacy & V2)
 
-- `POST /api/tugas/jawaban/submit`: submit jawaban tugas siswa.
+**API V2 Assignments:**
+Endpoint baru menggunakan prefix `/api/v2/assignments` dan `/api/v2/submissions` untuk menggantikan penggunaan `/api/db` dan endpoint legacy. 
+Semua endpoint ini secara otomatis ter-scope oleh `tenant_id` dan memvalidasi `profile.tenant_id`.
+- `GET /api/v2/assignments`: List tugas (mendukung filter `per_page=all`, `kelas`, `mapel`, `status`, `search`, `created_after`, dll).
+- `POST /api/v2/assignments`: Buat tugas baru.
+- `GET /api/v2/assignments/{id}`: Detail tugas.
+- `PATCH /api/v2/assignments/{id}`: Update tugas.
+- `DELETE /api/v2/assignments/{id}`: Hapus tugas.
+
+**API V2 Submissions:**
+- `GET /api/v2/submissions`: List jawaban tugas (mendukung filter `per_page=all`, `tugas_id` array, `user_id`, `status`, `search`).
+- `POST /api/v2/submissions`: Submit jawaban tugas siswa.
+- `GET /api/v2/submissions/{id}`: Detail jawaban tugas.
+- `PATCH /api/v2/submissions/{id}`: Update file jawaban.
+- `DELETE /api/v2/submissions/{id}`: Hapus jawaban.
+- `PATCH /api/v2/submissions/{submission}/grade`: Berikan/update nilai oleh guru.
+- `POST /api/v2/submissions/grade-by-user`: Berikan/update nilai langsung berdasarkan user (berguna untuk panel nilai tanpa mengetahui ID submission).
+
+**API V2 Uploads:**
+- `POST /api/v2/uploads`: Initiate upload session
+- `POST /api/v2/uploads/{session}/complete`: Complete upload session
+- `DELETE /api/v2/uploads/{session}`: Cancel upload session
+
+**Legacy Endpoints:**
+- `POST /api/tugas/jawaban/submit`: submit jawaban tugas siswa (Legacy).
 - `GET /api/reports/teacher-summary`: ringkasan laporan guru.
 
 Query reports:
@@ -596,7 +620,7 @@ Query reports:
 - `tahun_ajaran`
 - `months` atau `bulan`
 
-Tugas mendukung filter periode via DB proxy dan controller: `kelas`, `mapel`,
+Tugas legacy (lewat DB proxy) mendukung filter periode: `kelas`, `mapel`,
 `created_by`, `deadline_gte`, `deadline_lt`, `created_gte`, `tahun_ajaran`,
 `semester`, `order_by`, `order`.
 
@@ -1488,3 +1512,26 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `PATCH` | `/api/v2/teachers/{teacher}` | Mengupdate guru (partial) |
 | `DELETE` | `/api/v2/teachers/{teacher}` | Menghapus guru |
 
+| `GET` | `/api/v2/attendance` | Mendapatkan daftar presensi |
+| `GET` | `/api/v2/attendance/{attendance}` | Mendapatkan detail presensi |
+| `POST` | `/api/v2/attendance` | Mencatat presensi |
+| `PUT` | `/api/v2/attendance/{attendance}` | Mengupdate presensi |
+| `PATCH` | `/api/v2/attendance/{attendance}` | Mengupdate presensi |
+| `DELETE` | `/api/v2/attendance/{attendance}` | Menghapus presensi |
+| `GET` | `/api/v2/assignments` | Mendapatkan daftar tugas |
+| `GET` | `/api/v2/assignments/{assignment}` | Mendapatkan detail tugas |
+| `POST` | `/api/v2/assignments` | Membuat tugas |
+| `PUT` | `/api/v2/assignments/{assignment}` | Mengupdate tugas |
+| `PATCH` | `/api/v2/assignments/{assignment}` | Mengupdate tugas |
+| `DELETE` | `/api/v2/assignments/{assignment}` | Menghapus tugas |
+| `GET` | `/api/v2/submissions` | Mendapatkan daftar submission |
+| `GET` | `/api/v2/submissions/{submission}` | Mendapatkan detail submission |
+| `POST` | `/api/v2/submissions` | Membuat submission |
+| `PUT` | `/api/v2/submissions/{submission}` | Mengupdate submission |
+| `PATCH` | `/api/v2/submissions/{submission}` | Mengupdate submission |
+| `DELETE` | `/api/v2/submissions/{submission}` | Menghapus submission |
+| `PATCH` | `/api/v2/submissions/{submission}/grade` | Menilai submission |
+| `POST` | `/api/v2/submissions/grade-by-user` | Menilai by user |
+| `POST` | `/api/v2/uploads` | Upload session init |
+| `POST` | `/api/v2/uploads/{session}/complete` | Upload session complete |
+| `DELETE` | `/api/v2/uploads/{session}` | Upload session cancel |

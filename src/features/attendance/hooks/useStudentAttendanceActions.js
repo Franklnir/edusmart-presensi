@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { extractQrToken } from '../utils/qrToken'
 import { getToday, toMinutes } from '../utils/attendanceDate'
+import { attendanceService } from '../../../services/attendanceService'
 
 export function useStudentAttendanceActions({
   academicPeriodPayload,
@@ -52,11 +53,27 @@ export function useStudentAttendanceActions({
       ...academicPeriodPayload
     }
 
-    const { error } = await supabase.from('absensi').upsert(payload, {
-      onConflict: 'kelas,tanggal,mapel,uid'
-    })
+    const useApiV2 = import.meta.env.VITE_USE_ATTENDANCE_API_V2 === 'true'
 
-    if (error) throw error
+    if (useApiV2) {
+      try {
+        await attendanceService.storeAttendance({
+          ...payload,
+          idempotency_key: crypto.randomUUID()
+        })
+      } catch (err) {
+        if (err.response?.data?.code === 'ATTENDANCE_ALREADY_EXISTS') {
+           // Ignore or throw custom error
+        } else {
+           throw err
+        }
+      }
+    } else {
+      const { error } = await supabase.from('absensi').upsert(payload, {
+        onConflict: 'kelas,tanggal,mapel,uid'
+      })
+      if (error) throw error
+    }
 
     setStatus(st)
     statusRef.current = st

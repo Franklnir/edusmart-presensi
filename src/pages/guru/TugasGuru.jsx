@@ -20,6 +20,7 @@ import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveF
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { parseSupabaseError } from '../../utils/supabaseError'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
+import { assignmentService, submissionService } from '../../services/assignmentService'
 import {
   ASSIGNMENT_PHOTO_MAX_BYTES,
   ASSIGNMENT_PHOTOS_MAX_TOTAL_BYTES,
@@ -807,59 +808,85 @@ export default function TugasGuru() {
       const now = new Date()
       const normalizedSearch = debouncedHistorySearchTerm.trim().toLowerCase()
 
-      let query = supabase.from('tugas').select(TUGAS_GURU_COLUMNS).eq('created_by', user.id)
-      query = applyAcademicSemesterFilter(query)
-
-      if (selectedKelasFilter) query = query.eq('kelas', selectedKelasFilter)
-      if (selectedSubject) query = query.eq('mapel', selectedSubject)
-
-      if (filterStatus === 'active') query = query.gte('deadline', now.toISOString())
-      if (filterStatus === 'expired') query = query.lt('deadline', now.toISOString())
-
-      if (timeRange === 'week') {
-        const weekAgo = new Date(now)
-        weekAgo.setDate(now.getDate() - 7)
-        query = query.gte('created_at', weekAgo.toISOString())
-      } else if (timeRange === 'all') {
-	        if (dateFilterPeriod.startsAt && dateFilterPeriod.endsAt) {
-	          const start = new Date(`${dateFilterPeriod.startsAt}T00:00:00`)
-	          const end = new Date(`${dateFilterPeriod.endsAt}T00:00:00`)
-	          end.setDate(end.getDate() + 1)
-	          query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
-	        }
-      } else if (timeRange === 'custom_months' && selectedMonths.length > 0) {
-        let minYear = Infinity
-        let minMonth = Infinity
-        let maxYear = -Infinity
-        let maxMonth = -Infinity
-
-        selectedMonths.forEach((ym) => {
-          const [ys, ms] = ym.split('-')
-          const y = parseInt(ys, 10)
-          const m = parseInt(ms, 10)
-          if (!Number.isNaN(y) && !Number.isNaN(m)) {
-            if (y < minYear || (y === minYear && m < minMonth)) {
-              minYear = y
-              minMonth = m
-            }
-            if (y > maxYear || (y === maxYear && m > maxMonth)) {
-              maxYear = y
-              maxMonth = m
-            }
-          }
-        })
-
-        if (minYear !== Infinity) {
-          const start = new Date(minYear, minMonth - 1, 1)
-          const end = new Date(maxYear, maxMonth, 1)
-          query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
+      let tugasRaw = []
+      
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        const params = {
+          created_by: user.id,
+          per_page: 'all'
         }
-      }
+        if (selectedKelasFilter) params.kelas = selectedKelasFilter
+        if (selectedSubject) params.mapel = selectedSubject
+        if (filterStatus === 'active') params.status = 'active'
+        if (filterStatus === 'expired') params.status = 'expired'
+        if (timeRange === 'week') {
+          const weekAgo = new Date(now)
+          weekAgo.setDate(now.getDate() - 7)
+          params.created_after = weekAgo.toISOString()
+        } else if (timeRange === 'all' && dateFilterPeriod.startsAt && dateFilterPeriod.endsAt) {
+          params.created_after = new Date(`${dateFilterPeriod.startsAt}T00:00:00`).toISOString()
+          const end = new Date(`${dateFilterPeriod.endsAt}T00:00:00`)
+          end.setDate(end.getDate() + 1)
+          params.created_before = end.toISOString()
+        }
+        const res = await assignmentService.getAssignments(params)
+        tugasRaw = res.data
+      } else {
+        let query = supabase.from('tugas').select(TUGAS_GURU_COLUMNS).eq('created_by', user.id)
+        query = applyAcademicSemesterFilter(query)
 
-      query = query.order('created_at', { ascending: false })
-      if (!hasActiveHistoryFilter) query = query.limit(DEFAULT_TASK_LIST_LIMIT)
-      const { data: tugasRaw, error } = await query
-      if (error) throw error
+        if (selectedKelasFilter) query = query.eq('kelas', selectedKelasFilter)
+        if (selectedSubject) query = query.eq('mapel', selectedSubject)
+
+        if (filterStatus === 'active') query = query.gte('deadline', now.toISOString())
+        if (filterStatus === 'expired') query = query.lt('deadline', now.toISOString())
+
+        if (timeRange === 'week') {
+          const weekAgo = new Date(now)
+          weekAgo.setDate(now.getDate() - 7)
+          query = query.gte('created_at', weekAgo.toISOString())
+        } else if (timeRange === 'all') {
+            if (dateFilterPeriod.startsAt && dateFilterPeriod.endsAt) {
+              const start = new Date(`${dateFilterPeriod.startsAt}T00:00:00`)
+              const end = new Date(`${dateFilterPeriod.endsAt}T00:00:00`)
+              end.setDate(end.getDate() + 1)
+              query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
+            }
+        } else if (timeRange === 'custom_months' && selectedMonths.length > 0) {
+          let minYear = Infinity
+          let minMonth = Infinity
+          let maxYear = -Infinity
+          let maxMonth = -Infinity
+
+          selectedMonths.forEach((ym) => {
+            const [ys, ms] = ym.split('-')
+            const y = parseInt(ys, 10)
+            const m = parseInt(ms, 10)
+            if (!Number.isNaN(y) && !Number.isNaN(m)) {
+              if (y < minYear || (y === minYear && m < minMonth)) {
+                minYear = y
+                minMonth = m
+              }
+              if (y > maxYear || (y === maxYear && m > maxMonth)) {
+                maxYear = y
+                maxMonth = m
+              }
+            }
+          })
+
+          if (minYear !== Infinity) {
+            const start = new Date(minYear, minMonth - 1, 1)
+            const end = new Date(maxYear, maxMonth, 1)
+            query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
+          }
+        }
+
+        query = query.order('created_at', { ascending: false })
+        if (!hasActiveHistoryFilter) query = query.limit(DEFAULT_TASK_LIST_LIMIT)
+        const { data: qData, error } = await query
+        if (error) throw error
+        tugasRaw = qData
+      }
 
       let tugasData = sortTasksByNewest(tugasRaw || [])
 
@@ -900,10 +927,12 @@ export default function TugasGuru() {
 
       const statRequests = []
       if (tugasIds.length > 0) {
-        statRequests.push({
-          key: 'jawaban',
-          query: supabase.from('tugas_jawaban').select(TUGAS_JAWABAN_STATS_COLUMNS).in('tugas_id', tugasIds)
-        })
+        if (!import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+          statRequests.push({
+            key: 'jawaban',
+            query: supabase.from('tugas_jawaban').select(TUGAS_JAWABAN_STATS_COLUMNS).in('tugas_id', tugasIds)
+          })
+        }
       }
       if (uniqueKelasVariants.length > 0) {
         if (isViewingArchivePeriod && period.tahunAjaran) {
@@ -930,7 +959,16 @@ export default function TugasGuru() {
 
       const { data: statBatch } = await supabase.batch(statRequests)
 
-      const jawabanRes = statBatch?.jawaban || { data: [], error: null }
+      let jawabanRes = statBatch?.jawaban || { data: [], error: null }
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2 && tugasIds.length > 0) {
+        try {
+            const res = await submissionService.getSubmissions({ tugas_id: tugasIds, per_page: 'all' })
+            jawabanRes = { data: res.data, error: null }
+        } catch (e) {
+            jawabanRes = { data: [], error: e }
+        }
+      }
+      
       const siswaRes = statBatch?.siswa || { data: [], error: null }
       const classHistoryRes = statBatch?.classHistory || { data: [], error: null }
       if (jawabanRes.error) console.error('Error fetching stats jawaban tugas:', jawabanRes.error)
@@ -1045,28 +1083,50 @@ export default function TugasGuru() {
     try {
       setIsLoadingTugasPerluDinilai(true)
 
-      let tugasQuery = supabase
-        .from('tugas')
-        .select(TUGAS_GURU_COLUMNS)
-        .eq('created_by', user.id)
-      tugasQuery = applyAcademicSemesterFilter(tugasQuery)
-      const { data: tugasData, error: tugasError } = await tugasQuery
-
-      if (tugasError) throw tugasError
+      let tugasData = []
+      
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        try {
+          const res = await assignmentService.getAssignments({ created_by: user.id, per_page: 'all' })
+          tugasData = res.data
+        } catch (e) {
+          throw e
+        }
+      } else {
+        let tugasQuery = supabase
+          .from('tugas')
+          .select(TUGAS_GURU_COLUMNS)
+          .eq('created_by', user.id)
+        tugasQuery = applyAcademicSemesterFilter(tugasQuery)
+        const { data: qData, error: tugasError } = await tugasQuery
+        if (tugasError) throw tugasError
+        tugasData = qData
+      }
       if (!tugasData || tugasData.length === 0) {
         setTugasPerluDinilai([])
         return
       }
 
       const tugasIds = tugasData.map((t) => t.id)
-      let jawabanQuery = supabase
-        .from('tugas_jawaban')
-        .select('id,tugas_id,user_id,nilai,status')
-        .in('tugas_id', tugasIds)
-        .is('nilai', null)
-      const { data: jawabanData, error: jawabanError } = await jawabanQuery
-
-      if (jawabanError) throw jawabanError
+      let jawabanData = []
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        try {
+          // Status 'menunggu' means not yet graded or nilai is null. We can just fetch all and filter in JS.
+          const res = await submissionService.getSubmissions({ tugas_id: tugasIds, per_page: 'all' })
+          jawabanData = (res.data || []).filter(j => j.nilai === null || j.status === 'menunggu')
+        } catch (e) {
+          throw e
+        }
+      } else {
+        let jawabanQuery = supabase
+          .from('tugas_jawaban')
+          .select('id,tugas_id,user_id,nilai,status')
+          .in('tugas_id', tugasIds)
+          .is('nilai', null)
+        const { data: qData, error: jawabanError } = await jawabanQuery
+        if (jawabanError) throw jawabanError
+        jawabanData = qData
+      }
 
       const map = new Map()
       ;(jawabanData || []).forEach((j) => {
@@ -1187,10 +1247,19 @@ export default function TugasGuru() {
           return { data, error }
         })()
 
-        const jawabanPromise = supabase
-          .from('tugas_jawaban')
-          .select(TUGAS_JAWABAN_DETAIL_COLUMNS)
-          .eq('tugas_id', tugas.id)
+        const jawabanPromise = import.meta.env.VITE_USE_ASSIGNMENTS_API_V2
+          ? (async () => {
+              try {
+                const res = await submissionService.getSubmissions({ tugas_id: tugas.id, per_page: 'all' })
+                return { data: res.data, error: null }
+              } catch (e) {
+                return { data: null, error: e }
+              }
+            })()
+          : supabase
+              .from('tugas_jawaban')
+              .select(TUGAS_JAWABAN_DETAIL_COLUMNS)
+              .eq('tugas_id', tugas.id)
 
         const [
           { data: siswaData, error: siswaError },
@@ -1215,8 +1284,8 @@ export default function TugasGuru() {
         const formattedJawaban =
           jawabanData?.map((j) => ({
             ...j,
-            nama: j.profiles?.nama,
-            photo_url: j.profiles?.photo_url,
+            nama: j.profiles?.nama || j.student?.nama,
+            photo_url: j.profiles?.photo_url || j.student?.photo_url,
             uid: j.user_id
           })) || []
 
@@ -1603,8 +1672,12 @@ export default function TugasGuru() {
         file_url: form.file_url
       }
 
-      const { error } = await supabase.assignments.createTask(payload)
-      if (error) throw error
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        await assignmentService.storeAssignment(payload)
+      } else {
+        const { error } = await supabase.assignments.createTask(payload)
+        if (error) throw error
+      }
 
       pushToast('success', 'Tugas berhasil ditambahkan')
       resetCreateFormState()
@@ -1699,9 +1772,12 @@ export default function TugasGuru() {
       if (mulaiChanged) payload.mulai = new Date(editForm.mulai).toISOString()
       if (deadlineChanged) payload.deadline = new Date(editForm.deadline).toISOString()
 
-      const { error } = await supabase.assignments.updateTask(editForm.id, payload)
-
-      if (error) throw error
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        await assignmentService.updateAssignment(editForm.id, payload)
+      } else {
+        const { error } = await supabase.assignments.updateTask(editForm.id, payload)
+        if (error) throw error
+      }
 
       if (editOriginalFile && editOriginalFile !== editForm.file_url) {
         try {
@@ -1767,8 +1843,12 @@ export default function TugasGuru() {
         }
       }
 
-      const { error } = await supabase.assignments.deleteTask(tugasId)
-      if (error) throw error
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        await assignmentService.deleteAssignment(tugasId)
+      } else {
+        const { error } = await supabase.assignments.deleteTask(tugasId)
+        if (error) throw error
+      }
 
       pushToast('success', 'Tugas berhasil dihapus')
       setSelectedTugas(null)
@@ -1822,26 +1902,35 @@ export default function TugasGuru() {
     try {
       setLoading(true)
 
-      const existing = jawabanTugas.find((j) => j.user_id === siswaId)
-      if (existing) {
-        const { error } = await supabase
-          .from('tugas_jawaban')
-          .update({
-            nilai: parsed,
-            status: 'dinilai'
-          })
-          .eq('id', existing.id)
-          .eq('tugas_id', selectedTugas.id)
-
-        if (error) throw error
-      } else {
-        const { error } = await supabase.from('tugas_jawaban').insert({
+      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        await submissionService.gradeByUser({
           tugas_id: selectedTugas.id,
           user_id: siswaId,
           nilai: parsed,
           status: 'dinilai'
         })
-        if (error) throw error
+      } else {
+        const existing = jawabanTugas.find((j) => j.user_id === siswaId)
+        if (existing) {
+          const { error } = await supabase
+            .from('tugas_jawaban')
+            .update({
+              nilai: parsed,
+              status: 'dinilai'
+            })
+            .eq('id', existing.id)
+            .eq('tugas_id', selectedTugas.id)
+
+          if (error) throw error
+        } else {
+          const { error } = await supabase.from('tugas_jawaban').insert({
+            tugas_id: selectedTugas.id,
+            user_id: siswaId,
+            nilai: parsed,
+            status: 'dinilai'
+          })
+          if (error) throw error
+        }
       }
 
       pushToast('success', 'Nilai berhasil disimpan')
