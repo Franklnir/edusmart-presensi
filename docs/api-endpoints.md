@@ -582,6 +582,9 @@ Semua endpoint ini secara otomatis ter-scope oleh `tenant_id` dan memvalidasi `p
 - `GET /api/v2/uploads/{session}`: Read owned upload-session metadata
 - `POST /api/v2/uploads/{session}/complete`: Complete upload session
 - `DELETE /api/v2/uploads/{session}`: Cancel upload session
+- `GET /api/v2/attachments/{attachment}`: Read authorized attachment metadata
+- `GET /api/v2/attachments/{attachment}/download`: Create a temporary authorized download instruction
+- `DELETE /api/v2/attachments/{attachment}`: Detach and delete an authorized attachment
 
 **Legacy Endpoints:**
 - `POST /api/tugas/jawaban/submit`: submit jawaban tugas siswa (Legacy).
@@ -1487,6 +1490,9 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `GET` | `/api/v2/uploads/{session}` | Metadata upload session milik actor |
 | `POST` | `/api/v2/uploads/{session}/complete` | Upload session complete |
 | `DELETE` | `/api/v2/uploads/{session}` | Upload session cancel |
+| `GET` | `/api/v2/attachments/{attachment}` | Metadata attachment sesuai parent policy |
+| `GET` | `/api/v2/attachments/{attachment}/download` | Instruksi download sementara 5–15 menit |
+| `DELETE` | `/api/v2/attachments/{attachment}` | Detach dan soft-delete attachment |
 | `GET` | `/api/v2/attendance-requests` | Mengambil daftar pengajuan izin |
 | `POST` | `/api/v2/attendance-requests` | Membuat pengajuan izin baru |
 | `PATCH` | `/api/v2/attendance-requests/{attendance_request}` | Merespon (approve/reject) pengajuan izin |
