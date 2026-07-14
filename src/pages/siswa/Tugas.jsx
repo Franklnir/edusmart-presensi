@@ -46,7 +46,8 @@ const TUGAS_LIST_COLUMNS = 'id, kelas, judul, mapel, mulai, deadline, keterangan
 const TUGAS_MAPEL_COLUMNS = 'mapel'
 const TUGAS_JAWABAN_LIST_COLUMNS = 'tugas_id, user_id, nilai, status, file_url, file_urls, link_url, komentar_siswa, waktu_submit'
 const MAPEL_CACHE_TTL_MS = 5 * 60 * 1000
-const USE_ASSIGNMENT_UPLOADS_V2 = import.meta.env.VITE_USE_ASSIGNMENT_UPLOADS_API_V2 === 'true'
+const USE_ASSIGNMENTS_V2 = import.meta.env.VITE_USE_ASSIGNMENTS_API_V2 === 'true'
+const USE_ASSIGNMENT_UPLOADS_V2 = USE_ASSIGNMENTS_V2 && import.meta.env.VITE_USE_ASSIGNMENT_UPLOADS_API_V2 === 'true'
 const ATTACHMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const withV2Attachments = (record = {}) => {
@@ -691,7 +692,7 @@ export default function TugasSiswa() {
       const now = new Date()
 
       let tugasData = []
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         const params = {
           kelas,
           per_page: 'all'
@@ -756,7 +757,7 @@ export default function TugasSiswa() {
       // ambil jawaban milik siswa ini untuk tugas-tugas tersebut
       const tugasIds = tugasArr.map((t) => t.id)
       let jawabanData = []
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         const res = await submissionService.getSubmissions({ tugas_id: tugasIds, user_id: user.id, per_page: 'all' })
         jawabanData = (res.data || []).map(withV2Attachments)
       } else {
@@ -1305,7 +1306,7 @@ export default function TugasSiswa() {
 
       if (existing?.id) {
         if (currentLink || existingPhotos.length > 0 || (USE_ASSIGNMENT_UPLOADS_V2 && retainedV2Attachments.length > 0)) {
-          if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+          if (USE_ASSIGNMENTS_V2) {
             await submissionService.updateSubmission(existing.id, {
               attachment_ids: USE_ASSIGNMENT_UPLOADS_V2 ? retainedV2Attachments : undefined,
               link_url: currentLink || null,
@@ -1337,7 +1338,7 @@ export default function TugasSiswa() {
             return { ...prev, myJawaban: nextJawaban, myStatus: nextStatus }
           })
         } else {
-          if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+          if (USE_ASSIGNMENTS_V2) {
             await submissionService.deleteSubmission(existing.id)
           } else {
             const { error } = await supabase
@@ -1443,7 +1444,7 @@ export default function TugasSiswa() {
         ...academicPeriodPayload
       }
 
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         if (existing?.id) await submissionService.updateSubmission(existing.id, payload)
         else await submissionService.storeSubmission(payload)
       } else {

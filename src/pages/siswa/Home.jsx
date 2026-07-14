@@ -23,6 +23,7 @@ const DASHBOARD_TASK_LIMIT = 6
 const DASHBOARD_TASK_QUERY_LIMIT = 80
 const DASHBOARD_TASK_COLUMNS = 'id, kelas, judul, mapel, deadline, keterangan, file_url, link'
 const ACADEMIC_PERIOD_STORAGE_KEY = 'edusmart.siswa.home.periodFilter'
+const USE_ASSIGNMENTS_V2 = import.meta.env.VITE_USE_ASSIGNMENTS_API_V2 === 'true'
 const DEFAULT_EKSKUL_LIMIT = 3
 const EKSKUL_SELECT_COLUMNS = 'id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at, tahun_ajaran, semester'
 const LEGACY_EKSKUL_SELECT_COLUMNS = 'id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id'
@@ -920,7 +921,7 @@ export default function SHome() {
       let overdueData = []
       let upcomingData = []
       
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         try {
           // get active status and expired status
           const res = await assignmentService.getAssignments({
@@ -985,7 +986,7 @@ export default function SHome() {
 
       const tugasIds = taskRows.map((row) => row.id)
       let jawabanData = []
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         try {
           const res = await submissionService.getSubmissions({ tugas_id: tugasIds, user_id: userId, per_page: 'all' })
           jawabanData = res.data

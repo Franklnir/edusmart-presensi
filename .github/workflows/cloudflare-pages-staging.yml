@@ -45,6 +45,8 @@ jobs:
       VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
       VITE_GOOGLE_AUTH_LOGIN_URL: ${{ vars.VITE_GOOGLE_AUTH_LOGIN_URL || 'https://sismu.biz.id/api/auth/google/redirect' }}
       VITE_GOOGLE_AUTH_LINK_URL: ${{ vars.VITE_GOOGLE_AUTH_LINK_URL || 'https://sismu.biz.id/api/auth/google/link' }}
+      VITE_USE_ASSIGNMENTS_API_V2: ${{ vars.VITE_USE_ASSIGNMENTS_API_V2 || 'false' }}
+      VITE_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ vars.VITE_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
 
     steps:
       - name: Checkout

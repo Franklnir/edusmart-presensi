@@ -164,6 +164,8 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
           VITE_GOOGLE_AUTH_LOGIN_URL: ${{ vars.VITE_GOOGLE_AUTH_LOGIN_URL }}
           VITE_GOOGLE_AUTH_LINK_URL: ${{ vars.VITE_GOOGLE_AUTH_LINK_URL }}
+          VITE_USE_ASSIGNMENTS_API_V2: ${{ github.ref == 'refs/heads/staging' && vars.VITE_USE_ASSIGNMENTS_API_V2 || 'false' }}
+          VITE_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ github.ref == 'refs/heads/staging' && vars.VITE_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
         run: |
           set -euo pipefail
           docker buildx build \
@@ -178,6 +180,8 @@ jobs:
             --build-arg VITE_GOOGLE_CLIENT_ID="${VITE_GOOGLE_CLIENT_ID:-}" \
             --build-arg VITE_GOOGLE_AUTH_LOGIN_URL="${VITE_GOOGLE_AUTH_LOGIN_URL:-/api/auth/google/redirect}" \
             --build-arg VITE_GOOGLE_AUTH_LINK_URL="${VITE_GOOGLE_AUTH_LINK_URL:-/api/auth/google/link}" \
+            --build-arg VITE_USE_ASSIGNMENTS_API_V2="${VITE_USE_ASSIGNMENTS_API_V2:-false}" \
+            --build-arg VITE_USE_ASSIGNMENT_UPLOADS_API_V2="${VITE_USE_ASSIGNMENT_UPLOADS_API_V2:-false}" \
             --tag "$NGINX_IMAGE" \
             --tag "$NGINX_BRANCH_IMAGE" \
             --cache-from type=gha,scope=nginx-prod \

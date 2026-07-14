@@ -47,7 +47,8 @@ const TUGAS_GURU_COLUMNS = 'id,kelas,judul,mapel,mulai,deadline,keterangan,file_
 const TUGAS_JAWABAN_STATS_COLUMNS = 'tugas_id,user_id,nilai,status'
 const TUGAS_JAWABAN_DETAIL_COLUMNS = 'id,tugas_id,user_id,file_url,file_urls,link_url,komentar_siswa,nilai,status,waktu_submit,profiles(nama,photo_url)'
 const DEFAULT_TASK_LIST_LIMIT = 10
-const USE_ASSIGNMENT_UPLOADS_V2 = import.meta.env.VITE_USE_ASSIGNMENT_UPLOADS_API_V2 === 'true'
+const USE_ASSIGNMENTS_V2 = import.meta.env.VITE_USE_ASSIGNMENTS_API_V2 === 'true'
+const USE_ASSIGNMENT_UPLOADS_V2 = USE_ASSIGNMENTS_V2 && import.meta.env.VITE_USE_ASSIGNMENT_UPLOADS_API_V2 === 'true'
 const ATTACHMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const withV2Attachments = (record = {}) => {
@@ -810,7 +811,7 @@ export default function TugasGuru() {
 
       let tugasRaw = []
       
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         const params = {
           created_by: user.id,
           per_page: 'all'
@@ -927,7 +928,7 @@ export default function TugasGuru() {
 
       const statRequests = []
       if (tugasIds.length > 0) {
-        if (!import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+        if (!USE_ASSIGNMENTS_V2) {
           statRequests.push({
             key: 'jawaban',
             query: supabase.from('tugas_jawaban').select(TUGAS_JAWABAN_STATS_COLUMNS).in('tugas_id', tugasIds)
@@ -960,7 +961,7 @@ export default function TugasGuru() {
       const { data: statBatch } = await supabase.batch(statRequests)
 
       let jawabanRes = statBatch?.jawaban || { data: [], error: null }
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2 && tugasIds.length > 0) {
+      if (USE_ASSIGNMENTS_V2 && tugasIds.length > 0) {
         try {
             const res = await submissionService.getSubmissions({ tugas_id: tugasIds, per_page: 'all' })
             jawabanRes = { data: (res.data || []).map(withV2Attachments), error: null }
@@ -1085,7 +1086,7 @@ export default function TugasGuru() {
 
       let tugasData = []
       
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         const res = await assignmentService.getAssignments({ created_by: user.id, per_page: 'all' })
         tugasData = (res.data || []).map(withV2Attachments)
       } else {
@@ -1105,7 +1106,7 @@ export default function TugasGuru() {
 
       const tugasIds = tugasData.map((t) => t.id)
       let jawabanData = []
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         const res = await submissionService.getSubmissions({ tugas_id: tugasIds, per_page: 'all' })
         jawabanData = (res.data || []).map(withV2Attachments).filter(j => j.nilai === null || j.status === 'menunggu')
       } else {
@@ -1238,7 +1239,7 @@ export default function TugasGuru() {
           return { data, error }
         })()
 
-        const jawabanPromise = import.meta.env.VITE_USE_ASSIGNMENTS_API_V2
+        const jawabanPromise = USE_ASSIGNMENTS_V2
           ? (async () => {
               try {
                 const res = await submissionService.getSubmissions({ tugas_id: tugas.id, per_page: 'all' })
@@ -1673,7 +1674,7 @@ export default function TugasGuru() {
           : { file_url: form.file_url })
       }
 
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         await assignmentService.storeAssignment(payload)
       } else {
         const { error } = await supabase.assignments.createTask(payload)
@@ -1775,7 +1776,7 @@ export default function TugasGuru() {
       if (mulaiChanged) payload.mulai = new Date(editForm.mulai).toISOString()
       if (deadlineChanged) payload.deadline = new Date(editForm.deadline).toISOString()
 
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         await assignmentService.updateAssignment(editForm.id, payload)
       } else {
         const { error } = await supabase.assignments.updateTask(editForm.id, payload)
@@ -1845,7 +1846,7 @@ export default function TugasGuru() {
         }
       }
 
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         await assignmentService.deleteAssignment(tugasId)
       } else {
         const { error } = await supabase.assignments.deleteTask(tugasId)
@@ -1904,7 +1905,7 @@ export default function TugasGuru() {
     try {
       setLoading(true)
 
-      if (import.meta.env.VITE_USE_ASSIGNMENTS_API_V2) {
+      if (USE_ASSIGNMENTS_V2) {
         await submissionService.gradeByUser({
           tugas_id: selectedTugas.id,
           user_id: siswaId,
