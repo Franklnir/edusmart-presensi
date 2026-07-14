@@ -25,6 +25,10 @@ class EnsureTenantMatchesProfile
             return $next($request);
         }
 
+        if ($request->routeIs('profile.provision') || $request->is('api/v2/profile/provision')) {
+            return $next($request);
+        }
+
         $profile = Profile::query()->where('id', $user->id)->first();
         if (! $profile) {
             return response()->json(['message' => 'Profil belum tersedia'], 403);

@@ -3713,16 +3713,7 @@ export const supabase = {
       return { data: res.raw?.data ?? res.data, error: res.error }
     }
   },
-  profile: {
-    async updateMe(payload = {}) {
-      const res = await apiFetch('/api/profile/me', {
-        method: 'PATCH',
-        body: payload
-      })
-      if (!res.error) invalidateDbSelectCache()
-      return { data: res.raw?.data ?? res.data, error: res.error }
-    }
-  },
+
   presence: {
     async ping({ deviceId, activity = false }) {
       const res = await apiFetch('/api/presence/ping', {

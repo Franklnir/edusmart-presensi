@@ -40,6 +40,7 @@ export const withAcademicCacheScope = (params = {}) => ({
 
 export const queryKeys = {
   admin: {
+    dashboard: (params = {}) => ['admin', 'dashboard', withAcademicCacheScope(params)],
     dashboardSummary: (params = {}) => ['admin', 'dashboard-summary', withAcademicCacheScope(params)],
     homeBootstrap: (params = {}) => ['admin', 'home-bootstrap', withAcademicCacheScope(params)],
     academicSummary: (params = {}) => ['admin', 'academic-summary', withAcademicCacheScope(params)],

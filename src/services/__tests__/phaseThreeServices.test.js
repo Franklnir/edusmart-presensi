@@ -8,8 +8,12 @@ vi.mock('../../lib/api/requestId', () => ({ generateRequestId: () => 'generated-
 const { assignmentService, submissionService } = await import('../assignmentService')
 const { attendanceService } = await import('../attendanceService')
 const { academicContextService } = await import('../academicContextService')
+const { adminDashboardService } = await import('../adminDashboardService')
+const { announcementService } = await import('../announcementService')
 const { currentProfileService } = await import('../currentProfileService')
+const { organizationService } = await import('../organizationService')
 const { scheduleService } = await import('../scheduleService')
+const { gradeService } = await import('../gradeService')
 
 describe('Phase 3 API V2 services', () => {
   beforeEach(() => {
@@ -37,6 +41,91 @@ describe('Phase 3 API V2 services', () => {
       method: 'GET',
       cacheTtlMs: 60 * 1000,
       dedupe: true
+    })
+  })
+
+  it('loads the compact admin dashboard through the V2 resource', async () => {
+    await adminDashboardService.getDashboard({ tahun_ajaran: '2026/2027' })
+
+    expect(apiClient).toHaveBeenCalledWith('/api/v2/dashboard/admin', {
+      method: 'GET',
+      params: { tahun_ajaran: '2026/2027' },
+      cacheTtlMs: 15 * 1000,
+      dedupe: true
+    })
+  })
+
+  it('loads the tenant-scoped organization shell through the V2 resource', async () => {
+    await organizationService.getContext()
+
+    expect(apiClient).toHaveBeenCalledWith('/api/v2/organizations', {
+      method: 'GET',
+      cacheTtlMs: 60 * 1000,
+      dedupe: true
+    })
+  })
+
+  it('uses idempotent V2 mutations for announcements', async () => {
+    await announcementService.storeAnnouncement({
+      judul: 'Rapat',
+      keterangan: 'Besok',
+      target: 'guru'
+    })
+
+    expect(apiClient).toHaveBeenCalledWith('/api/v2/announcements', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Idempotency-Key': 'generated-key' },
+      body: {
+        judul: 'Rapat',
+        keterangan: 'Besok',
+        target: 'guru',
+        idempotency_key: 'generated-key'
+      }
+    }))
+  })
+
+  it('loads and saves teacher grade weights through the fixed V2 resource', async () => {
+    await gradeService.listWeights({ tahun_ajaran: '2026/2027', semester: 'Ganjil' })
+    expect(apiClient).toHaveBeenNthCalledWith(1, '/api/v2/grades/weights', {
+      method: 'GET',
+      params: { tahun_ajaran: '2026/2027', semester: 'Ganjil' },
+      cacheTtlMs: 15 * 1000,
+      dedupe: true
+    })
+
+    await gradeService.saveWeight({
+      tahun_ajaran: '2026/2027',
+      semester: 'Ganjil',
+      guru_id: 'forged-teacher',
+      mapel: 'Matematika',
+      bobot_tugas_pr: 30,
+      bobot_quiz_reguler: 20,
+      bobot_quiz_uts: 20,
+      bobot_quiz_uas: 30,
+      sumber_uts: 'digital',
+      sumber_uas: 'manual',
+      jenis_manual: 'nilai_tambah',
+      label_manual: 'Nilai tambah'
+    })
+
+    expect(apiClient).toHaveBeenNthCalledWith(2, '/api/v2/grades/weights', {
+      method: 'PUT',
+      headers: { 'Idempotency-Key': 'generated-key' },
+      body: {
+        tahun_ajaran: '2026/2027',
+        semester: 'Ganjil',
+        guru_id: 'forged-teacher',
+        mapel: 'Matematika',
+        bobot_tugas_pr: 30,
+        bobot_quiz_reguler: 20,
+        bobot_quiz_uts: 20,
+        bobot_quiz_uas: 30,
+        sumber_uts: 'digital',
+        sumber_uas: 'manual',
+        jenis_manual: 'nilai_tambah',
+        label_manual: 'Nilai tambah',
+        idempotency_key: 'generated-key'
+      }
     })
   })
 

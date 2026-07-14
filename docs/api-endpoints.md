@@ -1448,8 +1448,27 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `PATCH` | `/api/v2/classes/{class}` | Mengupdate kelas (partial) |
 | `DELETE` | `/api/v2/classes/{class}` | Menghapus kelas |
 | `GET` | `/api/v2/academic-context` | Konteks tahun ajaran dan semester aktif tenant dari server; tidak menerima `tenant_id` dari browser. |
+| `GET` | `/api/v2/organizations` | Konteks organisasi tenant, branding terfilter, assignment wali kelas, dan delegated feature untuk pengguna aktif. |
 | `GET` | `/api/v2/profile` | Profil milik pengguna yang sedang terautentikasi dalam tenant aktif. Path atau URL avatar tidak dikembalikan sampai Attachment V2 tersedia. |
 | `PATCH` | `/api/v2/profile` | Mengubah field profil mandiri yang diizinkan menurut role. Gunakan `Idempotency-Key`; `tenant_id`, role, status, dan identitas pihak lain ditolak. |
+| `GET` | `/api/v2/dashboard/admin` | Ringkasan dashboard admin yang tenant-scoped; hanya mengembalikan settings, periode akademik, statistik, dan pengumuman terfilter. |
+| `GET` | `/api/v2/announcements` | Daftar pengumuman tenant-scoped; guru dan siswa hanya menerima target yang sesuai role. |
+| `POST` | `/api/v2/announcements` | Membuat pengumuman sebagai admin sekolah; tenant dan ID ditetapkan server, `Idempotency-Key` wajib. |
+| `PUT` | `/api/v2/announcements/{announcement}` | Memperbarui pengumuman tenant-scoped; admin saja dan idempotent. |
+| `PATCH` | `/api/v2/announcements/{announcement}` | Memperbarui sebagian pengumuman tenant-scoped; admin saja dan idempotent. |
+| `DELETE` | `/api/v2/announcements/{announcement}` | Menghapus pengumuman tenant-scoped; admin saja dan `Idempotency-Key` wajib. |
+| `GET` | `/api/v2/extracurriculars` | Mendapatkan daftar ekstrakurikuler (filter aktif) |
+| `POST` | `/api/v2/extracurriculars` | Membuat ekstrakurikuler baru (admin) |
+| `GET` | `/api/v2/extracurriculars/{extracurricular}` | Mendapatkan detail ekstrakurikuler |
+| `PUT` | `/api/v2/extracurriculars/{extracurricular}` | Mengupdate ekstrakurikuler (admin) |
+| `DELETE` | `/api/v2/extracurriculars/{extracurricular}` | Menghapus ekstrakurikuler (admin) |
+| `GET` | `/api/v2/extracurriculars/{extracurricular}/members` | Daftar anggota ekstrakurikuler (admin/guru pembina) |
+| `POST` | `/api/v2/extracurriculars/{extracurricular}/join` | Bergabung ke ekstrakurikuler (siswa/admin) |
+| `DELETE` | `/api/v2/extracurriculars/{extracurricular}/leave` | Keluar dari ekstrakurikuler (siswa/admin) |
+| `GET` | `/api/v2/grades/weights` | Bobot komponen penilaian per guru dan mapel pada tahun ajaran serta semester yang dipilih; guru hanya melihat bobotnya sendiri. |
+| `PUT` | `/api/v2/grades/weights` | Membuat atau memperbarui bobot komponen penilaian; periode ditetapkan server, guru hanya dapat mengubah miliknya, dan `Idempotency-Key` wajib. |
+| `GET` | `/api/v2/grades/manual-scores` | Nilai manual per siswa per guru dan mapel pada tahun ajaran serta semester yang dipilih; guru hanya melihat nilai dari kelas/mapel yang diajarnya. |
+| `PUT` | `/api/v2/grades/manual-scores` | Membuat atau memperbarui nilai manual siswa; pemeriksaan `kelas_siswa` dan `jadwal`, `Idempotency-Key` wajib. |
 | `POST` | `/api/v2/frontend-logs` | Sink frontend errors |
 | `GET` | `/api/v2/frontend-logs` | Lihat frontend errors |
 | `GET` | `/api/v2/students` | Mendapatkan daftar siswa |
@@ -1471,6 +1490,14 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `PUT` | `/api/v2/schedules/{schedule}` | Memperbarui jadwal secara penuh; `kelas_id` dan idempotency wajib. |
 | `PATCH` | `/api/v2/schedules/{schedule}` | Memperbarui jadwal parsial; hasil akhir tetap divalidasi terhadap konflik. |
 | `DELETE` | `/api/v2/schedules/{schedule}` | Menghapus jadwal; `kelas_id` dan `Idempotency-Key` wajib. |
+| `GET` | `/api/v2/report-cards` | Mendapatkan daftar rapor |
+| `GET` | `/api/v2/report-cards/{student}` | Mendapatkan detail rapor |
+| `GET` | `/api/v2/report-cards/{student}/preview` | Preview rapor sebelum finalize |
+| `PUT` | `/api/v2/report-cards/{student}/metadata` | Update metadata rapor (kehadiran, catatan) |
+| `POST` | `/api/v2/report-cards/{student}/finalize` | Finalisasi rapor dan buat snapshot |
+| `POST` | `/api/v2/report-cards/{student}/publish` | Publish rapor ke wali murid |
+| `POST` | `/api/v2/report-cards/{student}/reopen` | Buka kembali rapor ke status draft |
+| `GET` | `/api/v2/report-cards/{student}/print` | Endpoint data cetak rapor |
 
 | `GET` | `/api/v2/attendance` | Mendapatkan daftar presensi |
 | `GET` | `/api/v2/attendance/{attendance}` | Mendapatkan detail presensi |

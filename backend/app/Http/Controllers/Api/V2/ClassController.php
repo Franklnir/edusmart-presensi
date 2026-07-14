@@ -138,6 +138,89 @@ class ClassController extends Controller
         ])->response()->setStatusCode(200);
     }
 
+    public function updateStructure(Request $request, string $id): JsonResponse
+    {
+        $tenantId = $request->attributes->get('tenant_id');
+        $reqId = $this->getRequestId($request);
+
+        $kelas = Kelas::where('tenant_id', $tenantId)->find($id);
+
+        if (! $kelas) {
+            return response()->json([
+                'success' => false,
+                'code' => 'CLASS_NOT_FOUND',
+                'message' => 'Kelas tidak ditemukan.',
+                'error' => 'Kelas tidak ditemukan.',
+                'request_id' => $reqId,
+            ], 404);
+        }
+
+        Gate::authorize('update', $kelas);
+
+        $request->validate([
+            'wali_guru_id' => 'nullable|string',
+            'wali_guru_nama' => 'nullable|string',
+            'ketua_siswa_id' => 'nullable|string',
+            'ketua_siswa_nama' => 'nullable|string',
+        ]);
+
+        $existing = DB::table('kelas_struktur')->where('kelas_id', $id)->first();
+
+        if ($existing) {
+            DB::table('kelas_struktur')->where('kelas_id', $id)->update([
+                'wali_guru_id' => $request->input('wali_guru_id'),
+                'wali_guru_nama' => $request->input('wali_guru_nama'),
+                'ketua_siswa_id' => $request->input('ketua_siswa_id'),
+                'ketua_siswa_nama' => $request->input('ketua_siswa_nama'),
+                'updated_at' => now(),
+            ]);
+        } else {
+            DB::table('kelas_struktur')->insert([
+                'kelas_id' => $id,
+                'wali_guru_id' => $request->input('wali_guru_id'),
+                'wali_guru_nama' => $request->input('wali_guru_nama'),
+                'ketua_siswa_id' => $request->input('ketua_siswa_id'),
+                'ketua_siswa_nama' => $request->input('ketua_siswa_nama'),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Struktur kelas berhasil diupdate.',
+            'request_id' => $reqId,
+        ], 200);
+    }
+    
+    public function getStructure(Request $request, string $id): JsonResponse
+    {
+        $tenantId = $request->attributes->get('tenant_id');
+        $reqId = $this->getRequestId($request);
+
+        $kelas = Kelas::where('tenant_id', $tenantId)->find($id);
+
+        if (! $kelas) {
+            return response()->json([
+                'success' => false,
+                'code' => 'CLASS_NOT_FOUND',
+                'message' => 'Kelas tidak ditemukan.',
+                'error' => 'Kelas tidak ditemukan.',
+                'request_id' => $reqId,
+            ], 404);
+        }
+
+        Gate::authorize('view', $kelas);
+
+        $struktur = DB::table('kelas_struktur')->where('kelas_id', $id)->first();
+
+        return response()->json([
+            'success' => true,
+            'data' => $struktur,
+            'request_id' => $reqId,
+        ], 200);
+    }
+
     /**
      * Remove the specified resource from storage.
      */

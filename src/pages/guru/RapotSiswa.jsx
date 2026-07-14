@@ -12,6 +12,10 @@ import {
   scheduleService,
   USE_SCHEDULES_API_V2
 } from '../../services/scheduleService'
+import {
+  reportCardService,
+  USE_REPORT_CARDS_API_V2
+} from '../../services/reportCardService'
 
 const RAPOT_TYPES = [
   { key: 'uts', labelKey: 'midterm' },
@@ -98,6 +102,14 @@ export default function RapotSiswa() {
   const [saving, setSaving] = useState(false)
   const [loadingClassData, setLoadingClassData] = useState(false)
   const [exportingRapot, setExportingRapot] = useState(false)
+  const [v2Preview, setV2Preview] = useState(null)
+  const [metadataForm, setMetadataForm] = useState({
+    sakit: '',
+    izin: '',
+    alpa: '',
+    catatan_wali_kelas: '',
+    keputusan: ''
+  })
 
   const activeTahunPelajaran = period?.tahunAjaran || ''
   const selectedHistory = useMemo(
@@ -470,6 +482,33 @@ export default function RapotSiswa() {
     const rapot = rapotIndex[`${student.id}|${type}`] || null
     setActiveModal({ student, type, rapot })
 
+    if (USE_REPORT_CARDS_API_V2) {
+      try {
+        setLoading(true)
+        const preview = await reportCardService.previewReportCard(student.id, {
+          jenis: type,
+          semester: selectedSemester,
+          tahun_pelajaran: tahunPelajaran,
+          kelas_id: selectedKelas
+        })
+        setV2Preview(preview)
+        const rapot = preview?.data
+        setMetadataForm({
+          sakit: rapot?.sakit || '',
+          izin: rapot?.izin || '',
+          alpa: rapot?.alpa || '',
+          catatan_wali_kelas: rapot?.catatan_wali_kelas || '',
+          keputusan: rapot?.keputusan || ''
+        })
+      } catch (error) {
+        console.error(error)
+        pushToast('error', error?.response?.data?.error?.message || error?.message || 'Gagal memuat pratinjau rapot V2.')
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
     if (!rapot?.id) {
       setRapotRows(makeDefaultRapotRows())
       return
@@ -738,6 +777,134 @@ export default function RapotSiswa() {
     user?.id
   ])
 
+  const saveMetadata = useCallback(async () => {
+    if (!activeModal?.student) return
+    try {
+      setSaving(true)
+      const idempotencyKey = makeLocalId()
+      await reportCardService.updateMetadata(activeModal.student.id, metadataForm, idempotencyKey)
+      pushToast('success', 'Metadata rapot berhasil disimpan.')
+      // Refresh preview
+      const preview = await reportCardService.previewReportCard(activeModal.student.id, {
+        jenis: activeModal.type,
+        semester: selectedSemester,
+        tahun_pelajaran: tahunPelajaran,
+        kelas_id: selectedKelas
+      })
+      setV2Preview(preview)
+    } catch (error) {
+      console.error(error)
+      pushToast('error', error?.response?.data?.error?.message || error?.message || 'Gagal menyimpan metadata.')
+    } finally {
+      setSaving(false)
+    }
+  }, [activeModal, metadataForm, selectedSemester, tahunPelajaran, selectedKelas, pushToast])
+
+  const handleFinalize = useCallback(async () => {
+    if (!activeModal?.student) return
+    if (!confirm('Apakah Anda yakin ingin memfinalisasi rapot ini? Rapot akan dibekukan.')) return
+    try {
+      setSaving(true)
+      const idempotencyKey = makeLocalId()
+      await reportCardService.finalizeReportCard(activeModal.student.id, {
+        jenis: activeModal.type,
+        semester: selectedSemester,
+        tahun_pelajaran: tahunPelajaran,
+        kelas_id: selectedKelas
+      }, idempotencyKey)
+      pushToast('success', 'Rapot berhasil difinalisasi.')
+      // Refresh preview
+      const preview = await reportCardService.previewReportCard(activeModal.student.id, {
+        jenis: activeModal.type,
+        semester: selectedSemester,
+        tahun_pelajaran: tahunPelajaran,
+        kelas_id: selectedKelas
+      })
+      setV2Preview(preview)
+    } catch (error) {
+      console.error(error)
+      pushToast('error', error?.response?.data?.error?.message || error?.message || 'Gagal finalisasi rapot.')
+    } finally {
+      setSaving(false)
+    }
+  }, [activeModal, selectedSemester, tahunPelajaran, selectedKelas, pushToast])
+
+  const handlePublish = useCallback(async () => {
+    if (!activeModal?.student) return
+    if (!confirm('Apakah Anda yakin ingin menerbitkan rapot ini? Siswa akan bisa melihatnya.')) return
+    try {
+      setSaving(true)
+      const idempotencyKey = makeLocalId()
+      await reportCardService.publishReportCard(activeModal.student.id, {
+        jenis: activeModal.type,
+        semester: selectedSemester,
+        tahun_pelajaran: tahunPelajaran,
+        kelas_id: selectedKelas
+      }, idempotencyKey)
+      pushToast('success', 'Rapot berhasil diterbitkan.')
+      const preview = await reportCardService.previewReportCard(activeModal.student.id, {
+        jenis: activeModal.type,
+        semester: selectedSemester,
+        tahun_pelajaran: tahunPelajaran,
+        kelas_id: selectedKelas
+      })
+      setV2Preview(preview)
+    } catch (error) {
+      console.error(error)
+      pushToast('error', error?.response?.data?.error?.message || error?.message || 'Gagal menerbitkan rapot.')
+    } finally {
+      setSaving(false)
+    }
+  }, [activeModal, selectedSemester, tahunPelajaran, selectedKelas, pushToast])
+
+  const handleReopen = useCallback(async () => {
+    if (!activeModal?.student) return
+    if (!confirm('Apakah Anda yakin ingin membuka kembali rapot ini? Status akan kembali menjadi Draft.')) return
+    try {
+      setSaving(true)
+      const idempotencyKey = makeLocalId()
+      await reportCardService.reopenReportCard(activeModal.student.id, {
+        jenis: activeModal.type,
+        semester: selectedSemester,
+        tahun_pelajaran: tahunPelajaran,
+        kelas_id: selectedKelas
+      }, idempotencyKey)
+      pushToast('success', 'Rapot berhasil dibuka kembali (Draft).')
+      const preview = await reportCardService.previewReportCard(activeModal.student.id, {
+        jenis: activeModal.type,
+        semester: selectedSemester,
+        tahun_pelajaran: tahunPelajaran,
+        kelas_id: selectedKelas
+      })
+      setV2Preview(preview)
+    } catch (error) {
+      console.error(error)
+      pushToast('error', error?.response?.data?.error?.message || error?.message || 'Gagal membuka kembali rapot.')
+    } finally {
+      setSaving(false)
+    }
+  }, [activeModal, selectedSemester, tahunPelajaran, selectedKelas, pushToast])
+
+  const handlePrint = useCallback(async () => {
+    if (!activeModal?.student) return
+    try {
+      setExportingRapot(true)
+      await reportCardService.printReportCard(activeModal.student.id, {
+        jenis: activeModal.type,
+        semester: selectedSemester,
+        tahun_pelajaran: tahunPelajaran,
+        kelas_id: selectedKelas
+      })
+      // Untuk sementara alert saja
+      alert(`API Endpoint untuk PDF siap: /api/v2/report-cards/${activeModal.student.id}/print`)
+    } catch (error) {
+      console.error(error)
+      pushToast('error', error?.response?.data?.error?.message || error?.message || 'Gagal mencetak rapot.')
+    } finally {
+      setExportingRapot(false)
+    }
+  }, [activeModal, selectedSemester, tahunPelajaran, selectedKelas, pushToast])
+
   const exportActiveRapotToExcel = useCallback(async () => {
     if (!activeModal) return
     try {
@@ -1002,8 +1169,121 @@ export default function RapotSiswa() {
                 </button>
               </div>
 
-              <div className="p-5 overflow-x-auto">
-                <table className="w-full min-w-[840px] text-sm">
+              {USE_REPORT_CARDS_API_V2 ? (
+                <>
+                  <div className="p-5 space-y-6">
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-100">
+                          <tr>
+                            <th className={`${modalTableHeaderClass} text-left`}>Mapel</th>
+                            <th className={`${modalTableHeaderClass} w-28 text-center`}>KKM</th>
+                            <th className={`${modalTableHeaderClass} w-32 text-center`}>Nilai</th>
+                            <th className={`${modalTableHeaderClass} w-28 text-center`}>Predikat</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {v2Preview?.data?.academic_scores?.map((score, i) => (
+                            <tr key={i}>
+                              <td className="px-3 py-3 font-semibold text-slate-900">{score.subject_name}</td>
+                              <td className="px-3 py-3 text-center">{score.passing_grade}</td>
+                              <td className="px-3 py-3 text-center font-bold">{score.score}</td>
+                              <td className="px-3 py-3 text-center">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${buildScoreTone(score.score, score.passing_grade)}`}>
+                                  {score.predicate || '-'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                          {!v2Preview?.data?.academic_scores?.length && (
+                            <tr>
+                              <td colSpan={4} className="px-3 py-6 text-center text-slate-500">Belum ada nilai akademik</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {v2Preview?.data?.extracurriculars?.length > 0 && (
+                      <div className="overflow-x-auto rounded-xl border border-slate-200">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-100">
+                            <tr>
+                              <th className={`${modalTableHeaderClass} text-left`}>Ekstrakurikuler</th>
+                              <th className={`${modalTableHeaderClass} w-32 text-center`}>Nilai/Predikat</th>
+                              <th className={`${modalTableHeaderClass} text-left`}>Keterangan</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {v2Preview.data.extracurriculars.map((ekskul, i) => (
+                              <tr key={i}>
+                                <td className="px-3 py-3 font-semibold text-slate-900">{ekskul.extracurricular_name}</td>
+                                <td className="px-3 py-3 text-center font-bold">{ekskul.score || ekskul.predicate || '-'}</td>
+                                <td className="px-3 py-3 text-slate-600">{ekskul.description || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <div>
+                        <label className={metricLabelClass}>Sakit</label>
+                        <input type="number" min="0" value={metadataForm.sakit} onChange={e => setMetadataForm(prev => ({...prev, sakit: e.target.value}))} className={inputClass} />
+                      </div>
+                      <div>
+                        <label className={metricLabelClass}>Izin</label>
+                        <input type="number" min="0" value={metadataForm.izin} onChange={e => setMetadataForm(prev => ({...prev, izin: e.target.value}))} className={inputClass} />
+                      </div>
+                      <div>
+                        <label className={metricLabelClass}>Alpa</label>
+                        <input type="number" min="0" value={metadataForm.alpa} onChange={e => setMetadataForm(prev => ({...prev, alpa: e.target.value}))} className={inputClass} />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className={metricLabelClass}>Catatan Wali Kelas</label>
+                        <textarea rows="3" value={metadataForm.catatan_wali_kelas} onChange={e => setMetadataForm(prev => ({...prev, catatan_wali_kelas: e.target.value}))} className={inputClass} placeholder="Beri catatan untuk siswa..."></textarea>
+                      </div>
+                      <div>
+                        <label className={metricLabelClass}>Keputusan (Opsional)</label>
+                        <textarea rows="3" value={metadataForm.keputusan} onChange={e => setMetadataForm(prev => ({...prev, keputusan: e.target.value}))} className={inputClass} placeholder="Cth: Naik ke kelas XI"></textarea>
+                      </div>
+                    </div>
+
+                    {v2Preview?.data?.status && (
+                      <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700 flex items-center justify-between">
+                        <span>Status Rapot V2:</span>
+                        <span className="uppercase tracking-widest">{v2Preview.data.status}</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="border-t border-slate-200 p-5 flex justify-end gap-3">
+                    {(v2Preview?.data?.status === 'draft' || !v2Preview?.data?.status) && (
+                      <>
+                        <button type="button" onClick={saveMetadata} disabled={saving} className={secondaryButtonClass}>Simpan Metadata</button>
+                        <button type="button" onClick={handleFinalize} disabled={saving} className="rounded-xl bg-amber-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60">Finalisasi</button>
+                      </>
+                    )}
+                    {v2Preview?.data?.status === 'finalized' && (
+                      <>
+                        <button type="button" onClick={handleReopen} disabled={saving} className={secondaryButtonClass}>Buka Kembali (Draft)</button>
+                        <button type="button" onClick={handlePublish} disabled={saving} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60">Terbitkan</button>
+                      </>
+                    )}
+                    {v2Preview?.data?.status === 'published' && (
+                      <button type="button" onClick={handlePrint} disabled={exportingRapot} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60">Cetak PDF</button>
+                    )}
+                    <button type="button" onClick={() => setActiveModal(null)} className={secondaryButtonClass}>Tutup</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="p-5 overflow-x-auto">
+                    <table className="w-full min-w-[840px] text-sm">
                   <thead className="bg-slate-100">
                     <tr>
                       <th className={`${modalTableHeaderClass} w-16 text-center`}>No</th>
@@ -1118,6 +1398,8 @@ export default function RapotSiswa() {
                   {saving ? 'Menyimpan...' : 'Simpan Rapot'}
                 </button>
               </div>
+            </>
+          )}
             </div>
           </div>
         )}

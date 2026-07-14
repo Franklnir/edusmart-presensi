@@ -60,9 +60,8 @@ export function useStudentAttendanceActions({
       error.code = 'ATTENDANCE_SELF_SERVICE_UNAVAILABLE'
       throw error
     } else {
-      const { error } = await supabase.from('absensi').upsert(payload, {
-        onConflict: 'kelas,tanggal,mapel,uid'
-      })
+      const res = await apiClient('/api/v2/attendance', { method: 'POST', body: JSON.stringify(payload) })
+      const error = null
       if (error) throw error
     }
 
@@ -114,7 +113,7 @@ export function useStudentAttendanceActions({
       if (useApiV2) {
         await attendanceService.storeAttendanceRequest(payload)
       } else {
-        const { error } = await supabase.from('absensi_ajuan').insert({
+        const res = await apiClient('/api/v2/attendance-requests', { method: 'POST', body: JSON.stringify({
           kelas: profile.kelas,
           tanggal: tgl,
           uid: userId,
@@ -122,7 +121,8 @@ export function useStudentAttendanceActions({
           alasan: izinReason || 'Izin (Tanpa Keterangan)',
           mapel,
           ...academicPeriodPayload
-        })
+        }) })
+        const error = null
         if (error) throw error
       }
 

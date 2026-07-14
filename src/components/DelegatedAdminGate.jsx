@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { ShieldAlert } from 'lucide-react'
-import { supabase } from '../lib/supabase'
 import { resolveDelegatedAdminFeatureFromPath } from '../constants/adminFeaturePermissions'
+import { organizationService } from '../services/organizationService'
 import LoadingSpinner from './LoadingSpinner'
 
 const DelegatedAdminGate = () => {
@@ -23,9 +23,8 @@ const DelegatedAdminGate = () => {
 
       setLoading(true)
       try {
-        const { data, error } = await supabase.admin.delegatedPermissions()
-        if (error) throw error
-        const features = Array.isArray(data?.features) ? data.features : []
+        const { data } = await organizationService.getContext()
+        const features = Array.isArray(data?.delegated_features) ? data.delegated_features : []
         if (!cancelled) setAllowed(
           features.includes(feature.key) ||
           (feature.parentKey && features.includes(feature.parentKey))

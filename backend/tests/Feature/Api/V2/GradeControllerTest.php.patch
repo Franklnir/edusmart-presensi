@@ -1,0 +1,124 @@
+--- backend/tests/Feature/Api/V2/GradeControllerTest.php
++++ backend/tests/Feature/Api/V2/GradeControllerTest.php
+@@ -129,6 +129,91 @@
+             ->assertJsonPath('code', 'academic_period_locked');
+     }
+ 
++    public function test_teacher_can_read_only_own_manual_scores(): void
++    {
++        $teacher = $this->createUser('guru');
++        $otherTeacher = $this->createUser('guru');
++        $student = $this->createUser('siswa');
++        $this->insertManualScore($teacher->id, $student->id, 'Kelas 10', 'Fisika');
++        $this->insertManualScore($otherTeacher->id, $student->id, 'Kelas 10', 'Biologi');
++
++        Sanctum::actingAs($teacher);
++        $this->withHeaders($this->tenantHeaders())
++            ->getJson('/api/v2/grades/manual-scores?tahun_ajaran=2026/2027&semester=Ganjil')
++            ->assertOk()
++            ->assertJsonPath('academic_context.tahun_ajaran', '2026/2027')
++            ->assertJsonCount(1, 'data')
++            ->assertJsonPath('data.0.mapel', 'Fisika')
++            ->assertJsonMissing(['mapel' => 'Biologi']);
++    }
++
++    public function test_teacher_upsert_manual_score_is_idempotent_and_server_scoped(): void
++    {
++        $teacher = $this->createUser('guru');
++        $student = $this->createUser('siswa');
++        $student->profile->update(['kelas' => 'Kelas 10']);
++        
++        DB::table('jadwal')->insert([
++            'id' => (string) Str::uuid(),
++            'tenant_id' => $this->tenantId,
++            'guru_id' => $teacher->id,
++            'kelas_id' => 'Kelas 10',
++            'mapel' => 'Fisika',
++            'tahun_ajaran' => '2026/2027',
++            'semester' => 'Ganjil',
++        ]);
++
++        Sanctum::actingAs($teacher);
++
++        $payload = $this->manualScorePayload([
++            'siswa_id' => $student->id,
++            'kelas_id' => 'Kelas 10',
++            'mapel' => 'Fisika',
++            'tahun_ajaran' => '2026/2027',
++            'semester' => 'Ganjil',
++        ]);
++        $headers = $this->tenantHeaders(['Idempotency-Key' => 'manual-score-upsert-1']);
++
++        $this->withHeaders($headers)
++            ->putJson('/api/v2/grades/manual-scores', $payload)
++            ->assertOk()
++            ->assertJsonPath('data.guru_id', $teacher->id)
++            ->assertJsonPath('data.siswa_id', $student->id);
++
++        $this->withHeaders($headers)
++            ->putJson('/api/v2/grades/manual-scores', $payload)
++            ->assertOk()
++            ->assertHeader('Idempotency-Replayed', 'true');
++
++        $this->assertSame(1, DB::table('guru_mapel_manual_nilai')
++            ->where('tenant_id', $this->tenantId)
++            ->where('guru_id', $teacher->id)
++            ->where('siswa_id', $student->id)
++            ->count());
++    }
++
++    public function test_manual_score_is_rejected_if_teacher_does_not_teach_class(): void
++    {
++        $teacher = $this->createUser('guru');
++        $student = $this->createUser('siswa');
++        $student->profile->update(['kelas' => 'Kelas 11']);
++        
++        Sanctum::actingAs($teacher);
++
++        $payload = $this->manualScorePayload([
++            'siswa_id' => $student->id,
++            'kelas_id' => 'Kelas 11',
++            'mapel' => 'Kimia',
++        ]);
++
++        $this->withHeaders($this->tenantHeaders())
++            ->putJson('/api/v2/grades/manual-scores', $payload)
++            ->assertStatus(403)
++            ->assertJsonPath('code', 'GRADE_TEACHING_ASSIGNMENT_REQUIRED');
++    }
++
+     private function createUser(string $role): User
+     {
+         $user = User::factory()->create(['id' => (string) Str::uuid()]);
+@@ -156,6 +241,31 @@
+         ]));
+     }
+ 
++    private function insertManualScore(string $guruId, string $siswaId, string $kelasId, string $mapel): void
++    {
++        DB::table('guru_mapel_manual_nilai')->insert($this->manualScorePayload([
++            'id' => (string) Str::uuid(),
++            'tenant_id' => $this->tenantId,
++            'guru_id' => $guruId,
++            'siswa_id' => $siswaId,
++            'kelas_id' => $kelasId,
++            'mapel' => $mapel,
++        ]));
++    }
++
++    /** @return array<string, mixed> */
++    private function manualScorePayload(array $overrides = []): array
++    {
++        return array_merge([
++            'tahun_ajaran' => '2026/2027',
++            'semester' => 'Ganjil',
++            'nilai_manual' => 85.5,
++            'nilai_uts_manual' => 80.0,
++            'nilai_uas_manual' => 90.0,
++            'catatan' => 'Baik',
++        ], $overrides);
++    }
++
+     /** @return array<string, mixed> */
+     private function weightPayload(array $overrides = []): array
+     {

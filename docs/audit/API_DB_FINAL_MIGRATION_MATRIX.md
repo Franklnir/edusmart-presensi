@@ -14,7 +14,8 @@ active legacy consumers. `LEGACY` means the gateway remains on an active path.
 |---|---|---|---|---|---|
 | Shared academic context | `AcademicContext.jsx` | active year and term bootstrap | none | `/api/v2/academic-context` | MIGRATED |
 | Current profile | auth bootstrap, EditProfile | current profile read and self update | `/api/db`, `/api/profile/me`, legacy storage avatar path | `/api/v2/profile`; profile Attachment V2 pending | IMPLEMENTING |
-| Navbar | navbar hooks | profile, presence, notifications | `/api/db` | profile and notification resources | LEGACY |
+| Organization context | navbar hooks | tenant name/logo, active academic context, homeroom flag, delegated features | `/api/db`, legacy permissions | `/api/v2/organizations` | IMPLEMENTING |
+| Navbar | navbar hooks | profile, presence, notifications | legacy monitoring/notification paths | profile, organization, and notification resources | IMPLEMENTING |
 | Dashboard | admin, teacher, student pages | role summaries and cards | `/api/db` | role dashboard resources | LEGACY |
 | Classes | admin class page | class CRUD | `/api/db` | `/api/v2/classes` | IMPLEMENTING |
 | Students | admin and student feature hooks | roster, state, RFID enrollment | `/api/db`, RFID legacy | `/api/v2/students` | IMPLEMENTING |
@@ -23,11 +24,11 @@ active legacy consumers. `LEGACY` means the gateway remains on an active path.
 | Attendance | admin, teacher, student | read, record, requests | `/api/db` | `/api/v2/attendance`, `/api/v2/attendance-requests` | IMPLEMENTING |
 | Assignments | teacher and student pages | assignment and submission workflows | `/api/db`, `/api/tugas` | `/api/v2/assignments`, `/api/v2/submissions` | IMPLEMENTING |
 | Attachments | assignment and submission flows | upload and authorized download | `/api/storage/*` | `/api/v2/uploads`, `/api/v2/attachments` | IMPLEMENTING |
-| Grades | teacher report and grade widgets | weights, manual scores, recap | `/api/db`, reports legacy | `/api/v2/grades` | LEGACY |
+| Grades | teacher report and grade widgets | semester-scoped subject weights; manual scores, recap remain legacy | `/api/db`, reports legacy | `/api/v2/grades/weights`; `/api/v2/grades` pending | IMPLEMENTING |
 | Report cards | teacher report-card page | report-card CRUD and items | `/api/db` | `/api/v2/report-cards` | LEGACY |
 | Quizzes | teacher and student quiz pages | authoring, attempts, grading, retake | `/api/quiz/*`, `/api/db` | quiz and attempt resources | LEGACY |
 | Reports | teacher reports and dashboard widgets | aggregates and exports | `/api/reports/*`, `/api/db` | `/api/v2/reports` | LEGACY |
-| Announcements | admin and dashboards | create, publish, read | `/api/db` | `/api/v2/announcements` | LEGACY |
+| Announcements | admin and dashboards | create, publish, read | `/api/db` | `/api/v2/announcements` | IMPLEMENTING |
 | School structure | class and settings tabs | structure and organization membership | `/api/db` | structure and organization resources | LEGACY |
 | Extracurriculars | admin, teacher, student | catalogue, registration, reporting | `/api/db` | extracurricular resources | LEGACY |
 | Certificates | admin certificate page | template, recipient, attachment flow | `/api/db`, `/api/storage/*` | certificate and attachment resources | LEGACY |

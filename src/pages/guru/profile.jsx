@@ -1,6 +1,7 @@
 // src/pages/guru/profile.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
+import { currentProfileService } from '../../services/currentProfileService'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import GoogleCredentialButton from '../../components/GoogleCredentialButton'
@@ -51,12 +52,6 @@ function displayValue(value, fallback = '-') {
   return text || fallback
 }
 
-function genderLabel(value) {
-  const normalized = String(value || '').trim().toUpperCase()
-  if (normalized === 'L') return 'Laki-laki'
-  if (normalized === 'P') return 'Perempuan'
-  return displayValue(value)
-}
 
 function roleLabel(value) {
   const normalized = String(value || '').trim().toLowerCase()
@@ -75,16 +70,6 @@ function statusLabel(value) {
   return displayValue(value)
 }
 
-function formatDateLabel(value) {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return displayValue(value)
-  return date.toLocaleDateString('id-ID', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric'
-  })
-}
 
 function formatDateTimeLabel(value) {
   if (!value) return '-'
@@ -147,8 +132,7 @@ async function compressImageTo100KB(file, maxBytes = MAX_COMPRESSED_BYTES) {
     let lastBlob = null
 
     while (quality >= 0.3) {
-      // eslint-disable-next-line no-await-in-loop
-      const blob = await new Promise((resolve) => {
+            const blob = await new Promise((resolve) => {
         canvas.toBlob(resolve, 'image/jpeg', quality)
       })
 
@@ -188,7 +172,7 @@ async function createSignedUrlOrThrow(path) {
 async function savePhotoPathToProfile(uid, filePath) {
   if (!uid) throw new Error('User tidak valid')
 
-  const { error } = await supabase.profile.updateMe({
+  const { error } = await currentProfileService.updateCurrentProfile({
     photo_path: filePath,
     photo_url: filePath
   })
@@ -403,8 +387,6 @@ export default function ProfileGuru() {
       }
       await refreshProfile()
       pushToast('success', plan.successMessage)
-    } catch (err) {
-      throw err
     } finally {
       setAccountSaving(false)
     }
@@ -465,7 +447,7 @@ export default function ProfileGuru() {
           setPhotoKey(stored)
           setPreviewUrl(addCacheBuster(signed))
         }
-      } catch (e) {
+      } catch {
         if (!cancelled) {
           setPhotoKey(stored)
           setPreviewUrl('')
@@ -560,7 +542,9 @@ export default function ProfileGuru() {
       if (localPreview) {
         try {
           URL.revokeObjectURL(localPreview)
-        } catch { }
+        } catch {
+          // ignore error
+        }
       }
     }
   }
@@ -580,7 +564,7 @@ export default function ProfileGuru() {
 
     setSaving(true)
     try {
-      const { error } = await supabase.profile.updateMe({
+      const { error } = await currentProfileService.updateCurrentProfile({
         nama: form.nama.trim(),
         nis: form.nis ? form.nis.trim() : null,
         jk: form.jk,

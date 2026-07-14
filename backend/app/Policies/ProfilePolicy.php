@@ -15,6 +15,11 @@ class ProfilePolicy
         return in_array($user->profile?->role, ['admin', 'guru'], true);
     }
 
+    public function viewAdminDashboard(User $user): bool
+    {
+        return $user->profile?->role === 'admin';
+    }
+
     public function view(User $user, Profile $profile): bool
     {
         $actor = $user->profile;

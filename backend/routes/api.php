@@ -165,7 +165,7 @@ Route::prefix('quiz')->middleware(['auth:sanctum', 'throttle:api'])->group(funct
     Route::post('/complete-essay-review', [QuizController::class, 'completeEssayReview']);
 });
 
-Route::middleware(['conceal.db.guests', 'throttle:db', 'track.db.proxy'])->group(function () {
+Route::middleware(['track.db.proxy', 'ensure.db.enabled', 'conceal.db.guests', 'throttle:db'])->group(function () {
     Route::post('/db', [DbController::class, 'handle']);
     Route::post('/db/batch', [DbController::class, 'batch']);
 });

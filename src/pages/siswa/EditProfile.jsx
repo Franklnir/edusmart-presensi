@@ -319,22 +319,10 @@ export default function EditProfile() {
   const updateProfilePhotoPathInDb = async (uid, objectKeyOrNull) => {
     const payload = {
       photo_path: objectKeyOrNull,
-      photo_url: objectKeyOrNull,
-      updated_at: new Date().toISOString()
+      photo_url: objectKeyOrNull
     }
 
-    // Coba pakai photo_path dulu
-    let { error } = await supabase.from('profiles').update(payload).eq('id', uid)
-
-    // Kalau kolom photo_path belum ada, fallback ke photo_url tapi isinya PATH (bukan URL)
-    if (error && /column .*photo_path.* does not exist/i.test(error.message || '')) {
-      const fallbackPayload = {
-        photo_url: objectKeyOrNull,
-        updated_at: new Date().toISOString()
-      }
-        ; ({ error } = await supabase.from('profiles').update(fallbackPayload).eq('id', uid))
-    }
-
+    const { error } = await currentProfileService.updateCurrentProfile(payload)
     if (error) throw error
   }
 

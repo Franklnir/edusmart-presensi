@@ -1,13 +1,18 @@
 <?php
 
 use App\Http\Controllers\Api\V2\AcademicContextController;
+use App\Http\Controllers\Api\V2\AdminDashboardController;
+use App\Http\Controllers\Api\V2\AnnouncementController;
 use App\Http\Controllers\Api\V2\AssignmentController;
 use App\Http\Controllers\Api\V2\AttachmentController;
 use App\Http\Controllers\Api\V2\AttendanceController;
 use App\Http\Controllers\Api\V2\AttendanceRequestController;
+use App\Http\Controllers\Api\V2\AttendanceScannerController;
 use App\Http\Controllers\Api\V2\ClassController;
 use App\Http\Controllers\Api\V2\CurrentProfileController;
 use App\Http\Controllers\Api\V2\FrontendLogController;
+use App\Http\Controllers\Api\V2\GradeController;
+use App\Http\Controllers\Api\V2\OrganizationContextController;
 use App\Http\Controllers\Api\V2\ScheduleController;
 use App\Http\Controllers\Api\V2\StudentController;
 use App\Http\Controllers\Api\V2\SubmissionController;
@@ -33,15 +38,27 @@ Route::post('/frontend-logs', [FrontendLogController::class, 'store'])
 Route::middleware('throttle:api')->group(function () {
     Route::get('/frontend-logs', [FrontendLogController::class, 'index']);
     Route::get('/academic-context', [AcademicContextController::class, 'show'])->name('academic-context.show');
+    Route::get('/organizations', [OrganizationContextController::class, 'show'])->name('organizations.show');
     Route::get('/profile', [CurrentProfileController::class, 'show'])->name('profile.show');
+    Route::post('/profile/provision', [CurrentProfileController::class, 'provision'])->name('profile.provision');
     Route::patch('/profile', [CurrentProfileController::class, 'update'])->name('profile.update');
+    Route::get('/dashboard/admin', [AdminDashboardController::class, 'show'])->name('dashboard.admin.show');
+    Route::get('/grades/weights', [GradeController::class, 'weights'])->name('grades.weights.index');
+    Route::put('/grades/weights', [GradeController::class, 'upsertWeights'])->name('grades.weights.upsert');
+    Route::get('/grades/manual-scores', [GradeController::class, 'manualScores'])->name('grades.manual-scores.index');
+    Route::put('/grades/manual-scores', [GradeController::class, 'upsertManualScore'])->name('grades.manual-scores.upsert');
+    Route::apiResource('announcements', AnnouncementController::class)->except(['show', 'create', 'edit']);
 
     Route::apiResource('classes', ClassController::class);
+    Route::get('classes/{class}/structure', [ClassController::class, 'getStructure'])->name('classes.structure.show');
+    Route::put('classes/{class}/structure', [ClassController::class, 'updateStructure'])->name('classes.structure.update');
     Route::apiResource('students', StudentController::class)->except(['destroy']);
     Route::patch('students/{student}/deactivate', [StudentController::class, 'deactivate'])->name('students.deactivate');
     Route::patch('students/{student}/activate', [StudentController::class, 'activate'])->name('students.activate');
     Route::apiResource('teachers', TeacherController::class);
     Route::apiResource('schedules', ScheduleController::class);
+    Route::post('attendance/scanner/bulk', [AttendanceScannerController::class, 'bulkStore'])->name('attendance.scanner.bulk');
+    Route::post('attendance/scanner/temp', [AttendanceScannerController::class, 'storeTemp'])->name('attendance.scanner.temp');
     Route::apiResource('attendance', AttendanceController::class)->except(['destroy']);
     Route::get('attendance-requests', [AttendanceRequestController::class, 'index'])->name('attendance-requests.index');
     Route::post('attendance-requests', [AttendanceRequestController::class, 'store'])->name('attendance-requests.store');
@@ -59,4 +76,47 @@ Route::middleware('throttle:api')->group(function () {
     Route::get('attachments/{attachment}', [AttachmentController::class, 'show'])->name('attachments.show');
     Route::get('attachments/{attachment}/download', [AttachmentController::class, 'download'])->name('attachments.download');
     Route::delete('attachments/{attachment}', [AttachmentController::class, 'destroy'])->name('attachments.destroy');
+
+    Route::get('report-cards', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'index'])->name('report-cards.index');
+    Route::get('report-cards/{student}', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'show'])->name('report-cards.show');
+    Route::get('report-cards/{student}/preview', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'preview'])->name('report-cards.preview');
+    Route::put('report-cards/{student}/metadata', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'updateMetadata'])->name('report-cards.metadata.update');
+    Route::post('report-cards/{student}/finalize', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'finalize'])->name('report-cards.finalize');
+    Route::post('report-cards/{student}/publish', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'publish'])->name('report-cards.publish');
+    Route::post('report-cards/{student}/reopen', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'reopen'])->name('report-cards.reopen');
+    Route::get('report-cards/{student}/print', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'print'])->name('report-cards.print');
+
+    // Extracurriculars
+    Route::get('extracurriculars', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'index'])->name('extracurriculars.index');
+    Route::post('extracurriculars', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'store'])->name('extracurriculars.store');
+    Route::get('extracurriculars/{extracurricular}', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'show'])->name('extracurriculars.show');
+    Route::put('extracurriculars/{extracurricular}', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'update'])->name('extracurriculars.update');
+    Route::delete('extracurriculars/{extracurricular}', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'destroy'])->name('extracurriculars.destroy');
+    Route::get('extracurriculars/{extracurricular}/members', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'members'])->name('extracurriculars.members');
+    Route::post('extracurriculars/{extracurricular}/join', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'join'])->name('extracurriculars.join');
+    Route::delete('extracurriculars/{extracurricular}/leave', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'leave'])->name('extracurriculars.leave');
+
+    // Certificates
+    Route::get('certificates', [\App\Http\Controllers\Api\V2\CertificateController::class, 'index'])->name('certificates.index');
+    Route::post('certificates', [\App\Http\Controllers\Api\V2\CertificateController::class, 'store'])->name('certificates.store');
+    Route::get('certificates/{certificate}', [\App\Http\Controllers\Api\V2\CertificateController::class, 'show'])->name('certificates.show');
+    Route::put('certificates/{certificate}', [\App\Http\Controllers\Api\V2\CertificateController::class, 'update'])->name('certificates.update');
+    Route::delete('certificates/{certificate}', [\App\Http\Controllers\Api\V2\CertificateController::class, 'destroy'])->name('certificates.destroy');
+
+    // Certificate Templates
+    Route::get('certificate-templates', [\App\Http\Controllers\Api\V2\CertificateTemplateController::class, 'index'])->name('certificate-templates.index');
+    Route::post('certificate-templates', [\App\Http\Controllers\Api\V2\CertificateTemplateController::class, 'store'])->name('certificate-templates.store');
+    Route::get('certificate-templates/{template}', [\App\Http\Controllers\Api\V2\CertificateTemplateController::class, 'show'])->name('certificate-templates.show');
+    Route::put('certificate-templates/{template}', [\App\Http\Controllers\Api\V2\CertificateTemplateController::class, 'update'])->name('certificate-templates.update');
+    Route::delete('certificate-templates/{template}', [\App\Http\Controllers\Api\V2\CertificateTemplateController::class, 'destroy'])->name('certificate-templates.destroy');
+
+    // Subjects & Jam Kosong
+    Route::apiResource('subjects', \App\Http\Controllers\Api\V2\SubjectController::class)->except(['create', 'edit']);
+    Route::apiResource('jam-kosong', \App\Http\Controllers\Api\V2\JamKosongController::class)->except(['create', 'edit', 'update', 'show']);
+
+    Route::apiResource('quizzes', \App\Http\Controllers\Api\V2\QuizController::class)->except(['create', 'edit', 'show']);
+    Route::apiResource('quiz-questions', \App\Http\Controllers\Api\V2\QuizQuestionController::class)->only(['store', 'update', 'destroy']);
+    Route::post('quizzes/{quiz}/submit', [\App\Http\Controllers\Api\V2\QuizSubmissionController::class, 'submitAnswer']);
+    Route::post('quizzes/{quiz}/finish', [\App\Http\Controllers\Api\V2\QuizSubmissionController::class, 'finishQuiz']);
+    Route::post('quizzes/{quiz}/violations', [\App\Http\Controllers\Api\V2\QuizSubmissionController::class, 'logViolation']);
 });

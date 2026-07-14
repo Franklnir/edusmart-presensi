@@ -15,6 +15,7 @@ import {
   withResolvedThemePreference,
   writeUserThemeLocal
 } from '../theme/userThemes'
+import { currentProfileService } from '../services/currentProfileService'
 
 // Helper kecil biar konsisten
 const normalizeEmail = (email) => email.trim().toLowerCase()
@@ -186,17 +187,13 @@ const ensureProfile = async (user) => {
       return { error: new Error('Role pengguna tidak valid') }
     }
 
-    const { error: insertError } = await supabase.from('profiles').insert(payload)
-    if (insertError) return { error: insertError }
-
-      ; ({ data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single())
-
-    if (error) return { error }
-    return { profile: withResolvedThemePreference(data, user.id) }
+    try {
+      const res = await currentProfileService.provisionCurrentProfile(payload)
+      if (res.error) return { error: res.error }
+      return { profile: withResolvedThemePreference(res.data, user.id) }
+    } catch (insertError) {
+      return { error: insertError }
+    }
   }
 
   return { error }
@@ -936,22 +933,22 @@ export const useAuthStore = create((set, get) => ({
       if (!user) throw new Error('User tidak ditemukan setelah registrasi')
 
       // 2) Insert ke tabel profiles
-      const { error: errProfile } = await supabase.from('profiles').insert({
-        id: user.id,
-        email: normalizedEmail,
-        role,
-        nama: profileData.nama,
-        status: 'active',
-        jk: profileData.jk || null,
-        telp: profileData.telp || null,
-        alamat: profileData.alamat || null,
-        kelas: profileData.kelas || null,
-        usia: profileData.usia || null,
-        nis: profileData.nis || null,
-        agama: profileData.agama || null,
-        jabatan: profileData.jabatan || null,
-        created_via: 'manual_registration',
-        created_at: new Date().toISOString()
+      const { error: errProfile } = await apiFetch('/api/v2/profile/provision', {
+        method: 'POST',
+        body: {
+          role,
+          nama: profileData.nama,
+          status: 'active',
+          jk: profileData.jk || null,
+          telp: profileData.telp || null,
+          alamat: profileData.alamat || null,
+          kelas: profileData.kelas || null,
+          usia: profileData.usia || null,
+          nis: profileData.nis || null,
+          agama: profileData.agama || null,
+          jabatan: profileData.jabatan || null,
+          created_via: 'manual_registration'
+        }
       })
 
       if (errProfile) {

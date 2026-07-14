@@ -147,6 +147,44 @@ class DbController extends ApiController
             return $this->deny('Aksi tidak diizinkan', 400, 'DB_ACTION_NOT_ALLOWED');
         }
 
+        // Phase 4H: Blokir operasi tulis (write) pada tabel yang sudah bermigrasi penuh ke V2
+        $migratedTables = [
+            'rapot_siswa',
+            'rapot_siswa_items',
+            'guru_mapel_manual_nilai',
+            'ekskul',
+            'ekskul_anggota',
+            'ekskul_pembina',
+            'ekskul_pertemuan',
+            'ekskul_pertemuan_absensi',
+            'ekskul_pertemuan_jurnal',
+            'absensi',
+            'absensi_scan_temp',
+            'tugas',
+            'tugas_jawaban',
+            'profiles',
+            'certificates',
+            'templat_sertifikat_publik',
+            // Phase 4K
+            'kelas',
+            'kelas_struktur',
+            'mata_pelajaran',
+            'jadwal',
+            'jam_kosong',
+            'guru_mapel_bobot',
+            // Phase 4L
+            'quizzes',
+            'quiz_questions',
+            'quiz_options',
+            'quiz_submissions',
+            'quiz_answers',
+            'quiz_violation_logs',
+            'quiz_retake_logs',
+        ];
+        if ($action !== 'select' && in_array($table, $migratedTables, true)) {
+            return $this->deny("Tabel {$table} telah dimigrasikan ke API V2. Operasi tulis melalui legacy API tidak lagi diizinkan.", 410, 'DB_LEGACY_WRITE_BLOCKED');
+        }
+
         $validationError = $this->validateDbRequestShape($request);
         if ($validationError !== null) {
             return $this->deny($validationError, 422);

@@ -1517,7 +1517,8 @@ export default function GuruQuiz() {
 
     try {
       setLoading(true)
-      const { error } = await supabase.from('quizzes').insert(payload)
+      await quizService.createQuiz(payload)
+      const error = null
       if (error) throw error
       pushToast('success', 'Quiz berhasil dibuat')
       resetQuizForm()
@@ -1599,10 +1600,7 @@ export default function GuruQuiz() {
     }
 
     await Promise.all(updates.map((question) => (
-      supabase.from('quiz_questions')
-        .update({ nomor: question.nomor, updated_at: new Date().toISOString() })
-        .eq('id', question.id)
-        .eq('quiz_id', selectedQuiz.id)
+      quizService.updateQuestion(question.id, { nomor: question.nomor, updated_at: new Date().toISOString(), options: optionsByQuestion[question.id] })
     )))
     const normalized = sorted.map((question, index) => ({ ...question, nomor: index + 1 }))
     setQuestions(normalized)
@@ -1770,13 +1768,8 @@ export default function GuruQuiz() {
     const next = !current
     try {
       setResultVisibilitySaving(true)
-      const { error } = await supabase
-        .from('quizzes')
-        .update({
-          result_visible_to_students: next,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', selectedQuiz.id)
+      await quizService.updateQuiz(selectedQuiz.id, { result_visible_to_students: next, updated_at: new Date().toISOString() })
+      const error = null
       if (error) throw error
 
       setQuizList((prev) => prev.map((row) => (
@@ -2002,53 +1995,45 @@ export default function GuruQuiz() {
         question_type: questionType,
         updated_at: new Date().toISOString()
       }
+      const optionRows = questionType === 'mcq' ? optionEntries.map((o) => ({
+        label: o.label,
+        text: o.text.trim(),
+        image_path: o.image_path || null,
+        is_correct: o.label === questionForm.correct
+      })) : []
+
       if (!questionId) {
         questionId = makeId()
         const nextNomor = questions.length + 1
         savedQuestionRow.id = questionId
         savedQuestionRow.nomor = nextNomor
         savedQuestionRow.created_at = new Date().toISOString()
-        const { error } = await supabase.from('quiz_questions').insert({
-          id: questionId,
-          quiz_id: selectedQuizId,
+        
+        await quizService.addQuestion(selectedQuizId, {
           nomor: nextNomor,
           soal: questionForm.soal.trim(),
           image_path: questionForm.image_path || null,
           poin: questionPoint,
           question_type: questionType,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          options: optionRows
         })
-        if (error) throw error
       } else {
         savedQuestionRow.nomor = editingQuestion?.nomor || questions.length
-        const { error } = await supabase
-          .from('quiz_questions')
-          .update({
-            soal: questionForm.soal.trim(),
-            image_path: questionForm.image_path || null,
-            poin: questionPoint,
-            question_type: questionType,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', questionId)
-        if (error) throw error
-        await supabase.from('quiz_options').delete().eq('question_id', questionId)
+        await quizService.updateQuestion(questionId, {
+          nomor: savedQuestionRow.nomor,
+          soal: questionForm.soal.trim(),
+          image_path: questionForm.image_path || null,
+          poin: questionPoint,
+          question_type: questionType,
+          options: optionRows
+        })
       }
 
       if (questionType === 'mcq') {
-        const optionRows = optionEntries.map((o) => ({
-          id: makeId(),
-          question_id: questionId,
-          label: o.label,
-          text: o.text.trim(),
-          image_path: o.image_path || null,
-          is_correct: o.label === questionForm.correct,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+        setOptionsByQuestion((prev) => ({
+          ...prev,
+          [questionId]: optionRows.map(o => ({ ...o, question_id: questionId, id: makeId() }))
         }))
-        const { error: optError } = await supabase.from('quiz_options').insert(optionRows)
-        if (optError) throw optError
       }
 
       const staleImagePaths = [...previousImagePaths].filter((path) => !nextImagePaths.has(path))
@@ -2314,7 +2299,7 @@ export default function GuruQuiz() {
     if (!window.confirm('Hapus soal ini?')) return
     try {
       setLoading(true)
-      await supabase.from('quiz_questions').delete().eq('id', questionId)
+      await quizService.deleteQuestion(questionId)
       const { data } = await supabase
         .from('quiz_questions')
         .select('id,quiz_id,nomor,soal,image_path,poin,question_type,updated_at')

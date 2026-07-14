@@ -19,6 +19,8 @@ class DbProxyUsageTelemetry
         try {
             $metadata = $this->metadata($request, $status, $startedAt);
             $now = now();
+            
+            Log::channel('legacy_db')->info('Legacy DB Access', $metadata);
 
             $updated = DB::table('db_proxy_usage_telemetry')
                 ->where('scope_key', $metadata['scope_key'])

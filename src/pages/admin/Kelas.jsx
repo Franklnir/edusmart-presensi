@@ -6,6 +6,7 @@ import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useUIStore } from '../../store/useUIStore'
 import { ClassesApi } from '../../lib/api/v2/classes'
 import { scheduleService } from '../../services/scheduleService'
+import { subjectService } from '../../services/academicService'
 import PasswordInput from '../../components/PasswordInput'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import { CalendarClock, Copy, Loader2, PlusCircle, Trash2 } from 'lucide-react'
@@ -1068,14 +1069,9 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
   const loadMapelList = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('mata_pelajaran')
-        .select('*')
-        .order('nama')
-
-      if (error) throw error
-
-      const rows = data.map(m => ({
+      const res = await subjectService.getSubjects({ per_page: 200 })
+      
+      const rows = (res.data || []).map(m => ({
         ...m,
         id: m.id,
         nama: normalizeMapelName(m.nama || m.id)

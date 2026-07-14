@@ -7,6 +7,7 @@ import {
   CERT_TEMPLATE_BUCKET as APP_CERT_TEMPLATE_BUCKET,
   extractObjectPath
 } from '../../lib/supabase'
+import { certificateService } from '../../services/certificateService'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
@@ -1213,10 +1214,11 @@ const GeneratorSection = ({ templateVersion }) => {
           sent: true,
           sent_at: new Date().toISOString()
         }
-        let { data: insData, error: insErr } = await supabase.from('certificates').insert(insertPayload).select('id')
+        let { data: insData, error: insErr } = await certificateService.createCertificate(insertPayload)
         if (insErr && /certificate_number/i.test(insErr.message || '')) {
-          const { certificate_number, ...legacyPayload } = insertPayload
-          ; ({ data: insData, error: insErr } = await supabase.from('certificates').insert(legacyPayload).select('id'))
+          const legacyPayload = { ...insertPayload }
+          delete legacyPayload.certificate_number
+          ; ({ data: insData, error: insErr } = await certificateService.createCertificate(legacyPayload))
         }
         if (insErr) throw insErr
 
@@ -1668,12 +1670,12 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
       }
 
       if (editingId) {
-        const { error } = await supabase.from('templat_sertifikat_publik').update(payload).eq('id', editingId)
+        const { error } = await certificateService.updateTemplate(editingId, payload)
         if (error) throw error
         toast('success', 'Template berhasil diperbarui')
       } else {
         const ins = { ...payload, created_by: user?.id || null, created_at: new Date().toISOString() }
-        const { error } = await supabase.from('templat_sertifikat_publik').insert(ins)
+        const { error } = await certificateService.createTemplate(ins)
         if (error) throw error
         toast('success', 'Template baru berhasil disimpan')
       }
@@ -1740,7 +1742,7 @@ const TemplateManagerSection = ({ onTemplateChanged }) => {
   const handleDelete = async (id) => {
     if (!confirm('Hapus template ini?')) return
     try {
-      const { error } = await supabase.from('templat_sertifikat_publik').delete().eq('id', id)
+      const { error } = await certificateService.deleteTemplate(id)
       if (error) throw error
       await loadTemplates()
       onTemplateChanged?.()
@@ -2187,7 +2189,7 @@ const HistorySection = () => {
     setDeletingId(row.id)
     try {
       // Hapus DB dulu (RLS admin)
-      const { error } = await supabase.from('certificates').delete().eq('id', row.id)
+      const { error } = await certificateService.deleteCertificate(row.id)
       if (error) throw error
 
       // Best effort: hapus file storage kalau file_url itu path

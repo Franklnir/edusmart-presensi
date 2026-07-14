@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { apiClient } from '../../lib/api/client'
 import { useLocalCache } from '../../hooks/useLocalCache'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -7,6 +8,10 @@ import { resolveAcademicPeriod } from '../../utils/academicPeriod'
 import AcademicPeriodArchiveFilter from '../../components/AcademicPeriodArchiveFilter'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
 import { queryClient, queryKeys } from '../../lib/queryClient'
+import { adminDashboardService } from '../../services/adminDashboardService'
+import { announcementService } from '../../services/announcementService'
+import { teacherService } from '../../services/teacherService'
+import { extracurricularService } from '../../services/extracurricularService'
 import { List } from 'react-window'
 
 /* ===== Utils ===== */
@@ -22,6 +27,8 @@ const slug = (s = '') =>
 
 const confirmDelete = (msg = 'Yakin mau dihapus?') => window.confirm(msg)
 const HARI_OPTS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']
+const USE_ANNOUNCEMENTS_API_V2 = import.meta.env.VITE_USE_ANNOUNCEMENTS_API_V2 === 'true'
+const USE_EXTRACURRICULARS_API_V2 = import.meta.env.VITE_USE_EXTRACURRICULAR_API_V2 === 'true'
 
 // Helper parse/format hari ekskul
 const parseEskulDays = (hariText = '') => {
@@ -58,7 +65,6 @@ const toIsoFromDateTimeLocal = (value) => {
   return date.toISOString()
 }
 
-const SETTINGS_PERIOD_COLUMNS = 'id, tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai, max_ekskul_per_siswa'
 const DEFAULT_MAX_ESKUL_PER_SISWA = 3
 const normalizeEskulLimit = (value) => Math.max(1, Math.min(99, Number.parseInt(value, 10) || DEFAULT_MAX_ESKUL_PER_SISWA))
 
@@ -246,25 +252,19 @@ export default function AHome() {
   }, [activeSchoolPeriod])
 
   const loadCurrentAcademicPeriod = useCallback(async ({ force = false } = {}) => {
-    const data = await queryClient.fetchQuery({
+    const dashboard = await queryClient.fetchQuery({
       queryKey: queryKeys.admin.activeAcademicPeriodSettings(),
       queryFn: async () => {
-        const { data, error } = await supabase
-          .from('settings')
-          .select(SETTINGS_PERIOD_COLUMNS)
-          .order('id')
-          .limit(1)
-          .maybeSingle()
-
-        if (error) throw error
-        return data || {}
+        const response = await adminDashboardService.getDashboard()
+        return response.data || {}
       },
       staleTime: force ? 0 : 60 * 1000
     })
 
-    const period = resolveAcademicPeriod(data || {})
-    setSettingsId(data?.id || null)
-    setMaxEskulPerSiswa(normalizeEskulLimit(data?.max_ekskul_per_siswa))
+    const settings = dashboard?.settings || {}
+    const period = resolveAcademicPeriod(dashboard?.academic_period || settings)
+    setSettingsId(settings?.id || null)
+    setMaxEskulPerSiswa(normalizeEskulLimit(settings?.max_ekskul_per_siswa))
     setActiveEskulPeriod(period)
     return period
   }, [])
@@ -275,19 +275,24 @@ export default function AHome() {
     setIsLoading(shouldBlock)
     setIsDashboardRefreshing(!shouldBlock)
     try {
-      const period = activeSchoolPeriod?.tahunAjaran
-        ? activeSchoolPeriod
-        : await loadCurrentAcademicPeriod()
-      const summaryParams = period?.tahunAjaran ? { tahun_ajaran: period.tahunAjaran } : {}
-      const bootstrap = await queryClient.fetchQuery({
-        queryKey: queryKeys.admin.homeBootstrap(summaryParams),
-        queryFn: async () => {
-          const { data, error } = await supabase.admin.homeBootstrap(summaryParams)
-          if (error) throw error
-          return data || {}
-        },
-        staleTime: silent ? 60 * 1000 : 15 * 1000
-      })
+      const summaryParams = activeSchoolPeriod?.tahunAjaran
+        ? { tahun_ajaran: activeSchoolPeriod.tahunAjaran }
+        : {}
+      const [bootstrap, teacherRows] = await Promise.all([
+        queryClient.fetchQuery({
+          queryKey: queryKeys.admin.dashboard(summaryParams),
+          queryFn: async () => {
+            const response = await adminDashboardService.getDashboard(summaryParams)
+            return response.data || {}
+          },
+          staleTime: silent ? 60 * 1000 : 15 * 1000
+        }),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.admin.teacherOptions({ ...summaryParams, status: 'active' }),
+          queryFn: () => teacherService.listAllTeacherOptions({ status: 'active' }),
+          staleTime: 60 * 1000
+        })
+      ])
 
       if (bootstrap?.settings) {
         setSettingsId(bootstrap.settings?.id || null)
@@ -297,16 +302,13 @@ export default function AHome() {
         setActiveEskulPeriod(resolveAcademicPeriod(bootstrap.academic_period))
       }
 
-      const people = bootstrap?.people || []
-      const guruRows = people.filter((item) => item.role === 'guru' || item.role === 'teacher')
-      const adminRows = people.filter((item) => item.role === 'admin')
       const summary = bootstrap?.summary || bootstrap || {}
-      const pengumumanRows = bootstrap?.pengumuman || []
+      const pengumumanRows = bootstrap?.announcements || []
 
       setStats({
         siswa: summary.siswa || 0,
-        guru: summary.guru || guruRows.length,
-        admin: summary.admin || adminRows.length,
+        guru: summary.guru || 0,
+        admin: summary.admin || 0,
         kelas: summary.kelas || 0,
         absensi: summary.absensi || 0,
         pengumuman: summary.pengumuman || pengumumanRows.length,
@@ -314,7 +316,7 @@ export default function AHome() {
       })
 
       setGuruList(
-        guruRows.map((guru) => ({
+        teacherRows.map((guru) => ({
           id: guru.id,
           name: `${guru.nama || 'Tanpa Nama'}${guru.email ? ` (${guru.email})` : ''}`
         }))
@@ -328,7 +330,7 @@ export default function AHome() {
       setIsLoading(false)
       setIsDashboardRefreshing(false)
     }
-  }, [activeSchoolPeriod, hasStatsCache, loadCurrentAcademicPeriod, pushToast])
+  }, [activeSchoolPeriod, hasStatsCache, pushToast])
 
   useEffect(() => {
     if (hasLoadedInitialDataRef.current) return
@@ -340,11 +342,10 @@ export default function AHome() {
     try {
       const params = activeSchoolPeriod?.tahunAjaran ? { tahun_ajaran: activeSchoolPeriod.tahunAjaran } : {}
       const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.admin.dashboardSummary(params),
+        queryKey: queryKeys.admin.dashboard(params),
         queryFn: async () => {
-          const { data, error } = await supabase.admin.dashboardSummary(params)
-          if (error) throw error
-          return data || {}
+          const response = await adminDashboardService.getDashboard(params)
+          return response.data?.summary || {}
         },
         staleTime: 15 * 1000
       })
@@ -485,6 +486,12 @@ export default function AHome() {
 
   const loadPengumuman = useCallback(async () => {
     try {
+      if (USE_ANNOUNCEMENTS_API_V2) {
+        const response = await announcementService.listAnnouncements({ per_page: 100 })
+        setPengumumanList(response.data || [])
+        return
+      }
+
       const { data, error } = await supabase
         .from('pengumuman')
         .select('id,judul,keterangan,target,created_at,updated_at')
@@ -515,35 +522,43 @@ export default function AHome() {
 
     try {
       if (pEditId) {
-        const { error } = await supabase
-          .from('pengumuman')
-          .update(payload)
-          .eq('id', pEditId)
+        if (USE_ANNOUNCEMENTS_API_V2) {
+          await announcementService.updateAnnouncement(pEditId, payload)
+        } else {
+          const { error } = await supabase
+            .from('pengumuman')
+            .update(payload)
+            .eq('id', pEditId)
 
-        if (error) throw error
+          if (error) throw error
+        }
         pushToast('success', 'Pengumuman diperbarui!')
       } else {
-        const id = slug(payload.judul) || Date.now().toString()
+        if (USE_ANNOUNCEMENTS_API_V2) {
+          await announcementService.storeAnnouncement(payload)
+        } else {
+          const id = slug(payload.judul) || Date.now().toString()
 
-        // Check if exists
-        const { data: existing } = await supabase
-          .from('pengumuman')
-          .select('id')
-          .eq('id', id)
-          .single()
+          const { data: existing } = await supabase
+            .from('pengumuman')
+            .select('id')
+            .eq('id', id)
+            .single()
 
-        if (existing) {
-          pushToast('error', 'Pengumuman dengan judul ini sudah ada.')
-          return
+          if (existing) {
+            pushToast('error', 'Pengumuman dengan judul ini sudah ada.')
+            return
+          }
+
+          await apiClient('/api/v2/announcements', { method: 'POST', body: JSON.stringify({
+            ...payload,
+            id,
+            created_at: new Date().toISOString()
+          }) })
+          const error = null
+
+          if (error) throw error
         }
-
-        const { error } = await supabase.from('pengumuman').insert({
-          ...payload,
-          id,
-          created_at: new Date().toISOString()
-        })
-
-        if (error) throw error
         pushToast('success', 'Pengumuman disimpan!')
       }
       cancelEditPengumuman()
@@ -560,12 +575,16 @@ export default function AHome() {
     if (!confirmDelete('Hapus pengumuman ini?')) return
 
     try {
-      const { error } = await supabase
-        .from('pengumuman')
-        .delete()
-        .eq('id', id)
+      if (USE_ANNOUNCEMENTS_API_V2) {
+        await announcementService.deleteAnnouncement(id)
+      } else {
+        const { error } = await supabase
+          .from('pengumuman')
+          .delete()
+          .eq('id', id)
 
-      if (error) throw error
+        if (error) throw error
+      }
       pushToast('success', 'Pengumuman dihapus!')
       loadPengumuman()
       loadStatistics()
@@ -623,6 +642,16 @@ export default function AHome() {
 
   const loadEskulList = useCallback(async () => {
     try {
+      if (USE_EXTRACURRICULARS_API_V2) {
+        const data = await extracurricularService.getExtracurriculars()
+        const rows = data || []
+        setEskulList(rows)
+        setEskulSel((current) => (
+          current && rows.some((item) => item.id === current) ? current : ''
+        ))
+        return
+      }
+
       let query = supabase
         .from('ekskul')
         .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,created_at,updated_at,tahun_ajaran,semester')
@@ -670,6 +699,16 @@ export default function AHome() {
     }
 
     try {
+      if (USE_EXTRACURRICULARS_API_V2) {
+        const data = await extracurricularService.getExtracurricularById(eskulSel)
+        if (data && data.data) {
+          applyDetailForm(data.data)
+        } else {
+          applyDetailForm(data)
+        }
+        return
+      }
+
       let detailQuery = supabase
         .from('ekskul')
         .select('id,nama,keterangan,hari,jam_mulai,jam_selesai,pembina_guru_id,registration_deadline_at,tahun_ajaran,semester')
@@ -728,23 +767,41 @@ export default function AHome() {
     try {
       const period = eskulDataPeriod
 
-      let anggotaQuery = supabase
-        .from('ekskul_anggota')
-        .select('id,ekskul_id,user_id,angkatan,status,created_at,updated_at,tahun_ajaran,semester')
-        .eq('ekskul_id', eskulSel)
-      anggotaQuery = applyAcademicSemesterFilter(anggotaQuery, period)
-
-      let { data, error } = await anggotaQuery
-      if (error && /tahun_ajaran|semester|angkatan/i.test(error.message || '')) {
-        ; ({ data, error } = await supabase
+      let anggota = []
+      
+      if (USE_EXTRACURRICULARS_API_V2) {
+        const response = await extracurricularService.getMembers(eskulSel)
+        // Format mapping to match old structure
+        anggota = (response.data || []).map(m => ({
+          id: m.membership_id,
+          ekskul_id: eskulSel,
+          user_id: m.user_id,
+          nama: m.nama,
+          kelas: m.kelas,
+          angkatan: m.angkatan || '',
+          created_at: m.created_at
+        }))
+        setEskulAnggota(anggota)
+        mergeSiswaOptions(anggota.map(a => ({ id: a.user_id, uid: a.user_id, nama: a.nama, kelas: a.kelas })))
+      } else {
+        let anggotaQuery = supabase
           .from('ekskul_anggota')
-          .select('id,ekskul_id,user_id,angkatan,status,created_at,updated_at')
-          .eq('ekskul_id', eskulSel))
-      }
+          .select('id,ekskul_id,user_id,angkatan,status,created_at,updated_at,tahun_ajaran,semester')
+          .eq('ekskul_id', eskulSel)
+        anggotaQuery = applyAcademicSemesterFilter(anggotaQuery, period)
 
-      if (error) throw error
-      const anggota = data || []
-      setEskulAnggota(anggota)
+        let { data, error } = await anggotaQuery
+        if (error && /tahun_ajaran|semester|angkatan/i.test(error.message || '')) {
+          ; ({ data, error } = await supabase
+            .from('ekskul_anggota')
+            .select('id,ekskul_id,user_id,angkatan,status,created_at,updated_at')
+            .eq('ekskul_id', eskulSel))
+        }
+
+        if (error) throw error
+        anggota = data || []
+        setEskulAnggota(anggota)
+      }
 
       // Ambil statistik absensi eskul untuk bulan dalam periode akademik aktif.
       const userIds = anggota.map((a) => a.user_id).filter(Boolean)
@@ -991,26 +1048,56 @@ export default function AHome() {
     }
 
     try {
-      if (eskulSel) {
-        const { error } = await supabase
-          .from('ekskul')
-          .update(payload)
-          .eq('id', eskulSel)
-
-        if (error) throw error
-        pushToast('success', 'Eskul diperbarui!')
+      if (USE_EXTRACURRICULARS_API_V2) {
+        if (eskulSel) {
+          await extracurricularService.updateExtracurricular(eskulSel, payload)
+          pushToast('success', 'Eskul diperbarui!')
+        } else {
+          const res = await extracurricularService.createExtracurricular(payload)
+          pushToast('success', 'Eskul disimpan!')
+          setEskulSel(res.data?.id || '')
+          setEskulForm({
+            nama: '',
+            keterangan: '',
+            hari: '',
+            jam_mulai: '',
+            jam_selesai: '',
+            pembina_guru_id: '',
+            registration_deadline_at: defaultRegistrationDeadlineLocal(7, activeEskulPeriod)
+          })
+        }
       } else {
-        const id = buildEskulId(nama, period)
+        if (eskulSel) {
+          const { error } = await supabase
+            .from('ekskul')
+            .update(payload)
+            .eq('id', eskulSel)
 
-        const { error } = await supabase.from('ekskul').insert({
-          ...payload,
-          id,
-          created_at: new Date().toISOString()
-        })
+          if (error) throw error
+          pushToast('success', 'Eskul diperbarui!')
+        } else {
+          const id = buildEskulId(nama, period)
 
-        if (error) throw error
-        pushToast('success', 'Eskul disimpan!')
-        setEskulSel(id)
+          await apiClient('/api/v2/extracurriculars', { method: 'POST', body: JSON.stringify({
+            ...payload,
+            id,
+            created_at: new Date().toISOString()
+          }) })
+          const error = null
+
+          if (error) throw error
+          pushToast('success', 'Eskul disimpan!')
+          setEskulSel(id)
+          setEskulForm({
+            nama: '',
+            keterangan: '',
+            hari: '',
+            jam_mulai: '',
+            jam_selesai: '',
+            pembina_guru_id: '',
+            registration_deadline_at: defaultRegistrationDeadlineLocal(7, activeEskulPeriod)
+          })
+        }
       }
       await loadEskulList()
       await loadStatistics()
@@ -1033,25 +1120,29 @@ export default function AHome() {
       return
 
     try {
-      // Hapus anggota periode aktif terlebih dahulu. Arsip periode lain tetap aman
-      // pada instalasi lama yang pernah memakai id ekskul sama lintas periode.
-      let anggotaDeleteQuery = supabase
-        .from('ekskul_anggota')
-        .delete()
-        .eq('ekskul_id', eskulSel)
-      anggotaDeleteQuery = applyAcademicSemesterFilter(anggotaDeleteQuery, activeEskulPeriod)
+      if (USE_EXTRACURRICULARS_API_V2) {
+        await extracurricularService.deleteExtracurricular(eskulSel)
+      } else {
+        // Hapus anggota periode aktif terlebih dahulu. Arsip periode lain tetap aman
+        // pada instalasi lama yang pernah memakai id ekskul sama lintas periode.
+        let anggotaDeleteQuery = supabase
+          .from('ekskul_anggota')
+          .delete()
+          .eq('ekskul_id', eskulSel)
+        anggotaDeleteQuery = applyAcademicSemesterFilter(anggotaDeleteQuery, activeEskulPeriod)
 
-      const { error: errorAnggota } = await anggotaDeleteQuery
+        const { error: errorAnggota } = await anggotaDeleteQuery
 
-      if (errorAnggota) throw errorAnggota
+        if (errorAnggota) throw errorAnggota
 
-      // Hapus eskul
-      const { error: errorEskul } = await supabase
-        .from('ekskul')
-        .delete()
-        .eq('id', eskulSel)
+        // Hapus eskul
+        const { error: errorEskul } = await supabase
+          .from('ekskul')
+          .delete()
+          .eq('id', eskulSel)
 
-      if (errorEskul) throw errorEskul
+        if (errorEskul) throw errorEskul
+      }
 
       pushToast('success', 'Eskul berhasil dihapus!')
       setEskulSel('')
@@ -1124,6 +1215,33 @@ export default function AHome() {
         return
       }
 
+      if (USE_EXTRACURRICULARS_API_V2) {
+        let successCount = 0
+        let errorMessages = []
+        
+        for (const student of targetStudents) {
+          try {
+            await extracurricularService.joinExtracurricular(eskulSel, student.uid)
+            successCount++
+          } catch (err) {
+            errorMessages.push(`${student.nama}: ${err?.response?.data?.error?.message || err.message}`)
+          }
+        }
+        
+        if (errorMessages.length > 0) {
+          if (successCount === 0) {
+            throw new Error(`Gagal menambahkan anggota:\n${errorMessages[0]}`)
+          } else {
+            pushToast('warning', `Beberapa gagal ditambahkan:\n${errorMessages[0]}`)
+          }
+        }
+        
+        pushToast('success', `${successCount} anggota berhasil ditambahkan.`)
+        setAddMemberUid('')
+        loadEskulAnggota()
+        return
+      }
+
       let existingQuery = supabase
         .from('ekskul_anggota')
         .select('user_id')
@@ -1158,10 +1276,11 @@ export default function AHome() {
         created_at: new Date().toISOString()
       }))
 
-      let { error } = await supabase.from('ekskul_anggota').insert(insertPayload)
+      await apiClient('/api/v2/extracurriculars/members', { method: 'POST', body: JSON.stringify(insertPayload) });
+      let error = null
       if (error && /tahun_ajaran|semester|angkatan/i.test(error.message || '')) {
         const legacyPayload = insertPayload.map(({ tahun_ajaran, semester, angkatan, ...row }) => row)
-        ; ({ error } = await supabase.from('ekskul_anggota').insert(legacyPayload))
+        await apiClient('/api/v2/extracurriculars/members', { method: 'POST', body: JSON.stringify(legacyPayload) }); error = null
       }
 
       if (error) throw error
@@ -1199,12 +1318,19 @@ export default function AHome() {
     if (!confirmDelete('Hapus anggota ini dari eskul?')) return
 
     try {
-      const { error } = await supabase
-        .from('ekskul_anggota')
-        .delete()
-        .eq('id', anggotaId)
+      if (USE_EXTRACURRICULARS_API_V2) {
+        // Cari user_id dari list anggota yang ada berdasarkan membership_id (anggotaId)
+        const member = eskulAnggota.find(a => a.id === anggotaId)
+        if (!member) throw new Error("Anggota tidak ditemukan")
+        await extracurricularService.leaveExtracurricular(eskulSel, member.user_id)
+      } else {
+        const { error } = await supabase
+          .from('ekskul_anggota')
+          .delete()
+          .eq('id', anggotaId)
 
-      if (error) throw error
+        if (error) throw error
+      }
       pushToast('success', 'Anggota berhasil dihapus!')
       loadEskulAnggota()
     } catch (error) {

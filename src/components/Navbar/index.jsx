@@ -44,7 +44,7 @@ const Navbar = () => {
   const hasSuperAdminAccess = Boolean(isSuperAdmin && role === 'admin')
   const effectiveRole = hasSuperAdminAccess ? 'admin' : role
   const showMonitoring = effectiveRole === 'admin' && !hasSuperAdminAccess
-  const isWaliKelas = useWaliKelasFlag(role, user?.id, settings)
+  const isWaliKelas = useWaliKelasFlag(role, user?.id)
   const delegatedAdminFeatures = useDelegatedAdminFeatures(role, user?.id)
   const navItems = useNavigationMenu({
     effectiveRole,

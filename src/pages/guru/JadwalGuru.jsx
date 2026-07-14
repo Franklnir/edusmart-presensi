@@ -14,8 +14,10 @@ import { loadExcelJsBrowser } from '../../utils/excelBrowser'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
 import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import { scheduleService } from '../../services/scheduleService'
+import { announcementService } from '../../services/announcementService'
 
 const USE_SCHEDULES_API_V2 = import.meta.env.VITE_USE_SCHEDULES_API_V2 === 'true'
+const USE_ANNOUNCEMENTS_API_V2 = import.meta.env.VITE_USE_ANNOUNCEMENTS_API_V2 === 'true'
 
 // --- HELPER FUNCTIONS ---
 
@@ -1545,12 +1547,17 @@ export default function JadwalGuru() {
           .order('nama')
           // .limit(1000) // Bisa di-uncomment jika siswa sangat banyak
 
-        const pengumumanQuery = supabase
-          .from('pengumuman')
-          .select('id, judul, isi, type, created_at, created_by')
-          .in('target', ['guru', 'semua'])
-          .order('created_at', { ascending: false })
-          .limit(3)
+        const pengumumanQuery = USE_ANNOUNCEMENTS_API_V2
+          ? announcementService
+            .listAnnouncements({ per_page: 3 })
+            .then(({ data }) => ({ data, error: null }))
+            .catch((error) => ({ data: null, error }))
+          : supabase
+            .from('pengumuman')
+            .select('id, judul, isi, type, created_at, created_by')
+            .in('target', ['guru', 'semua'])
+            .order('created_at', { ascending: false })
+            .limit(3)
 
         const sertifikatQuery = supabase
           .from('certificates')

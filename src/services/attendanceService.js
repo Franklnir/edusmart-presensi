@@ -45,5 +45,13 @@ export const attendanceService = {
       `/api/v2/attendance-requests/${id}`,
       mutationOptions('DELETE')
     ))
+  },
+
+  async bulkStoreAttendance(data) {
+    return responsePayload(await apiClient('/api/v2/attendance/scanner/bulk', mutationOptions('POST', data)))
+  },
+
+  async storeScanTemp(data) {
+    return responsePayload(await apiClient('/api/v2/attendance/scanner/temp', mutationOptions('POST', data)))
   }
 }

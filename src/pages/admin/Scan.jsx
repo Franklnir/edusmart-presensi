@@ -7,6 +7,7 @@ import React, {
   useMemo
 } from 'react'
 import { supabase } from '../../lib/supabase'
+import { apiClient } from '../../lib/api/client'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import ProfileAvatar from '../../components/ProfileAvatar'
@@ -965,8 +966,9 @@ export default function Scan() {
               }
             }
           } else {
-            const { error: errAbsen } = await supabase.from('absensi').upsert(
-              {
+            await apiClient('/api/v2/attendance', {
+              method: 'POST',
+              body: JSON.stringify({
                 kelas: student.kelas,
                 tanggal: todayIso,
                 uid: student.id,
@@ -975,11 +977,8 @@ export default function Scan() {
                 nama: student.nama,
                 oleh: 'ADMIN_SCANNER_LANGSUNG',
                 waktu: now.toISOString()
-              },
-              { onConflict: 'kelas,tanggal,mapel,uid' }
-            )
-
-            if (errAbsen) throw errAbsen
+              })
+            })
           }
 
           // Update scan status if applicable
@@ -1117,10 +1116,10 @@ export default function Scan() {
           source: scanSource
         }
 
-        const { error: tempErr } = await supabase
-          .from('absensi_scan_temp')
-          .upsert(
-            {
+        let tempErr = null
+        if (USE_ATTENDANCE_API_V2) {
+          try {
+            await attendanceService.storeScanTemp({
               tanggal,
               siswa_id: student.id,
               kelas: student.kelas,
@@ -1129,11 +1128,30 @@ export default function Scan() {
               mapel_count: mapelCount,
               source: scanSource,
               card_uid: cleanedUid
-            },
-            {
-              onConflict: 'tanggal,siswa_id,sesi'
-            }
-          )
+            })
+          } catch (err) {
+            tempErr = err
+          }
+        } else {
+          const res = await supabase
+            .from('absensi_scan_temp')
+            .upsert(
+              {
+                tanggal,
+                siswa_id: student.id,
+                kelas: student.kelas,
+                sesi: currentSession,
+                scan_at: now.toISOString(),
+                mapel_count: mapelCount,
+                source: scanSource,
+                card_uid: cleanedUid
+              },
+              {
+                onConflict: 'tanggal,siswa_id,sesi'
+              }
+            )
+          tempErr = res.error
+        }
 
         if (tempErr) {
           console.error('Gagal menyimpan ke absensi_scan_temp:', tempErr)
@@ -1550,9 +1568,22 @@ export default function Scan() {
       }
 
       if (absensiInserts.length > 0) {
-        const { error: errInsertAbsensi } = await supabase
-          .from('absensi')
-          .insert(absensiInserts)
+        let errInsertAbsensi = null
+        if (USE_ATTENDANCE_API_V2) {
+          try {
+            await attendanceService.bulkStoreAttendance({
+              records: absensiInserts,
+              idempotency_key: `bulk-scan-${tanggal}-${new Date().getTime()}`
+            })
+          } catch (err) {
+            errInsertAbsensi = err
+          }
+        } else {
+          const res = await supabase
+            .from('absensi')
+            .insert(absensiInserts)
+          errInsertAbsensi = res.error
+        }
 
         if (errInsertAbsensi) throw errInsertAbsensi
 

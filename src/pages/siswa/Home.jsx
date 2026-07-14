@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/useAuthStore'
 import { supabase } from '../../lib/supabase'
+import { apiClient } from '../../lib/api/client'
 import { useLocalCache } from '../../hooks/useLocalCache'
 
 import { useUIStore } from '../../store/useUIStore'
@@ -17,6 +18,8 @@ import {
   resolveAcademicPeriod
 } from '../../utils/academicPeriod'
 import { assignmentService, submissionService } from '../../services/assignmentService'
+import { announcementService } from '../../services/announcementService'
+import { extracurricularService } from '../../services/extracurricularService'
 import { logError } from '../../utils/logger'
 
 const DASHBOARD_TASK_LIMIT = 6
@@ -24,6 +27,8 @@ const DASHBOARD_TASK_QUERY_LIMIT = 80
 const DASHBOARD_TASK_COLUMNS = 'id, kelas, judul, mapel, deadline, keterangan, file_url, link'
 const ACADEMIC_PERIOD_STORAGE_KEY = 'edusmart.siswa.home.periodFilter'
 const USE_ASSIGNMENTS_V2 = import.meta.env.VITE_USE_ASSIGNMENTS_API_V2 === 'true'
+const USE_ANNOUNCEMENTS_API_V2 = import.meta.env.VITE_USE_ANNOUNCEMENTS_API_V2 === 'true'
+const USE_EXTRACURRICULARS_API_V2 = import.meta.env.VITE_USE_EXTRACURRICULAR_API_V2 === 'true'
 const DEFAULT_EKSKUL_LIMIT = 3
 const EKSKUL_SELECT_COLUMNS = 'id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id, registration_deadline_at, tahun_ajaran, semester'
 const LEGACY_EKSKUL_SELECT_COLUMNS = 'id, nama, keterangan, hari, jam_mulai, jam_selesai, pembina_guru_id'
@@ -830,6 +835,12 @@ export default function SHome() {
 
   const loadPengumuman = async () => {
     try {
+      if (USE_ANNOUNCEMENTS_API_V2) {
+        const { data } = await announcementService.listAnnouncements({ per_page: 5 })
+        setPengumuman(data || [])
+        return
+      }
+
       const { data, error } = await supabase
         .from('pengumuman')
         .select('*')
@@ -1071,36 +1082,62 @@ export default function SHome() {
     setEskulLoadError('')
     try {
       const period = await loadActiveAcademicPeriod()
-      let eskulQuery = supabase
-        .from('ekskul')
-        .select(EKSKUL_SELECT_COLUMNS)
-        .order('nama')
-      eskulQuery = applyAcademicSemesterFilter(eskulQuery, period)
-
-      let { data: eskulData, error: eskulError } = await eskulQuery
-      if (eskulError && shouldRetryLegacyEskulSelect(eskulError)) {
-        ; ({ data: eskulData, error: eskulError } = await supabase
-          .from('ekskul')
-          .select(LEGACY_EKSKUL_SELECT_COLUMNS)
-          .order('nama'))
-      }
-
-      let anggotaQuery = supabase
-        .from('ekskul_anggota')
-        .select('id, ekskul_id, user_id')
-        .eq('user_id', userId)
-      anggotaQuery = applyAcademicSemesterFilter(anggotaQuery, period)
-
-      let { data: anggotaData, error: anggotaError } = await anggotaQuery
-      if (anggotaError && isLegacyAcademicColumnError(anggotaError)) {
-        ; ({ data: anggotaData, error: anggotaError } = await supabase
+      let eskulData = []
+      let anggotaData = []
+      
+      if (USE_EXTRACURRICULARS_API_V2) {
+        const data = await extracurricularService.getExtracurriculars()
+        eskulData = data || []
+        
+        // Cari status keanggotaan dengan mengecek members setiap ekskul (karena V2 getExtracurriculars belum include members per student)
+        // Alternatif terbaik di siswa adalah backend V2 menyediakan endpoint /my-extracurriculars atau kita cek secara manual.
+        // Untuk saat ini, kita fetch `/api/v2/extracurriculars/{id}/members` jika tidak ada endpoint spesifik.
+        // Namun, jika backend tidak berubah, siswa tidak bisa melihat daftar /members milik ekskul kecuali Admin/Pembina!
+        // Jadi kita akan fallback ke database untuk ekskul_anggota atau gunakan legacy jika siswa tidak punya akses getMembers.
+        // Wait, the API V2 for `/api/v2/extracurriculars` returns all extracurriculars.
+        // Actually, let's keep querying ekskul_anggota via supabase for the student's joined status since V2 API only has /join and /leave, it doesn't have /my-extracurriculars.
+        let anggotaQuery = supabase
           .from('ekskul_anggota')
           .select('id, ekskul_id, user_id')
-          .eq('user_id', userId))
-      }
+          .eq('user_id', userId)
+        anggotaQuery = applyAcademicSemesterFilter(anggotaQuery, period)
 
-      if (eskulError) throw eskulError
-      if (anggotaError) throw anggotaError
+        const res = await anggotaQuery
+        anggotaData = res.data || []
+      } else {
+        let eskulQuery = supabase
+          .from('ekskul')
+          .select(EKSKUL_SELECT_COLUMNS)
+          .order('nama')
+        eskulQuery = applyAcademicSemesterFilter(eskulQuery, period)
+
+        let { data: ed, error: eskulError } = await eskulQuery
+        if (eskulError && shouldRetryLegacyEskulSelect(eskulError)) {
+          ; ({ data: ed, error: eskulError } = await supabase
+            .from('ekskul')
+            .select(LEGACY_EKSKUL_SELECT_COLUMNS)
+            .order('nama'))
+        }
+        eskulData = ed
+
+        let anggotaQuery = supabase
+          .from('ekskul_anggota')
+          .select('id, ekskul_id, user_id')
+          .eq('user_id', userId)
+        anggotaQuery = applyAcademicSemesterFilter(anggotaQuery, period)
+
+        let { data: ad, error: anggotaError } = await anggotaQuery
+        if (anggotaError && isLegacyAcademicColumnError(anggotaError)) {
+          ; ({ data: ad, error: anggotaError } = await supabase
+            .from('ekskul_anggota')
+            .select('id, ekskul_id, user_id')
+            .eq('user_id', userId))
+        }
+        anggotaData = ad
+        
+        if (eskulError) throw eskulError
+        if (anggotaError) throw anggotaError
+      }
 
       const pembinaIds = Array.from(
         new Set((eskulData || []).map((e) => e.pembina_guru_id).filter(Boolean)),
@@ -1240,50 +1277,60 @@ export default function SHome() {
     }
 
     try {
-      if (joined) {
-        let deleteQuery = supabase
-          .from('ekskul_anggota')
-          .delete()
-          .eq('ekskul_id', item.id)
-          .eq('user_id', userId)
-        deleteQuery = applyAcademicSemesterFilter(deleteQuery, period)
-
-        let { error } = await deleteQuery
-        if (error && isLegacyAcademicColumnError(error)) {
-          ; ({ error } = await supabase
+      if (USE_EXTRACURRICULARS_API_V2) {
+        if (joined) {
+          await extracurricularService.leaveExtracurricular(item.id)
+          pushToast('success', 'Berhasil membatalkan ekskul')
+        } else {
+          await extracurricularService.joinExtracurricular(item.id)
+          pushToast('success', 'Berhasil bergabung ekskul!')
+        }
+      } else {
+        if (joined) {
+          let deleteQuery = supabase
             .from('ekskul_anggota')
             .delete()
             .eq('ekskul_id', item.id)
-            .eq('user_id', userId))
-        }
+            .eq('user_id', userId)
+          deleteQuery = applyAcademicSemesterFilter(deleteQuery, period)
 
-        if (error) throw error
-        pushToast('success', 'Berhasil membatalkan ekskul')
-      } else {
-        const insertPayload = {
-          ekskul_id: item.id,
-          user_id: userId,
-          tahun_ajaran: period.tahunAjaran,
-          semester: period.semester,
-          angkatan: profile?.angkatan || null,
-          created_at: new Date().toISOString(),
-        }
-        let { error } = await supabase
-          .from('ekskul_anggota')
-          .insert(insertPayload)
-        if (error && isLegacyAcademicColumnError(error)) {
-          const { tahun_ajaran, semester, angkatan, ...legacyPayload } = insertPayload
-          ; ({ error } = await supabase.from('ekskul_anggota').insert(legacyPayload))
-        }
+          let { error } = await deleteQuery
+          if (error && isLegacyAcademicColumnError(error)) {
+            ; ({ error } = await supabase
+              .from('ekskul_anggota')
+              .delete()
+              .eq('ekskul_id', item.id)
+              .eq('user_id', userId))
+          }
 
-        if (error) throw error
-        pushToast('success', 'Berhasil bergabung ekskul!')
+          if (error) throw error
+          pushToast('success', 'Berhasil membatalkan ekskul')
+        } else {
+          const insertPayload = {
+            ekskul_id: item.id,
+            user_id: userId,
+            tahun_ajaran: period.tahunAjaran,
+            semester: period.semester,
+            angkatan: profile?.angkatan || null,
+            created_at: new Date().toISOString(),
+          }
+          let { error } = await supabase
+            .from('ekskul_anggota')
+            .insert(insertPayload)
+          if (error && isLegacyAcademicColumnError(error)) {
+            const { tahun_ajaran, semester, angkatan, ...legacyPayload } = insertPayload
+            const res = await apiClient('/api/v2/extracurriculars/members', { method: 'POST', body: JSON.stringify(legacyPayload) }); error = null
+          }
+
+          if (error) throw error
+          pushToast('success', 'Berhasil bergabung ekskul!')
+        }
       }
 
       loadEskul()
     } catch (err) {
       console.error('Error toggle ekskul:', err)
-      pushToast('error', 'Gagal mengubah keikutsertaan ekskul')
+      pushToast('error', err?.response?.data?.error?.message || err?.message || 'Gagal mengubah keikutsertaan ekskul')
     }
   }
 

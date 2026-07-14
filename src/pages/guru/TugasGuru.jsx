@@ -49,7 +49,6 @@ const FILE_SIZE_LIMITS = {
 const KELAS_COLUMNS = 'id,nama,grade,suffix,tingkat,jurusan,angkatan'
 const JADWAL_GURU_COLUMNS = 'id,kelas_id,mapel,guru_id,guru_nama,hari,jam_mulai,jam_selesai,tahun_ajaran,semester,periode_berlaku'
 const TUGAS_GURU_COLUMNS = 'id,kelas,judul,mapel,mulai,deadline,keterangan,file_url,link,created_by,created_at,updated_at,tahun_ajaran,semester,angkatan'
-const TUGAS_JAWABAN_STATS_COLUMNS = 'tugas_id,user_id,nilai,status'
 const TUGAS_JAWABAN_DETAIL_COLUMNS = 'id,tugas_id,user_id,file_url,file_urls,link_url,komentar_siswa,nilai,status,waktu_submit,profiles(nama,photo_url)'
 const DEFAULT_TASK_LIST_LIMIT = 10
 const USE_ASSIGNMENTS_V2 = import.meta.env.VITE_USE_ASSIGNMENTS_API_V2 === 'true'
@@ -828,7 +827,6 @@ export default function TugasGuru() {
 
       let tugasRaw = []
       
-      if (USE_ASSIGNMENTS_V2) {
         const params = {
           created_by: user.id,
           per_page: 'all'
@@ -849,62 +847,6 @@ export default function TugasGuru() {
         }
         const res = await assignmentService.getAssignments(params)
         tugasRaw = (res.data || []).map(withV2Attachments)
-      } else {
-        let query = supabase.from('tugas').select(TUGAS_GURU_COLUMNS).eq('created_by', user.id)
-        query = applyAcademicSemesterFilter(query)
-
-        if (selectedKelasFilter) query = query.eq('kelas', selectedKelasFilter)
-        if (selectedSubject) query = query.eq('mapel', selectedSubject)
-
-        if (filterStatus === 'active') query = query.gte('deadline', now.toISOString())
-        if (filterStatus === 'expired') query = query.lt('deadline', now.toISOString())
-
-        if (timeRange === 'week') {
-          const weekAgo = new Date(now)
-          weekAgo.setDate(now.getDate() - 7)
-          query = query.gte('created_at', weekAgo.toISOString())
-        } else if (timeRange === 'all') {
-            if (dateFilterPeriod.startsAt && dateFilterPeriod.endsAt) {
-              const start = new Date(`${dateFilterPeriod.startsAt}T00:00:00`)
-              const end = new Date(`${dateFilterPeriod.endsAt}T00:00:00`)
-              end.setDate(end.getDate() + 1)
-              query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
-            }
-        } else if (timeRange === 'custom_months' && selectedMonths.length > 0) {
-          let minYear = Infinity
-          let minMonth = Infinity
-          let maxYear = -Infinity
-          let maxMonth = -Infinity
-
-          selectedMonths.forEach((ym) => {
-            const [ys, ms] = ym.split('-')
-            const y = parseInt(ys, 10)
-            const m = parseInt(ms, 10)
-            if (!Number.isNaN(y) && !Number.isNaN(m)) {
-              if (y < minYear || (y === minYear && m < minMonth)) {
-                minYear = y
-                minMonth = m
-              }
-              if (y > maxYear || (y === maxYear && m > maxMonth)) {
-                maxYear = y
-                maxMonth = m
-              }
-            }
-          })
-
-          if (minYear !== Infinity) {
-            const start = new Date(minYear, minMonth - 1, 1)
-            const end = new Date(maxYear, maxMonth, 1)
-            query = query.gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
-          }
-        }
-
-        query = query.order('created_at', { ascending: false })
-        if (!hasActiveHistoryFilter) query = query.limit(DEFAULT_TASK_LIST_LIMIT)
-        const { data: qData, error } = await query
-        if (error) throw error
-        tugasRaw = qData
-      }
 
       let tugasData = sortTasksByNewest(tugasRaw || [])
 
@@ -944,14 +886,6 @@ export default function TugasGuru() {
       const uniqueKelasVariants = Array.from(new Set(uniqueKelas.flatMap((k) => buildKelasVariants(k))))
 
       const statRequests = []
-      if (tugasIds.length > 0) {
-        if (!USE_ASSIGNMENTS_V2) {
-          statRequests.push({
-            key: 'jawaban',
-            query: supabase.from('tugas_jawaban').select(TUGAS_JAWABAN_STATS_COLUMNS).in('tugas_id', tugasIds)
-          })
-        }
-      }
       if (uniqueKelasVariants.length > 0) {
         if (isViewingArchivePeriod && period.tahunAjaran) {
           statRequests.push({
@@ -977,8 +911,8 @@ export default function TugasGuru() {
 
       const { data: statBatch } = await supabase.batch(statRequests)
 
-      let jawabanRes = statBatch?.jawaban || { data: [], error: null }
-      if (USE_ASSIGNMENTS_V2 && tugasIds.length > 0) {
+      let jawabanRes = { data: [], error: null }
+      if (tugasIds.length > 0) {
         try {
             const res = await submissionService.getSubmissions({ tugas_id: tugasIds, per_page: 'all' })
             jawabanRes = { data: (res.data || []).map(withV2Attachments), error: null }
@@ -1922,36 +1856,12 @@ export default function TugasGuru() {
     try {
       setLoading(true)
 
-      if (USE_ASSIGNMENTS_V2) {
         await submissionService.gradeByUser({
           tugas_id: selectedTugas.id,
           user_id: siswaId,
           nilai: parsed,
           status: 'dinilai'
         })
-      } else {
-        const existing = jawabanTugas.find((j) => j.user_id === siswaId)
-        if (existing) {
-          const { error } = await supabase
-            .from('tugas_jawaban')
-            .update({
-              nilai: parsed,
-              status: 'dinilai'
-            })
-            .eq('id', existing.id)
-            .eq('tugas_id', selectedTugas.id)
-
-          if (error) throw error
-        } else {
-          const { error } = await supabase.from('tugas_jawaban').insert({
-            tugas_id: selectedTugas.id,
-            user_id: siswaId,
-            nilai: parsed,
-            status: 'dinilai'
-          })
-          if (error) throw error
-        }
-      }
 
       pushToast('success', 'Nilai berhasil disimpan')
       await loadDetailTugas(selectedTugas, { silent: true })

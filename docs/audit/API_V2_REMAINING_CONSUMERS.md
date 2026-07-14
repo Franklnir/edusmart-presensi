@@ -33,7 +33,7 @@ migration.
 | Upload/Attachment | `src/lib/supabase.js` storage compatibility adapter | initiate, relay upload, complete, signed/public URL, download, delete | `/api/storage/*` | `/api/v2/uploads`, `/api/v2/attachments/*` implemented for assignment/submission | PARTIAL |
 | Upload/Attachment | `src/pages/guru/TugasGuru.jsx`, `src/pages/siswa/Tugas.jsx` | assignment/submission upload progress, cancel, authorized download/removal | `/api/storage/*` when V2 flag is false | strict `uploadService` V2 path; no error fallback | PARTIAL (STAGING FLAG OFF) |
 | Upload/Attachment | `src/pages/admin/pengaturan.jsx`, `src/pages/guru/profile.jsx`, `src/utils/certificateFiles.js` | settings/profile/certificate assets | `/api/storage/*` | generic parent-aware Attachment V2 integration pending | LEGACY |
-| Grades | `src/pages/guru/Laporan.jsx` | weights, manual grades, task/quiz recap, export inputs | `/api/db`, `/api/reports/*` | `/api/v2/grades*` pending; schedule dependencies V2 under flag | LEGACY |
+| Grades | `src/pages/guru/Laporan.jsx` | semester-scoped weights; manual grades, task/quiz recap, export inputs | `/api/db`, `/api/reports/*` when the flag is false | `/api/v2/grades/weights` under `VITE_USE_GRADES_API_V2`; manual grades and recap V2 pending | PARTIAL |
 | Grades/Raport | `src/pages/guru/RapotSiswa.jsx` | raport CRUD, items, schedule-derived subjects | `/api/db` (`rapot_siswa*`; schedule rollback only) | grade/raport V2 pending schema mapping; schedule dependency V2 under flag | LEGACY |
 | Grades | assignment/quiz grade widgets and student dashboards | view/edit task and quiz scores | `/api/db`, `/api/quiz/*` | grade V2 plus submission/attempt resources pending | LEGACY |
 | Quiz authoring | `src/pages/guru/Quiz.jsx` | dashboard/detail, CRUD quiz/questions/options, schedule, publish/close/clone, essay grade/retake | `/api/quiz/*`, `/api/db`, `/api/storage/*` | `/api/v2/quizzes*`, question/attempt V2 pending; schedule options V2 under flag | LEGACY |
@@ -45,8 +45,8 @@ migration.
 | Schedules | `src/pages/guru/Laporan.jsx`, `RapotSiswa.jsx` | own-subject and homeroom class schedule scope | `/api/db` only when the flag is false | `/api/v2/schedules*`; complete under flag; report/grade domain remains legacy | PARTIAL (STAGING FLAG OFF) |
 | Schedules | `src/features/attendance/components/MapelOptions.jsx`, `useStudentAttendanceData.js` | student daily/weekly and subject schedule options | `/api/db` only when the flag is false | `/api/v2/schedules*`; complete under flag, historical enrollment enforced server-side | PARTIAL (STAGING FLAG OFF) |
 | Schedules | `src/pages/siswa/Tugas.jsx`, `Quiz.jsx` | student class and subject schedule options | `/api/db` only when the flag is false | `/api/v2/schedules*`; complete under flag, with no V2 fallback | PARTIAL (STAGING FLAG OFF) |
-| Announcements | `src/pages/admin/Home.jsx` | list/create/update/delete | `/api/db` (`pengumuman`) | `/api/v2/announcements*` pending | LEGACY |
-| Announcements | `src/pages/guru/JadwalGuru.jsx`, `src/pages/siswa/Home.jsx` | role-scoped dashboard list | `/api/db` (`pengumuman`) | `/api/v2/announcements*` pending | LEGACY |
+| Announcements | `src/pages/admin/Home.jsx` | list/create/update/delete | `/api/db` (`pengumuman`) when the flag is false | `/api/v2/announcements*` under `VITE_USE_ANNOUNCEMENTS_API_V2` | PARTIAL |
+| Announcements | `src/pages/guru/JadwalGuru.jsx`, `src/pages/siswa/Home.jsx` | role-scoped dashboard list | `/api/db` (`pengumuman`) when the flag is false | `/api/v2/announcements*` under `VITE_USE_ANNOUNCEMENTS_API_V2` | PARTIAL |
 | Extracurriculars | `src/pages/admin/Home.jsx` | catalogue/member list, create/join/remove | `/api/db` (`ekskul`, `ekskul_anggota`) | `/api/v2/extracurriculars*` pending | LEGACY |
 | Extracurriculars | `src/pages/siswa/Home.jsx` | list/membership/join | `/api/db` (`ekskul`, `ekskul_anggota`) | extracurricular/member V2 pending | LEGACY |
 | Extracurriculars | `src/pages/guru/JadwalGuru.jsx`, `src/pages/guru/Laporan.jsx`, `src/pages/admin/Sertifikat.jsx` | membership/options/report/certificate recipients | `/api/db` | extracurricular/member V2 pending | LEGACY |
@@ -64,8 +64,8 @@ migration.
 | Domain | Consumer | Operasi | Endpoint Lama | Endpoint V2 | Status |
 |---|---|---|---|---|---|
 | Academic context | `src/context/AcademicContext.jsx` | bootstrap konteks tahun ajaran dan semester aktif | none | `GET /api/v2/academic-context` | MIGRATED |
-| Navbar/dashboard | `src/components/Navbar/hooks.js` | profile/presence/notification refresh | `/api/db` | profile/notification contract pending | LEGACY |
-| Organization/school structure | admin class/settings views | structure, organizations, membership, import histories | `/api/db` | out-of-phase V2 domain contract pending | LEGACY |
+| Navbar/dashboard | `src/components/Navbar/hooks.js`, `src/components/DelegatedAdminGate.jsx` | organization shell, profile, presence, notification refresh | legacy monitoring/notification paths | `/api/v2/organizations` plus profile/notification resources | PARTIAL |
+| Organization/school structure | admin class/settings views | structure, organizations, membership, import histories | `/api/db` | organization shell `/api/v2/organizations`; full structure resources pending | PARTIAL |
 | PWA cache | `src/lib/supabase.js` cache policy and generated service worker | caches selected GET/DB-proxy/report/quiz reads | `/api/db`, `/api/reports/*`, `/api/quiz/*` | invalidate/re-key when each V2 service cuts over | PARTIAL |
 | Monitor UI | `src/pages/admin/MonitorLog.jsx`, `SuperMonitorLog.jsx`, global browser reporter | tenant and aggregate browser errors, including global errors and rejected promises | does not call `/api/db` for business data | `/api/v2/frontend-logs*` and Super Monitor aggregate | MIGRATED |
 | Generic compatibility | `src/lib/supabase.js` query builder and batch adapter | arbitrary table select/insert/update/delete/upsert | `/api/db`, `/api/db/batch` | replace per domain; no generic V2 equivalent | LEGACY |

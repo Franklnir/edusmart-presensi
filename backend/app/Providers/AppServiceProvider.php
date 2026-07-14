@@ -102,6 +102,27 @@ class AppServiceProvider extends ServiceProvider
             }
         });
 
+        Gate::define('manage-sertifikat', function (object $user, string $tenantId): bool {
+            if ($tenantId === '' || empty($user->id)) {
+                return false;
+            }
+
+            try {
+                if (DB::table('super_admins')->where('user_id', $user->id)->exists()) {
+                    return true;
+                }
+
+                $profile = DB::table('profiles')
+                    ->where('id', $user->id)
+                    ->where('tenant_id', $tenantId)
+                    ->first(['role']);
+
+                return $profile && in_array($profile->role, ['admin', 'guru'], true);
+            } catch (\Throwable) {
+                return false;
+            }
+        });
+
         ResetPassword::createUrlUsing(function (object $user, string $token) use ($frontendUrl): string {
             $tenantFrontendUrl = $this->tenantFrontendBaseUrlForUser($user, $frontendUrl);
             $email = urlencode((string) ($user->email ?? ''));

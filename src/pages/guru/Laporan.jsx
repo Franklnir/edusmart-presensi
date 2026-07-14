@@ -16,6 +16,10 @@ import {
   USE_SCHEDULES_API_V2
 } from '../../services/scheduleService'
 import {
+  gradeService,
+  USE_GRADES_API_V2
+} from '../../services/gradeService'
+import {
   getAcademicAssessmentLabels,
   getAssessmentSlotLabel
 } from '../../utils/academicAssessment'
@@ -655,6 +659,15 @@ export default function LaporanRekap() {
         return
       }
       try {
+        if (USE_GRADES_API_V2) {
+          const result = await gradeService.listWeights({
+            tahun_ajaran: selectedTahunAjaran,
+            semester: selectedSemester
+          })
+          setMapelComponentWeightRows(result.data || [])
+          return
+        }
+
         let query = supabase
           .from('guru_mapel_bobot')
           .select('*')
@@ -805,13 +818,22 @@ export default function LaporanRekap() {
 
     try {
       setSavingMapelWeight(true)
-      const { data, error } = await supabase
-        .from('guru_mapel_bobot')
-        .upsert(payload, { onConflict: 'tenant_id,guru_id,mapel,tahun_ajaran,semester' })
-        .select('*')
-        .single()
-      if (error) throw error
-      const savedRow = data || payload
+      let savedRow
+      if (USE_GRADES_API_V2) {
+        if (!isActiveReportPeriod) {
+          throw new Error('Periode arsip hanya dapat diubah melalui sesi koreksi resmi.')
+        }
+        const result = await gradeService.saveWeight(payload)
+        savedRow = result.data || payload
+      } else {
+        const { data, error } = await supabase
+          .from('guru_mapel_bobot')
+          .upsert(payload, { onConflict: 'tenant_id,guru_id,mapel,tahun_ajaran,semester' })
+          .select('*')
+          .single()
+        if (error) throw error
+        savedRow = data || payload
+      }
 
       setMapelComponentWeightRows((prev) => {
         const others = [...(prev || [])].filter((row) => normalizeMapelKey(row?.mapel) !== selectedMapelKey)
@@ -840,6 +862,7 @@ export default function LaporanRekap() {
     selectedTahunAjaran,
     selectedSemester,
     selectedWeightMapel,
+    isActiveReportPeriod,
     mapelWeightValidation,
     mapelComponentWeightRows,
     pushToast
@@ -1124,19 +1147,35 @@ export default function LaporanRekap() {
 
       const detailBatchItems = []
       const tahunAjaran = selectedTahunAjaran || reportPeriod.tahunAjaran
+      let manualResult = { data: [], error: null }
       if (studentIds.length) {
-        detailBatchItems.push({
-          key: 'manual',
-          query: supabase
-          .from('guru_mapel_manual_nilai')
-          .select('*')
-          .eq('guru_id', user.id)
-          .eq('kelas_id', selectedKelas)
-          .eq('mapel', selectedMapel)
-          .eq('tahun_ajaran', tahunAjaran)
-          .eq('semester', selectedSemester || reportPeriod.semester)
-          .in('siswa_id', studentIds)
-        })
+        if (USE_GRADES_API_V2) {
+          try {
+            const result = await gradeService.listManualScores({
+              tahun_ajaran: tahunAjaran,
+              semester: selectedSemester || reportPeriod.semester,
+              kelas_id: selectedKelas,
+              mapel: selectedMapel,
+              per_page: 500
+            })
+            manualResult = { data: result.data || [], error: null }
+          } catch (error) {
+            manualResult = { data: [], error }
+          }
+        } else {
+          detailBatchItems.push({
+            key: 'manual',
+            query: supabase
+              .from('guru_mapel_manual_nilai')
+              .select('*')
+              .eq('guru_id', user.id)
+              .eq('kelas_id', selectedKelas)
+              .eq('mapel', selectedMapel)
+              .eq('tahun_ajaran', tahunAjaran)
+              .eq('semester', selectedSemester || reportPeriod.semester)
+              .in('siswa_id', studentIds)
+          })
+        }
         detailBatchItems.push({
           key: 'rapot',
           query: supabase
@@ -1150,7 +1189,9 @@ export default function LaporanRekap() {
         })
       }
       const detailBatch = detailBatchItems.length ? await supabase.batch(detailBatchItems) : { data: {} }
-      const manualResult = detailBatch.data?.manual
+      if (!USE_GRADES_API_V2) {
+        manualResult = detailBatch.data?.manual || manualResult
+      }
       const rapotResult = detailBatch.data?.rapot
       if (manualResult?.error) throw manualResult.error
       if (rapotResult?.error) throw rapotResult.error
@@ -1366,10 +1407,17 @@ export default function LaporanRekap() {
 
     try {
       setSavingMapelManualId(row.id)
-      const { error } = await supabase
-        .from('guru_mapel_manual_nilai')
-        .upsert(payload, { onConflict: 'tenant_id,guru_id,siswa_id,kelas_id,mapel,tahun_ajaran,semester' })
-      if (error) throw error
+      if (USE_GRADES_API_V2) {
+        if (!isActiveReportPeriod || isFutureReportPeriod) {
+          throw new Error('Periode arsip atau periode depan tidak dapat diubah tanpa konteks mutasi resmi.')
+        }
+        await gradeService.saveManualScore(payload)
+      } else {
+        const { error } = await supabase
+          .from('guru_mapel_manual_nilai')
+          .upsert(payload, { onConflict: 'tenant_id,guru_id,siswa_id,kelas_id,mapel,tahun_ajaran,semester' })
+        if (error) throw error
+      }
       pushToast('success', `Nilai manual ${row.nama} berhasil disimpan.`)
       await loadLaporanMapel()
     } catch (error) {
@@ -1386,6 +1434,8 @@ export default function LaporanRekap() {
     pushToast,
     reportPeriod.semester,
     reportPeriod.tahunAjaran,
+    isActiveReportPeriod,
+    isFutureReportPeriod,
     selectedKelas,
     selectedMapel,
     selectedSemester,

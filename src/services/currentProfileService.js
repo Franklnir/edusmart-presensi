@@ -26,6 +26,23 @@ export const currentProfileService = {
     return payload(await apiClient('/api/v2/profile', { method: 'GET' }))
   },
 
+  async provisionCurrentProfile(source) {
+    const key = source.idempotency_key || generateRequestId()
+    const requestPayload = {
+      role: source.role,
+      nama: source.nama,
+      email: source.email,
+      status: source.status,
+      created_via: source.created_via,
+      idempotency_key: key
+    }
+    return payload(await apiClient('/api/v2/profile/provision', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': key },
+      body: requestPayload
+    }))
+  },
+
   async updateCurrentProfile(source) {
     const key = source.idempotency_key || generateRequestId()
     return payload(await apiClient('/api/v2/profile', {

@@ -47,9 +47,7 @@ import {
 const STATUS_FILTER_VALUES = new Set(['all', 'belum', 'menunggu', 'dinilai'])
 const TIME_RANGE_VALUES = new Set(['recent', 'week', 'all', 'custom_months'])
 const DEFAULT_TASK_LIST_LIMIT = 10
-const TUGAS_LIST_COLUMNS = 'id, kelas, judul, mapel, mulai, deadline, keterangan, file_url, link, created_at, updated_at'
 const TUGAS_MAPEL_COLUMNS = 'mapel'
-const TUGAS_JAWABAN_LIST_COLUMNS = 'tugas_id, user_id, nilai, status, file_url, file_urls, link_url, komentar_siswa, waktu_submit'
 const MAPEL_CACHE_TTL_MS = 5 * 60 * 1000
 const USE_ASSIGNMENTS_V2 = import.meta.env.VITE_USE_ASSIGNMENTS_API_V2 === 'true'
 const USE_ASSIGNMENT_UPLOADS_V2 = USE_ASSIGNMENTS_V2 && import.meta.env.VITE_USE_ASSIGNMENT_UPLOADS_API_V2 === 'true'
@@ -709,38 +707,18 @@ export default function TugasSiswa() {
       const now = new Date()
 
       let tugasData = []
-      if (USE_ASSIGNMENTS_V2) {
-        const params = {
-          kelas,
-          per_page: 'all'
-        }
-        if (selectedMapel) params.mapel = selectedMapel
-        if (timeRange === 'week') {
-          const weekAgo = new Date(now)
-          weekAgo.setDate(now.getDate() - 7)
-          params.created_after = weekAgo.toISOString()
-        }
-        const res = await assignmentService.getAssignments(params)
-        tugasData = (res.data || []).map(withV2Attachments)
-      } else {
-        // tugas untuk kelas siswa
-        let query = supabase.from('tugas').select(TUGAS_LIST_COLUMNS).eq('kelas', kelas)
-        query = applyAcademicSemesterFilter(query)
-        
-        if (selectedMapel) query = query.eq('mapel', selectedMapel)
-
-        if (timeRange === 'week') {
-          const weekAgo = new Date(now)
-          weekAgo.setDate(now.getDate() - 7)
-          query = query.gte('created_at', weekAgo.toISOString())
-        }
-
-        query = query.order('created_at', { ascending: false })
-        if (!hasActiveTaskFilter) query = query.limit(DEFAULT_TASK_LIST_LIMIT)
-        const { data: qData, error } = await query
-        if (error) throw error
-        tugasData = qData
+      const params = {
+        kelas,
+        per_page: 'all'
       }
+      if (selectedMapel) params.mapel = selectedMapel
+      if (timeRange === 'week') {
+        const weekAgo = new Date(now)
+        weekAgo.setDate(now.getDate() - 7)
+        params.created_after = weekAgo.toISOString()
+      }
+      const res = await assignmentService.getAssignments(params)
+      tugasData = (res.data || []).map(withV2Attachments)
       
       const normalizedSearch = debouncedSearchTerm.trim().toLowerCase()
       
@@ -774,20 +752,8 @@ export default function TugasSiswa() {
       // ambil jawaban milik siswa ini untuk tugas-tugas tersebut
       const tugasIds = tugasArr.map((t) => t.id)
       let jawabanData = []
-      if (USE_ASSIGNMENTS_V2) {
-        const res = await submissionService.getSubmissions({ tugas_id: tugasIds, user_id: user.id, per_page: 'all' })
-        jawabanData = (res.data || []).map(withV2Attachments)
-      } else {
-        let jawabanQuery = supabase
-          .from('tugas_jawaban')
-          .select(TUGAS_JAWABAN_LIST_COLUMNS)
-          .eq('user_id', user.id)
-          .in('tugas_id', tugasIds)
-        const { data: qData, error: jErr } = await jawabanQuery
-
-        if (jErr) throw jErr
-        jawabanData = qData
-      }
+      const resSubmissions = await submissionService.getSubmissions({ tugas_id: tugasIds, user_id: user.id, per_page: 'all' })
+      jawabanData = (resSubmissions.data || []).map(withV2Attachments)
       if (requestId !== listRequestSeqRef.current) return
 
       const jawabanArr = jawabanData || []
@@ -901,35 +867,15 @@ export default function TugasSiswa() {
       let tugasData
       let jawabanData
       let attachmentMetadata = []
+      const [taskResponse, submissionsResponse] = await Promise.all([
+        assignmentService.getAssignment(tugas.id),
+        submissionService.getSubmissions({ tugas_id: tugas.id, per_page: 'all' })
+      ])
+      tugasData = withV2Attachments(taskResponse.data || taskResponse)
+      jawabanData = withV2Attachments((submissionsResponse.data || []).find((item) => item.user_id === user.id) || null)
       if (USE_ASSIGNMENT_UPLOADS_V2) {
-        const [taskResponse, submissionsResponse] = await Promise.all([
-          assignmentService.getAssignment(tugas.id),
-          submissionService.getSubmissions({ tugas_id: tugas.id, per_page: 'all' })
-        ])
-        tugasData = withV2Attachments(taskResponse.data || taskResponse)
-        jawabanData = withV2Attachments((submissionsResponse.data || []).find((item) => item.user_id === user.id) || null)
         const ids = Array.isArray(jawabanData?.attachment_ids) ? jawabanData.attachment_ids : []
         attachmentMetadata = await Promise.all(ids.map((id) => uploadService.getAttachment(id)))
-      } else {
-        let tugasQuery = supabase
-          .from('tugas')
-          .select(TUGAS_LIST_COLUMNS)
-          .eq('id', tugas.id)
-          .single()
-        tugasQuery = applyAcademicSemesterFilter(tugasQuery)
-        const { data, error } = await tugasQuery
-        if (error) throw error
-        tugasData = data
-
-        let jawabanQuery = supabase
-          .from('tugas_jawaban')
-          .select('id, tugas_id, user_id, file_url, file_urls, link_url, komentar_siswa, nilai, status, waktu_submit')
-          .eq('tugas_id', tugas.id)
-          .eq('user_id', user.id)
-          .maybeSingle()
-        const result = await jawabanQuery
-        if (result.error) throw result.error
-        jawabanData = result.data
       }
 
       const windowInfo = getTaskWindowInfo(tugasData?.mulai, tugasData?.deadline, new Date())
@@ -1323,24 +1269,11 @@ export default function TugasSiswa() {
 
       if (existing?.id) {
         if (currentLink || existingPhotos.length > 0 || (USE_ASSIGNMENT_UPLOADS_V2 && retainedV2Attachments.length > 0)) {
-          if (USE_ASSIGNMENTS_V2) {
-            await submissionService.updateSubmission(existing.id, {
-              attachment_ids: USE_ASSIGNMENT_UPLOADS_V2 ? retainedV2Attachments : undefined,
-              link_url: currentLink || null,
-              komentar_siswa: existing.komentar_siswa || null
-            })
-          } else {
-            const { error } = await supabase
-              .from('tugas_jawaban')
-              .update({
-                file_url: existingPhotos[0] || null,
-                file_urls: existingPhotos.length > 0 ? existingPhotos : null
-              })
-              .eq('id', existing.id)
-              .eq('user_id', user.id)
-
-            if (error) throw error
-          }
+          await submissionService.updateSubmission(existing.id, {
+            attachment_ids: USE_ASSIGNMENT_UPLOADS_V2 ? retainedV2Attachments : undefined,
+            link_url: currentLink || null,
+            komentar_siswa: existing.komentar_siswa || null
+          })
 
           setDetail((prev) => {
             if (!prev) return prev
@@ -1355,17 +1288,7 @@ export default function TugasSiswa() {
             return { ...prev, myJawaban: nextJawaban, myStatus: nextStatus }
           })
         } else {
-          if (USE_ASSIGNMENTS_V2) {
-            await submissionService.deleteSubmission(existing.id)
-          } else {
-            const { error } = await supabase
-              .from('tugas_jawaban')
-              .delete()
-              .eq('id', existing.id)
-              .eq('user_id', user.id)
-
-            if (error) throw error
-          }
+          await submissionService.deleteSubmission(existing.id)
 
           setDetail((prev) => (prev ? { ...prev, myJawaban: null, myStatus: 'belum' } : prev))
         }
@@ -1461,13 +1384,8 @@ export default function TugasSiswa() {
         ...academicPeriodPayload
       }
 
-      if (USE_ASSIGNMENTS_V2) {
-        if (existing?.id) await submissionService.updateSubmission(existing.id, payload)
-        else await submissionService.storeSubmission(payload)
-      } else {
-        const { error } = await supabase.assignments.submitAnswer(payload)
-        if (error) throw error
-      }
+      if (existing?.id) await submissionService.updateSubmission(existing.id, payload)
+      else await submissionService.storeSubmission(payload)
 
       const nextFiles = answerFiles
       const staleFiles = existingFiles.filter((value) => value && !nextFiles.includes(value))

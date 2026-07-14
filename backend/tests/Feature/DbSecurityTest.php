@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Support\AcademicPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -45,6 +46,28 @@ class DbSecurityTest extends TestCase
                 'columns' => '*',
             ])
             ->assertUnauthorized();
+    }
+
+    public function test_database_gateway_returns_a_controlled_gone_response_when_disabled(): void
+    {
+        Config::set('api_db.enabled', false);
+
+        $response = $this
+            ->withHeader('X-Request-ID', 'api-db-disable-test')
+            ->postJson('/api/db', [
+                'table' => 'settings',
+                'action' => 'select',
+            ]);
+
+        $response
+            ->assertStatus(410)
+            ->assertJson([
+                'success' => false,
+                'code' => 'API_DB_DEPRECATED',
+                'message' => 'Endpoint ini sudah tidak tersedia.',
+                'request_id' => 'api-db-disable-test',
+            ])
+            ->assertHeader('X-Request-ID', 'api-db-disable-test');
     }
 
     public function test_database_gateway_records_privacy_safe_migration_telemetry(): void

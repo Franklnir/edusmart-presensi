@@ -1,52 +1,32 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PROFILE_BUCKET, getSignedUrlForValue, supabase } from '../../lib/supabase'
 import { buildNavigationMenu } from '../../navigation/menu.utils'
-import { normalizeAcademicYear } from '../../utils/academicPeriod'
+import { organizationService } from '../../services/organizationService'
 
 const isHttpUrl = (value = '') => /^https?:\/\//i.test(String(value || ''))
 
 export const useNavbarSettings = (authSettings) => {
   const [settings, setSettings] = useState(authSettings || {})
-  const [settingsId, setSettingsId] = useState(authSettings?.id || null)
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
     let isCancelled = false
 
     const loadSettings = async () => {
-      if (authSettings?.id) {
-        setSettings(authSettings || {})
-        setSettingsId(authSettings.id)
-      }
+      setIsLoading(true)
 
       try {
-        const columns = 'id,nama_sekolah,logo_url,logo_path,updated_at'
-        let data = null
-        let error = null
-
-        if (authSettings?.id) {
-          ; ({ data, error } = await supabase
-            .from('settings')
-            .select(columns)
-            .eq('id', authSettings.id)
-            .limit(1)
-            .single())
-        } else {
-          ; ({ data, error } = await supabase
-            .from('settings')
-            .select(columns)
-            .order('id', { ascending: true })
-            .limit(1)
-            .single())
+        const { data } = await organizationService.getContext()
+        const organization = data?.organization || {}
+        const nextSettings = {
+          ...(authSettings || {}),
+          id: authSettings?.id || null,
+          nama_sekolah: organization.name || authSettings?.nama_sekolah || '',
+          logo_path: organization.logo_path || authSettings?.logo_path || '',
+          updated_at: organization.updated_at || authSettings?.updated_at || null
         }
 
-        if (error && error.code === 'PGRST116') data = null
-        else if (error) throw error
-
-        if (!isCancelled && data) {
-          setSettings(data || {})
-          setSettingsId(data.id)
-        }
+        if (!isCancelled) setSettings(nextSettings)
       } catch (error) {
         if (!isCancelled) console.error('Error loading settings:', error)
       } finally {
@@ -60,27 +40,6 @@ export const useNavbarSettings = (authSettings) => {
       isCancelled = true
     }
   }, [authSettings])
-
-  useEffect(() => {
-    if (!settingsId) return undefined
-
-    const channel = supabase
-      .channel('navbar_settings_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'settings', filter: `id=eq.${settingsId}` },
-        (payload) => {
-          const row = payload.new
-          if (!row) return
-          setSettings((prev) => ({ ...prev, ...row }))
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [settingsId])
 
   return { settings, isLoading }
 }
@@ -155,9 +114,8 @@ export const useSchoolLogoUrl = (settings) => {
   return { logoUrl, clearLogoUrl }
 }
 
-export const useWaliKelasFlag = (role, userId, settings = null) => {
+export const useWaliKelasFlag = (role, userId) => {
   const [isWaliKelas, setIsWaliKelas] = useState(false)
-  const activeYear = normalizeAcademicYear(settings?.tahun_ajaran || settings?.tahunAjaran)
 
   useEffect(() => {
     let cancelled = false
@@ -169,20 +127,8 @@ export const useWaliKelasFlag = (role, userId, settings = null) => {
       }
 
       try {
-        let query = supabase
-          .from('kelas_struktur')
-          .select('kelas_id')
-          .eq('wali_guru_id', userId)
-          .limit(1)
-
-        if (activeYear) {
-          query = query.eq('tahun_ajaran', activeYear)
-        }
-
-        const { data, error } = await query
-
-        if (error) throw error
-        if (!cancelled) setIsWaliKelas((data || []).length > 0)
+        const { data } = await organizationService.getContext()
+        if (!cancelled) setIsWaliKelas(Boolean(data?.membership?.is_wali_kelas))
       } catch {
         if (!cancelled) setIsWaliKelas(false)
       }
@@ -193,7 +139,7 @@ export const useWaliKelasFlag = (role, userId, settings = null) => {
     return () => {
       cancelled = true
     }
-  }, [activeYear, role, userId])
+  }, [role, userId])
 
   return isWaliKelas
 }
@@ -211,9 +157,10 @@ export const useDelegatedAdminFeatures = (role, userId) => {
       }
 
       try {
-        const { data, error } = await supabase.admin.delegatedPermissions()
-        if (error) throw error
-        if (!cancelled) setFeatures(Array.isArray(data?.features) ? data.features : [])
+        const { data } = await organizationService.getContext()
+        if (!cancelled) {
+          setFeatures(Array.isArray(data?.delegated_features) ? data.delegated_features : [])
+        }
       } catch {
         if (!cancelled) setFeatures([])
       }
