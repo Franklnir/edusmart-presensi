@@ -1,6 +1,8 @@
 // src/pages/siswa/EditProfile.jsx
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
+import { ClassesApi } from '../../lib/api/v2/classes'
+import { currentProfileService } from '../../services/currentProfileService'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import GoogleCredentialButton from '../../components/GoogleCredentialButton'
@@ -27,7 +29,6 @@ import {
   shouldForceAccountSetup
 } from '../../utils/accountSetup'
 import { completeGoogleLinkOAuthFlow } from '../../utils/googleLinking'
-import { sanitizeText } from '../../utils/sanitize'
 import { validatePassword } from '../../utils/passwordPolicy'
 import { religionSelectOptions } from '../../constants/religionOptions'
 
@@ -95,7 +96,6 @@ async function compressImageToMaxBytes(file, maxBytes = 100 * 1024) {
 
   let blob = null
   while (quality >= minQuality) {
-    // eslint-disable-next-line no-await-in-loop
     blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
     if (!blob) break
     if (blob.size <= maxBytes) break
@@ -273,14 +273,12 @@ export default function EditProfile() {
 
   const loadKelasList = async () => {
     try {
-      const { data, error } = await supabase
-        .from('kelas')
-        .select('id, nama, grade, suffix')
-        .order('grade', { ascending: true })
-        .order('suffix', { ascending: true })
-        .limit(100)
-
-      if (error) throw error
+      const response = await ClassesApi.getAll({
+        per_page: '100',
+        sort: 'grade',
+        order: 'asc'
+      })
+      const data = response.data || response.payload?.data || []
 
       const formatted = (data || []).map((k) => ({
         id: k.id,
@@ -604,20 +602,20 @@ export default function EditProfile() {
       const updateData = {
         jk: form.jk,
         agama: form.agama || null,
-        nis: form.nis ? form.nis.trim() : null,
-        usia: form.usia ? parseInt(form.usia, 10) : null,
         no_hp_siswa: form.no_hp_siswa ? form.no_hp_siswa.trim() : null,
-        no_hp_wali: form.no_hp_wali ? form.no_hp_wali.trim() : null,
-        updated_at: new Date().toISOString()
+        no_hp_wali: form.no_hp_wali ? form.no_hp_wali.trim() : null
       }
 
-      const { error } = await supabase.from('profiles').update(updateData).eq('id', user.id)
-      if (error) throw error
+      const response = await currentProfileService.updateCurrentProfile(updateData)
+      if (response.data) {
+        useAuthStore.setState((state) => ({
+          profile: { ...state.profile, ...response.data }
+        }))
+      }
 
       setOriginalForm(form)
       setIsFormDirty(false)
 
-      await refreshProfile()
       pushToast('success', 'Profil berhasil diperbarui')
     } catch (err) {
       pushToast('error', err.message || 'Gagal menyimpan profil')
@@ -755,8 +753,6 @@ export default function EditProfile() {
       }
       await refreshProfile()
       pushToast('success', plan.successMessage)
-    } catch (err) {
-      throw err
     } finally {
       setAccountSaving(false)
     }
@@ -1334,11 +1330,9 @@ export default function EditProfile() {
                   </label>
                   <input
                     type="text"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 placeholder-slate-400 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700"
                     value={form.nis}
-                    onChange={(e) => handleFieldChange('nis', e.target.value)}
-                    placeholder="16 digit (opsional)"
-                    maxLength={16}
+                    readOnly
                   />
                 </div>
 
@@ -1351,10 +1345,9 @@ export default function EditProfile() {
                     type="number"
                     min="10"
                     max="30"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 placeholder-slate-400 transition-all duration-200 hover:border-slate-300 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-100"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700"
                     value={form.usia}
-                    onChange={(e) => handleFieldChange('usia', e.target.value)}
-                    placeholder="10-30 tahun (opsional)"
+                    readOnly
                   />
                 </div>
 

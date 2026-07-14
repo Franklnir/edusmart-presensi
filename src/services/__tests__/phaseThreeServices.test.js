@@ -7,6 +7,8 @@ vi.mock('../../lib/api/requestId', () => ({ generateRequestId: () => 'generated-
 
 const { assignmentService, submissionService } = await import('../assignmentService')
 const { attendanceService } = await import('../attendanceService')
+const { academicContextService } = await import('../academicContextService')
+const { currentProfileService } = await import('../currentProfileService')
 const { scheduleService } = await import('../scheduleService')
 
 describe('Phase 3 API V2 services', () => {
@@ -26,6 +28,36 @@ describe('Phase 3 API V2 services', () => {
       params: { kelas: '10A' }
     })
     expect(result).toEqual({ success: true, data: [{ id: 1 }], meta: { total: 1 } })
+  })
+
+  it('loads academic context through its tenant-scoped V2 resource', async () => {
+    await academicContextService.getActiveContext()
+
+    expect(apiClient).toHaveBeenCalledWith('/api/v2/academic-context', {
+      method: 'GET',
+      cacheTtlMs: 60 * 1000,
+      dedupe: true
+    })
+  })
+
+  it('uses an idempotent self-profile endpoint and strips privileged fields', async () => {
+    await currentProfileService.updateCurrentProfile({
+      jk: 'P',
+      no_hp_siswa: '081234567890',
+      tenant_id: 'forged',
+      role: 'admin',
+      photo_url: 'https://permanent.example/avatar.jpg'
+    })
+
+    expect(apiClient).toHaveBeenCalledWith('/api/v2/profile', {
+      method: 'PATCH',
+      headers: { 'Idempotency-Key': 'generated-key' },
+      body: {
+        jk: 'P',
+        no_hp_siswa: '081234567890',
+        idempotency_key: 'generated-key'
+      }
+    })
   })
 
   it('adds one idempotency key to assignment mutations and strips server fields', async () => {

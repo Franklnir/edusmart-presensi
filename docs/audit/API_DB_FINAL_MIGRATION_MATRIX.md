@@ -12,8 +12,8 @@ active legacy consumers. `LEGACY` means the gateway remains on an active path.
 
 | Domain | Consumer | Operasi | Endpoint Lama | Endpoint V2 | Status |
 |---|---|---|---|---|---|
-| Shared academic context | `AcademicContext.jsx` | active year and term bootstrap | `/api/db` settings | `/api/v2/academic-context` | IMPLEMENTING |
-| Current profile | auth bootstrap, EditProfile | current profile read and self update | `/api/db`, `/api/profile/me` | `/api/v2/profile` | IMPLEMENTING |
+| Shared academic context | `AcademicContext.jsx` | active year and term bootstrap | none | `/api/v2/academic-context` | MIGRATED |
+| Current profile | auth bootstrap, EditProfile | current profile read and self update | `/api/db`, `/api/profile/me`, legacy storage avatar path | `/api/v2/profile`; profile Attachment V2 pending | IMPLEMENTING |
 | Navbar | navbar hooks | profile, presence, notifications | `/api/db` | profile and notification resources | LEGACY |
 | Dashboard | admin, teacher, student pages | role summaries and cards | `/api/db` | role dashboard resources | LEGACY |
 | Classes | admin class page | class CRUD | `/api/db` | `/api/v2/classes` | IMPLEMENTING |

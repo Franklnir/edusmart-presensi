@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabase'
 import { queryClient, queryKeys } from '../lib/queryClient'
+import { academicContextService } from '../services/academicContextService'
 import { useAuthStore } from '../store/useAuthStore'
 import {
   generateAcademicYearOptions,
@@ -13,7 +13,7 @@ import {
 } from '../utils/academicCorrectionSession'
 
 const AcademicContext = createContext(null)
-const SETTINGS_PERIOD_COLUMNS = 'id, tenant_id, tahun_ajaran, semester_aktif, periode_mulai, periode_selesai, periode_ganjil_mulai, periode_ganjil_selesai, periode_genap_mulai, periode_genap_selesai, max_ekskul_per_siswa, updated_at'
+const ACADEMIC_CONTEXT_REFRESH_MS = 60 * 1000
 
 export function AcademicContextProvider({ children }) {
   const settings = useAuthStore((state) => state.settings)
@@ -39,41 +39,31 @@ export function AcademicContextProvider({ children }) {
         const data = await queryClient.fetchQuery({
           queryKey: queryKeys.admin.activeAcademicPeriodSettings({ tenantId }),
           queryFn: async () => {
-            const { data: row, error } = await supabase
-              .from('settings')
-              .select(SETTINGS_PERIOD_COLUMNS)
-              .order('id', { ascending: true })
-              .limit(1)
-              .maybeSingle()
-            if (error) throw error
-            return row || {}
+            const response = await academicContextService.getActiveContext()
+            return response.data || {}
           },
           staleTime: 60 * 1000
         })
         if (!cancelled) setActiveAcademicPeriod(resolveAcademicPeriod(data || {}))
-      } catch (error) {
+      } catch {
         if (!cancelled) setActiveAcademicPeriod(fallback)
       }
     }
 
     load()
-    const channel = supabase
-      .channel(`active_academic_period_settings:${tenantId || 'unknown'}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, (payload) => {
-        if (cancelled) return
-        const eventTenantId = String(payload.new?.tenant_id || payload.old?.tenant_id || '')
-        if (tenantId && eventTenantId && eventTenantId !== tenantId) return
-        queryClient.setQueryData(
-          queryKeys.admin.activeAcademicPeriodSettings({ tenantId }),
-          payload.new || {}
-        )
-        setActiveAcademicPeriod(resolveAcademicPeriod(payload.new || {}))
+    const refresh = () => {
+      queryClient.removeQueries({
+        queryKey: queryKeys.admin.activeAcademicPeriodSettings({ tenantId })
       })
-      .subscribe()
+      void load()
+    }
+    const interval = window.setInterval(refresh, ACADEMIC_CONTEXT_REFRESH_MS)
+    window.addEventListener('sismu:academic-context-updated', refresh)
 
     return () => {
       cancelled = true
-      supabase.removeChannel(channel)
+      window.clearInterval(interval)
+      window.removeEventListener('sismu:academic-context-updated', refresh)
     }
   }, [fallback, tenantId])
 

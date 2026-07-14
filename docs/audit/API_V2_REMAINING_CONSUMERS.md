@@ -20,7 +20,7 @@ migration.
 | Classes | `src/pages/admin/Kelas.jsx` | CRUD kelas plus schedule preview/options | `/api/db` (`kelas`, rollback-only `jadwal`) | `/api/v2/classes`; schedule V2 for preview/CRUD/export under flag | PARTIAL |
 | Teachers | `src/pages/admin/Guru.jsx` | list/update teacher | `/api/db` (`profiles`) | `/api/v2/teachers` pending; unused direct schedule preload removed | PARTIAL |
 | Students | `src/pages/admin/Siswa.jsx`, student feature hooks | list, CRUD, activate/deactivate, RFID enrollment | `/api/db`, `/api/rfid/set-mode` | `/api/v2/students`; RFID V2 pending | PARTIAL |
-| Student profile | `src/pages/siswa/EditProfile.jsx` | update profile/avatar | `/api/db`, `/api/storage/*` | profile and Upload/Attachment V2 pending | LEGACY |
+| Student profile | `src/pages/siswa/EditProfile.jsx` | update profil teks, daftar kelas, dan avatar | `/api/db` hanya untuk path avatar; `/api/storage/*` untuk avatar | `GET/PATCH /api/v2/profile`; `/api/v2/classes`; Attachment V2 avatar pending | PARTIAL |
 | Auth profile provisioning | `src/store/useAuthStore.js`, `src/pages/auth/Register.jsx` | create/read profile after auth | `/api/db`; `/api/auth/*` | version-neutral auth may remain; profile provisioning contract pending | LEGACY |
 | Attendance | `src/pages/admin/Scan.jsx` | schedule lookup, attendance upsert, scan status | `/api/db` (`absensi`, `rfid_scans`; schedule rollback only) | `/api/v2/attendance`; schedule lookup V2 under flag; RFID pending | PARTIAL |
 | Attendance | `src/pages/guru/AbsensiGuru.jsx` | schedule/student/attendance/request reads and mutations | `/api/db` (schedule rollback only; attendance legacy) | `/api/v2/attendance`, `/api/v2/attendance-requests`; schedule read V2 under flag | PARTIAL |
@@ -63,7 +63,7 @@ migration.
 
 | Domain | Consumer | Operasi | Endpoint Lama | Endpoint V2 | Status |
 |---|---|---|---|---|---|
-| Academic context | `src/context/AcademicContext.jsx` | settings/period bootstrap used by all domains | `/api/db` | scoped settings/academic-period V2 pending | LEGACY |
+| Academic context | `src/context/AcademicContext.jsx` | bootstrap konteks tahun ajaran dan semester aktif | none | `GET /api/v2/academic-context` | MIGRATED |
 | Navbar/dashboard | `src/components/Navbar/hooks.js` | profile/presence/notification refresh | `/api/db` | profile/notification contract pending | LEGACY |
 | Organization/school structure | admin class/settings views | structure, organizations, membership, import histories | `/api/db` | out-of-phase V2 domain contract pending | LEGACY |
 | PWA cache | `src/lib/supabase.js` cache policy and generated service worker | caches selected GET/DB-proxy/report/quiz reads | `/api/db`, `/api/reports/*`, `/api/quiz/*` | invalidate/re-key when each V2 service cuts over | PARTIAL |

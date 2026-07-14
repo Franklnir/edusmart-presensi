@@ -1,10 +1,12 @@
 <?php
 
+use App\Http\Controllers\Api\V2\AcademicContextController;
 use App\Http\Controllers\Api\V2\AssignmentController;
 use App\Http\Controllers\Api\V2\AttachmentController;
 use App\Http\Controllers\Api\V2\AttendanceController;
 use App\Http\Controllers\Api\V2\AttendanceRequestController;
 use App\Http\Controllers\Api\V2\ClassController;
+use App\Http\Controllers\Api\V2\CurrentProfileController;
 use App\Http\Controllers\Api\V2\FrontendLogController;
 use App\Http\Controllers\Api\V2\ScheduleController;
 use App\Http\Controllers\Api\V2\StudentController;
@@ -30,6 +32,9 @@ Route::post('/frontend-logs', [FrontendLogController::class, 'store'])
 
 Route::middleware('throttle:api')->group(function () {
     Route::get('/frontend-logs', [FrontendLogController::class, 'index']);
+    Route::get('/academic-context', [AcademicContextController::class, 'show'])->name('academic-context.show');
+    Route::get('/profile', [CurrentProfileController::class, 'show'])->name('profile.show');
+    Route::patch('/profile', [CurrentProfileController::class, 'update'])->name('profile.update');
 
     Route::apiResource('classes', ClassController::class);
     Route::apiResource('students', StudentController::class)->except(['destroy']);

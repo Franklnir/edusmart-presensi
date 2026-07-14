@@ -1447,6 +1447,9 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `PUT` | `/api/v2/classes/{class}` | Mengupdate kelas (full) |
 | `PATCH` | `/api/v2/classes/{class}` | Mengupdate kelas (partial) |
 | `DELETE` | `/api/v2/classes/{class}` | Menghapus kelas |
+| `GET` | `/api/v2/academic-context` | Konteks tahun ajaran dan semester aktif tenant dari server; tidak menerima `tenant_id` dari browser. |
+| `GET` | `/api/v2/profile` | Profil milik pengguna yang sedang terautentikasi dalam tenant aktif. Path atau URL avatar tidak dikembalikan sampai Attachment V2 tersedia. |
+| `PATCH` | `/api/v2/profile` | Mengubah field profil mandiri yang diizinkan menurut role. Gunakan `Idempotency-Key`; `tenant_id`, role, status, dan identitas pihak lain ditolak. |
 | `POST` | `/api/v2/frontend-logs` | Sink frontend errors |
 | `GET` | `/api/v2/frontend-logs` | Lihat frontend errors |
 | `GET` | `/api/v2/students` | Mendapatkan daftar siswa |

@@ -33,6 +33,17 @@ class ProfilePolicy
         return $actor->id === $profile->id;
     }
 
+    public function viewSelf(User $user, Profile $profile): bool
+    {
+        return $user->id === $profile->id
+            && $user->profile?->tenant_id === $profile->tenant_id;
+    }
+
+    public function updateSelf(User $user, Profile $profile): bool
+    {
+        return $this->viewSelf($user, $profile);
+    }
+
     public function create(User $user): bool
     {
         return $user->profile?->role === 'admin';
