@@ -26,6 +26,8 @@ class UpdateAssignmentRequest extends FormRequest
             'tahun_ajaran' => ['nullable', 'string', 'max:50'],
             'semester' => ['nullable', 'string', 'max:50'],
             'angkatan' => ['nullable', 'string', 'max:50'],
+            'status' => ['sometimes', 'string', 'in:draft,published,closed,archived'],
+            'idempotency_key' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

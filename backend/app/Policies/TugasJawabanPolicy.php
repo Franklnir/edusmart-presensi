@@ -17,6 +17,10 @@ class TugasJawabanPolicy
 
     public function view(User $user, TugasJawaban $jawaban): bool
     {
+        if (! $user->profile || ! $jawaban->tugas || $user->profile->tenant_id !== $jawaban->tugas->tenant_id) {
+            return false;
+        }
+
         if ($user->profile->role === 'admin') {
             return true;
         }
@@ -34,19 +38,27 @@ class TugasJawabanPolicy
 
     public function create(User $user): bool
     {
-        return $user->profile->role === 'siswa' || $user->profile->role === 'guru';
+        return $user->profile?->role === 'siswa';
     }
 
     public function update(User $user, TugasJawaban $jawaban): bool
     {
+        if (! $user->profile || ! $jawaban->tugas || $user->profile->tenant_id !== $jawaban->tugas->tenant_id) {
+            return false;
+        }
+
         if ($user->profile->role === 'siswa') {
             return $jawaban->user_id === $user->profile->id;
         }
+
         return false;
     }
 
     public function grade(User $user, TugasJawaban $jawaban): bool
     {
+        if (! $user->profile || ! $jawaban->tugas || $user->profile->tenant_id !== $jawaban->tugas->tenant_id) {
+            return false;
+        }
         if ($user->profile->role === 'admin') {
             return true;
         }
@@ -60,6 +72,10 @@ class TugasJawabanPolicy
 
     public function delete(User $user, TugasJawaban $jawaban): bool
     {
+        if (! $user->profile || ! $jawaban->tugas || $user->profile->tenant_id !== $jawaban->tugas->tenant_id) {
+            return false;
+        }
+
         if ($user->profile->role === 'admin') {
             return true;
         }

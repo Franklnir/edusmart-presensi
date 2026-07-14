@@ -26,7 +26,8 @@ class StoreAssignmentRequest extends FormRequest
             'tahun_ajaran' => ['nullable', 'string', 'max:50'],
             'semester' => ['nullable', 'string', 'max:50'],
             'angkatan' => ['nullable', 'string', 'max:50'],
-            'idempotency_key' => ['nullable', 'string', 'max:64'],
+            'status' => ['nullable', 'string', 'in:draft,published'],
+            'idempotency_key' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

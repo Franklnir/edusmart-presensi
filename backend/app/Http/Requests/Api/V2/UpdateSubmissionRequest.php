@@ -16,9 +16,10 @@ class UpdateSubmissionRequest extends FormRequest
         return [
             'attachment_ids' => ['nullable', 'array'],
             'attachment_ids.*' => ['string', 'uuid'],
-            'link_url' => ['nullable', 'string'],
+            'link_url' => ['nullable', 'url', 'max:2048'],
             'file_name' => ['nullable', 'string'],
             'komentar_siswa' => ['nullable', 'string'],
+            'idempotency_key' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

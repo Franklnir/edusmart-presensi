@@ -4,46 +4,47 @@ namespace App\Policies;
 
 use App\Models\Tugas;
 use App\Models\User;
-use Illuminate\Auth\Access\HandlesAuthorization;
 
 class TugasPolicy
 {
-    use HandlesAuthorization;
-
     public function viewAny(User $user): bool
     {
-        return in_array($user->profile->role, ['guru', 'siswa', 'admin']);
+        return in_array($user->profile?->role, ['guru', 'siswa', 'admin'], true);
     }
 
     public function view(User $user, Tugas $tugas): bool
     {
-        if ($user->profile->role === 'admin') {
+        $actor = $user->profile;
+        if (! $actor || $actor->tenant_id !== $tugas->tenant_id) {
+            return false;
+        }
+
+        if ($actor->role === 'admin') {
             return true;
         }
 
-        if ($user->profile->role === 'guru') {
-            return $tugas->created_by === $user->profile->id;
+        if ($actor->role === 'guru') {
+            return $tugas->created_by === $actor->id;
         }
 
-        if ($user->profile->role === 'siswa') {
-            return $tugas->kelas === $user->profile->kelas;
-        }
-
-        return false;
+        return $actor->role === 'siswa'
+            && $tugas->kelas === $actor->kelas
+            && in_array($tugas->status, ['published', 'closed'], true);
     }
 
     public function create(User $user): bool
     {
-        return $user->profile->role === 'guru' || $user->profile->role === 'admin';
+        return in_array($user->profile?->role, ['guru', 'admin'], true);
     }
 
     public function update(User $user, Tugas $tugas): bool
     {
-        if ($user->profile->role === 'admin') {
-            return true;
+        $actor = $user->profile;
+        if (! $actor || $actor->tenant_id !== $tugas->tenant_id) {
+            return false;
         }
 
-        return $user->profile->role === 'guru' && $tugas->created_by === $user->profile->id;
+        return $actor->role === 'admin' || ($actor->role === 'guru' && $tugas->created_by === $actor->id);
     }
 
     public function delete(User $user, Tugas $tugas): bool

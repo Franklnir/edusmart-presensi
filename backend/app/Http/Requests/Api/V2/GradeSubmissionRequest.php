@@ -15,7 +15,8 @@ class GradeSubmissionRequest extends FormRequest
     {
         return [
             'nilai' => ['required', 'integer', 'min:0', 'max:100'],
-            'status' => ['nullable', 'string', 'max:255'],
+            'status' => ['nullable', 'string', 'in:dinilai,revisi'],
+            'idempotency_key' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

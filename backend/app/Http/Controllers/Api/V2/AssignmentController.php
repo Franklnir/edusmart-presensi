@@ -7,105 +7,82 @@ use App\Http\Requests\Api\V2\StoreAssignmentRequest;
 use App\Http\Requests\Api\V2\UpdateAssignmentRequest;
 use App\Models\Tugas;
 use App\Models\TugasJawaban;
+use App\Services\AcademicAccessService;
+use App\Services\AttachmentClaimService;
 use App\Services\IdempotencyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 
 class AssignmentController extends Controller
 {
-    private IdempotencyService $idempotencyService;
-
-    public function __construct(IdempotencyService $idempotencyService)
-    {
-        $this->idempotencyService = $idempotencyService;
-    }
-
-    private function getRequestId(Request $request): string
-    {
-        return $request->header('X-Request-ID', (string) Str::uuid());
-    }
+    public function __construct(
+        private readonly IdempotencyService $idempotencyService,
+        private readonly AcademicAccessService $academicAccess,
+        private readonly AttachmentClaimService $attachmentClaims
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
         Gate::authorize('viewAny', Tugas::class);
-        $tenantId = $request->attributes->get('tenant_id');
-        $reqId = $this->getRequestId($request);
+        $tenantId = (string) $request->attributes->get('tenant_id');
+        $actor = $request->user()->profile;
+        $query = Tugas::where('tenant_id', $tenantId);
 
-        $query = Tugas::query();
-
-        if (\Illuminate\Support\Facades\Schema::hasColumn('tugas', 'tenant_id')) {
-            $query->where('tenant_id', $tenantId);
+        foreach (['kelas', 'mapel', 'tahun_ajaran', 'semester'] as $filter) {
+            if ($request->filled($filter)) {
+                $query->where($filter, $request->query($filter));
+            }
         }
-
-        if ($request->filled('kelas')) {
-            $query->where('kelas', $request->query('kelas'));
-        }
-        if ($request->filled('created_by')) {
+        if ($request->filled('created_by') && $actor->role === 'admin') {
             $query->where('created_by', $request->query('created_by'));
         }
-        if ($request->filled('mapel')) {
-            $query->where('mapel', $request->query('mapel'));
-        }
-        if ($request->filled('tahun_ajaran')) {
-            $query->where('tahun_ajaran', $request->query('tahun_ajaran'));
-        }
-        if ($request->filled('semester')) {
-            $query->where('semester', $request->query('semester'));
-        }
 
-        $user = $request->user();
-        if ($user && $user->profile) {
-            if ($user->profile->role === 'siswa') {
-                $query->where('kelas', $user->profile->kelas);
-            } elseif ($user->profile->role === 'guru') {
-                $query->where('created_by', $user->profile->id);
-            }
+        if ($actor->role === 'siswa') {
+            $query->where('kelas', $actor->kelas)->whereIn('status', ['published', 'closed']);
+        } elseif ($actor->role === 'guru') {
+            $query->where('created_by', $actor->id);
         }
 
         if ($request->filled('status')) {
-            $status = $request->query('status');
-            if ($status === 'active') {
-                $query->where('deadline', '>=', now());
-            } elseif ($status === 'expired') {
-                $query->where('deadline', '<', now());
-            }
+            match ($request->query('status')) {
+                'active' => $query->where('status', 'published')->where('deadline', '>=', now()),
+                'expired' => $query->where('deadline', '<', now()),
+                'draft', 'published', 'closed', 'archived' => $query->where('status', $request->query('status')),
+                default => null,
+            };
         }
-        
         if ($request->filled('created_after')) {
             $query->where('created_at', '>=', $request->query('created_after'));
         }
         if ($request->filled('created_before')) {
             $query->where('created_at', '<', $request->query('created_before'));
         }
-        
         if ($request->filled('search')) {
-            $search = $request->query('search');
-            $query->where(function($q) use ($search) {
-                $q->where('judul', 'like', "%{$search}%")
-                  ->orWhere('keterangan', 'like', "%{$search}%");
-            });
+            $search = mb_substr((string) $request->query('search'), 0, 255);
+            $query->where(fn ($nested) => $nested
+                ->where('judul', 'like', "%{$search}%")
+                ->orWhere('keterangan', 'like', "%{$search}%"));
         }
 
-        $query->orderBy('created_at', 'desc');
+        $query->orderByDesc('created_at');
+        $requested = $request->query('per_page', 25);
+        if ($requested === 'all') {
+            $data = $query->limit(500)->get();
 
-        $perPage = $request->query('per_page', 25);
-        if ($perPage === 'all') {
-            $assignments = $query->get();
             return response()->json([
                 'success' => true,
-                'message' => 'Data tugas berhasil diambil.',
-                'data' => $assignments,
-                'request_id' => $reqId,
+                'data' => $data,
+                'request_id' => $this->requestId($request),
             ]);
         }
-        
-        $assignments = $query->paginate((int) $perPage);
+
+        $assignments = $query->paginate(max(1, min((int) $requested, 100)))->appends($request->query());
 
         return response()->json([
             'success' => true,
-            'message' => 'Data tugas berhasil diambil.',
             'data' => $assignments->items(),
             'meta' => [
                 'current_page' => $assignments->currentPage(),
@@ -113,7 +90,7 @@ class AssignmentController extends Controller
                 'per_page' => $assignments->perPage(),
                 'total' => $assignments->total(),
             ],
-            'request_id' => $reqId,
+            'request_id' => $this->requestId($request),
         ]);
     }
 
@@ -121,122 +98,179 @@ class AssignmentController extends Controller
     {
         Gate::authorize('create', Tugas::class);
         $validated = $request->validated();
-        
-        $profile = $request->user()->profile;
-        $tenantId = $request->attributes->get('tenant_id');
-        $reqId = $this->getRequestId($request);
+        $actor = $request->user()->profile;
+        $tenantId = (string) $request->attributes->get('tenant_id');
 
-        $idempotencyKey = $validated['idempotency_key'] ?? (string) Str::uuid();
+        if (! $this->academicAccess->canManageClass($actor, $validated['kelas'], $validated['mapel'])) {
+            return $this->error($request, 'ASSIGNMENT_SCOPE_FORBIDDEN', 'Guru tidak mengampu kelas/mapel tersebut.', 403);
+        }
 
-        return $this->idempotencyService->handle($request, $idempotencyKey, function () use ($validated, $profile, $tenantId, $reqId) {
-            $tugas = new Tugas();
-            $tugas->kelas = $validated['kelas'];
-            $tugas->judul = $validated['judul'];
-            $tugas->mapel = $validated['mapel'];
-            $tugas->mulai = $validated['mulai'] ?? now();
-            $tugas->deadline = $validated['deadline'];
-            $tugas->keterangan = $validated['keterangan'] ?? null;
-            if (isset($validated['attachment_ids'])) {
-                $tugas->attachment_ids = $validated['attachment_ids'];
+        return $this->idempotencyService->handle(
+            $request,
+            $validated['idempotency_key'] ?? null,
+            function () use ($request, $validated, $actor, $tenantId) {
+                try {
+                    $assignment = DB::transaction(function () use ($validated, $actor, $tenantId) {
+                        $assignment = new Tugas;
+                        $assignment->fill(collect($validated)->except(['attachment_ids', 'idempotency_key'])->all());
+                        $assignment->tenant_id = $tenantId;
+                        $assignment->created_by = $actor->id;
+                        $assignment->status = $validated['status'] ?? 'published';
+                        $assignment->mulai = $validated['mulai'] ?? now();
+                        $assignment->save();
+
+                        $attachmentIds = $this->attachmentClaims->claim(
+                            $validated['attachment_ids'] ?? [],
+                            $tenantId,
+                            $actor->id,
+                            'assignment_attachment',
+                            $assignment->id,
+                            'assignment',
+                            $assignment->id
+                        );
+                        $assignment->attachment_ids = $attachmentIds ?: null;
+                        $assignment->save();
+
+                        $this->audit($tenantId, $actor->id, $actor->role, 'INSERT', $assignment, null);
+
+                        return $assignment;
+                    });
+                } catch (\LogicException $exception) {
+                    return $this->attachmentError($request, $exception);
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Tugas berhasil dibuat.',
+                    'data' => $assignment,
+                    'request_id' => $this->requestId($request),
+                ], 201);
             }
-            $tugas->link = $validated['link'] ?? null;
-            $tugas->tahun_ajaran = $validated['tahun_ajaran'] ?? null;
-            $tugas->semester = $validated['semester'] ?? null;
-            $tugas->angkatan = $validated['angkatan'] ?? null;
-            $tugas->created_by = $profile->id;
-            
-            if (\Illuminate\Support\Facades\Schema::hasColumn('tugas', 'tenant_id')) {
-                $tugas->tenant_id = $tenantId;
-            }
-
-            $tugas->save();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Tugas berhasil dibuat.',
-                'data' => $tugas,
-                'request_id' => $reqId,
-            ], 201);
-        });
+        );
     }
 
     public function show(Request $request, string $id): JsonResponse
     {
-        $tenantId = $request->attributes->get('tenant_id');
-        $reqId = $this->getRequestId($request);
-        
-        $query = Tugas::query();
-        if (\Illuminate\Support\Facades\Schema::hasColumn('tugas', 'tenant_id')) {
-            $query->where('tenant_id', $tenantId);
-        }
-        
-        $tugas = $query->findOrFail($id);
-        Gate::authorize('view', $tugas);
+        $assignment = Tugas::where('tenant_id', $request->attributes->get('tenant_id'))->findOrFail($id);
+        Gate::authorize('view', $assignment);
 
         return response()->json([
             'success' => true,
-            'data' => $tugas,
-            'request_id' => $reqId,
+            'data' => $assignment,
+            'request_id' => $this->requestId($request),
         ]);
     }
 
     public function update(UpdateAssignmentRequest $request, string $id): JsonResponse
     {
-        $tenantId = $request->attributes->get('tenant_id');
-        $reqId = $this->getRequestId($request);
-        
-        $query = Tugas::query();
-        if (\Illuminate\Support\Facades\Schema::hasColumn('tugas', 'tenant_id')) {
-            $query->where('tenant_id', $tenantId);
-        }
-        
-        $tugas = $query->findOrFail($id);
-        Gate::authorize('update', $tugas);
-
+        $tenantId = (string) $request->attributes->get('tenant_id');
+        $assignment = Tugas::where('tenant_id', $tenantId)->findOrFail($id);
+        Gate::authorize('update', $assignment);
         $validated = $request->validated();
-        
-        $tugas->fill($validated);
-        $tugas->save();
+        $actor = $request->user()->profile;
+        $classId = $validated['kelas'] ?? $assignment->kelas;
+        $subject = $validated['mapel'] ?? $assignment->mapel;
+        if (! $this->academicAccess->canManageClass($actor, $classId, $subject)) {
+            return $this->error($request, 'ASSIGNMENT_SCOPE_FORBIDDEN', 'Guru tidak mengampu kelas/mapel tersebut.', 403);
+        }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Tugas berhasil diperbarui.',
-            'data' => $tugas,
-            'request_id' => $reqId,
-        ]);
+        return $this->idempotencyService->handle(
+            $request,
+            $validated['idempotency_key'] ?? null,
+            function () use ($request, $assignment, $validated, $actor, $tenantId) {
+                try {
+                    $assignment = DB::transaction(function () use ($assignment, $validated, $actor, $tenantId) {
+                        $assignment = Tugas::whereKey($assignment->id)->where('tenant_id', $tenantId)->lockForUpdate()->firstOrFail();
+                        $before = $assignment->toArray();
+                        $assignment->fill(collect($validated)->except(['attachment_ids', 'idempotency_key'])->all());
+                        if (array_key_exists('attachment_ids', $validated)) {
+                            $assignment->attachment_ids = $this->attachmentClaims->claim(
+                                $validated['attachment_ids'] ?? [],
+                                $tenantId,
+                                $actor->id,
+                                'assignment_attachment',
+                                $assignment->id,
+                                'assignment',
+                                $assignment->id
+                            );
+                        }
+                        $assignment->save();
+                        $this->audit($tenantId, $actor->id, $actor->role, 'UPDATE', $assignment, $before);
+
+                        return $assignment;
+                    });
+                } catch (\LogicException $exception) {
+                    return $this->attachmentError($request, $exception);
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Tugas berhasil diperbarui.',
+                    'data' => $assignment,
+                    'request_id' => $this->requestId($request),
+                ]);
+            }
+        );
     }
 
     public function destroy(Request $request, string $id): JsonResponse
     {
-        $tenantId = $request->attributes->get('tenant_id');
-        $reqId = $this->getRequestId($request);
-        
-        $query = Tugas::query();
-        if (\Illuminate\Support\Facades\Schema::hasColumn('tugas', 'tenant_id')) {
-            $query->where('tenant_id', $tenantId);
-        }
-        
-        $tugas = $query->findOrFail($id);
-        Gate::authorize('delete', $tugas);
-
-        $submissionsCount = TugasJawaban::where('tugas_id', $tugas->id)->count();
-
-        if ($submissionsCount > 0) {
-            return response()->json([
-                'success' => false,
-                'code' => 'ASSIGNMENT_HAS_SUBMISSIONS',
-                'message' => 'Tugas sudah memiliki jawaban siswa dan tidak dapat dihapus.',
-                'error' => 'Tugas sudah memiliki jawaban siswa dan tidak dapat dihapus.',
-                'request_id' => $reqId,
-            ], 409);
+        $tenantId = (string) $request->attributes->get('tenant_id');
+        $assignment = Tugas::where('tenant_id', $tenantId)->findOrFail($id);
+        Gate::authorize('delete', $assignment);
+        if (TugasJawaban::where('tugas_id', $assignment->id)->exists()) {
+            return $this->error($request, 'ASSIGNMENT_HAS_SUBMISSIONS', 'Tugas dengan submission tidak dapat dihapus.', 409);
         }
 
-        $tugas->delete();
+        DB::transaction(function () use ($assignment, $request, $tenantId) {
+            $before = $assignment->toArray();
+            $assignment->delete();
+            $actor = $request->user()->profile;
+            $this->audit($tenantId, $actor->id, $actor->role, 'DELETE', $assignment, $before);
+        });
 
         return response()->json([
             'success' => true,
             'message' => 'Tugas berhasil dihapus.',
-            'request_id' => $reqId,
+            'request_id' => $this->requestId($request),
         ]);
+    }
+
+    private function audit(string $tenantId, string $actorId, string $role, string $action, Tugas $assignment, ?array $before): void
+    {
+        DB::table('audit_log')->insert([
+            'tenant_id' => $tenantId,
+            'table_name' => 'tugas',
+            'record_id' => (string) $assignment->id,
+            'action' => $action,
+            'old_data' => $before ? json_encode($before) : null,
+            'new_data' => $action === 'DELETE' ? null : json_encode($assignment->toArray()),
+            'user_id' => $actorId,
+            'user_role' => $role,
+            'timestamp' => now(),
+        ]);
+    }
+
+    private function attachmentError(Request $request, \LogicException $exception): JsonResponse
+    {
+        $code = $exception->getMessage();
+        $status = str_contains($code, 'TENANT') || str_contains($code, 'OWNER') ? 403 : 409;
+
+        return $this->error($request, $code, 'Attachment tidak dapat diklaim untuk tugas ini.', $status);
+    }
+
+    private function requestId(Request $request): string
+    {
+        return $request->header('X-Request-ID', (string) Str::uuid());
+    }
+
+    private function error(Request $request, string $code, string $message, int $status): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'code' => $code,
+            'message' => $message,
+            'request_id' => $this->requestId($request),
+        ], $status);
     }
 }

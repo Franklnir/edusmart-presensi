@@ -3,9 +3,11 @@
 namespace Tests\Feature\Api\V2;
 
 use App\Models\Profile;
-use App\Models\User;
 use App\Models\Tugas;
+use App\Models\TugasJawaban;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -18,14 +20,20 @@ class AssignmentControllerTest extends TestCase
     {
         parent::setUp();
         config(['tenancy.allow_header_override' => true]);
-
-        \Illuminate\Support\Facades\DB::table('tenants')->insertOrIgnore([
+        DB::table('tenants')->insertOrIgnore([
             ['id' => 'tenant-a', 'slug' => 'tenant-a', 'name' => 'Tenant A'],
             ['id' => 'tenant-b', 'slug' => 'tenant-b', 'name' => 'Tenant B'],
         ]);
+        foreach (['10A', '10B'] as $class) {
+            DB::table('kelas')->insert([
+                'id' => $class,
+                'nama' => $class,
+                'tenant_id' => 'tenant-a',
+            ]);
+        }
     }
 
-    private function createUserWithRole(string $tenantId, string $role, array $extraProfile = []): User
+    private function user(string $tenantId, string $role, array $profile = []): User
     {
         $user = User::factory()->create(['id' => Str::uuid()->toString()]);
         Profile::forceCreate(array_merge([
@@ -33,146 +41,142 @@ class AssignmentControllerTest extends TestCase
             'email' => $user->email,
             'tenant_id' => $tenantId,
             'role' => $role,
-            'nama' => "Test $role",
+            'nama' => "Test {$role}",
             'status' => 'active',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ], $extraProfile));
+        ], $profile));
+
         return $user;
     }
 
-    public function test_guru_can_create_assignment()
+    private function schedule(User $teacher, string $class = '10A', string $subject = 'Matematika'): void
     {
-        $guru = $this->createUserWithRole('tenant-a', 'guru');
-        Sanctum::actingAs($guru);
+        $tenant = $teacher->profile->tenant_id;
+        DB::table('jadwal')->insert([
+            'id' => (string) Str::uuid(),
+            'kelas_id' => $class,
+            'hari' => 'Senin',
+            'mapel' => $subject,
+            'guru_id' => $teacher->id,
+            'jam_mulai' => '08:00',
+            'jam_selesai' => '09:00',
+            'tenant_id' => $tenant,
+        ]);
+    }
 
+    private function assignment(User $teacher, array $values = []): Tugas
+    {
+        return Tugas::forceCreate(array_merge([
+            'kelas' => '10A',
+            'judul' => 'Tugas Matematika',
+            'mapel' => 'Matematika',
+            'mulai' => now()->subMinute(),
+            'deadline' => now()->addDays(7),
+            'created_by' => $teacher->id,
+            'tenant_id' => $teacher->profile->tenant_id,
+            'status' => 'published',
+        ], $values));
+    }
+
+    public function test_assigned_teacher_creates_idempotently_and_audit_is_written(): void
+    {
+        $teacher = $this->user('tenant-a', 'guru');
+        $this->schedule($teacher);
+        Sanctum::actingAs($teacher);
         $payload = [
             'kelas' => '10A',
             'judul' => 'Tugas Matematika',
             'mapel' => 'Matematika',
-            'mulai' => now()->toDateTimeString(),
-            'deadline' => now()->addDays(7)->toDateTimeString(),
+            'deadline' => now()->addDays(7)->toIso8601String(),
         ];
 
-        $response = $this->postJson('/api/v2/assignments', $payload, [
-            'X-Tenant' => 'tenant-a'
-        ]);
+        $this->postJson('/api/v2/assignments', $payload, ['X-Tenant' => 'tenant-a'])
+            ->assertStatus(422)->assertJsonPath('code', 'IDEMPOTENCY_KEY_REQUIRED');
 
-        $response->assertStatus(201)
-                 ->assertJsonPath('data.judul', 'Tugas Matematika')
-                 ->assertJsonPath('data.created_by', $guru->id);
-                 
-        $this->assertDatabaseHas('tugas', [
-            'judul' => 'Tugas Matematika',
-            'created_by' => $guru->id,
-        ]);
-        
-        // Idempotency: Second request with same payload should return 201
-        $payload['idempotency_key'] = $response->json('request_id'); // We didn't send idempotency_key in first request, let's just make a new idempotent request pair
-        
-        $payload['idempotency_key'] = Str::uuid()->toString();
-        $response1 = $this->postJson('/api/v2/assignments', $payload, [
-            'X-Tenant' => 'tenant-a'
-        ]);
-        $response1->assertStatus(201);
-        
-        // Retry exact same payload
-        $response2 = $this->postJson('/api/v2/assignments', $payload, [
-            'X-Tenant' => 'tenant-a'
-        ]);
-        $response2->assertStatus(201);
-        
-        // Retry same key, different payload -> 409
-        $payloadDiff = $payload;
-        $payloadDiff['judul'] = 'Berubah';
-        $response3 = $this->postJson('/api/v2/assignments', $payloadDiff, [
-            'X-Tenant' => 'tenant-a'
-        ]);
-        $response3->assertStatus(409)->assertJsonPath('code', 'IDEMPOTENCY_CONFLICT');
-    }
-
-    public function test_siswa_cannot_create_assignment()
-    {
-        $siswa = $this->createUserWithRole('tenant-a', 'siswa', ['kelas' => '10A']);
-        Sanctum::actingAs($siswa);
-
-        $payload = [
-            'kelas' => '10A',
-            'judul' => 'Tugas Matematika',
-            'mapel' => 'Matematika',
-            'mulai' => now()->toDateTimeString(),
-            'deadline' => now()->addDays(7)->toDateTimeString(),
-        ];
-
-        $response = $this->postJson('/api/v2/assignments', $payload, [
-            'X-Tenant' => 'tenant-a'
-        ]);
-
-        $response->assertStatus(403);
-    }
-
-    public function test_siswa_can_view_assignments_for_their_class()
-    {
-        $guru = $this->createUserWithRole('tenant-a', 'guru');
-        $siswa = $this->createUserWithRole('tenant-a', 'siswa', ['kelas' => '10A']);
-        $siswaB = $this->createUserWithRole('tenant-a', 'siswa', ['kelas' => '10B']);
-
-        Tugas::forceCreate([
-            'kelas' => '10A',
-            'judul' => 'Tugas 10A',
-            'mapel' => 'Matematika',
-            'mulai' => now(),
-            'deadline' => now()->addDays(7),
-            'created_by' => $guru->id,
+        $headers = ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => 'assignment-create-1'];
+        $first = $this->postJson('/api/v2/assignments', $payload, $headers)
+            ->assertCreated()->assertJsonPath('data.created_by', $teacher->id);
+        $this->postJson('/api/v2/assignments', $payload, $headers)
+            ->assertCreated()->assertHeader('Idempotency-Replayed', 'true');
+        $this->assertDatabaseCount('tugas', 1);
+        $this->assertDatabaseHas('audit_log', [
             'tenant_id' => 'tenant-a',
+            'table_name' => 'tugas',
+            'record_id' => (string) $first->json('data.id'),
+            'action' => 'INSERT',
         ]);
 
-        Sanctum::actingAs($siswa);
-        $response = $this->getJson('/api/v2/assignments', [
-            'X-Tenant' => 'tenant-a'
-        ]);
-
-        $response->assertStatus(200)
-                 ->assertJsonCount(1, 'data');
-
-        Sanctum::actingAs($siswaB);
-        $response = $this->getJson('/api/v2/assignments', [
-            'X-Tenant' => 'tenant-a'
-        ]);
-
-        $response->assertStatus(200)
-                 ->assertJsonCount(0, 'data');
+        $this->postJson('/api/v2/assignments', [...$payload, 'judul' => 'Berubah'], $headers)
+            ->assertStatus(409)->assertJsonPath('code', 'IDEMPOTENCY_CONFLICT');
     }
 
-    public function test_cannot_delete_assignment_with_submissions()
+    public function test_teacher_cannot_create_for_unassigned_class_or_subject(): void
     {
-        $guru = $this->createUserWithRole('tenant-a', 'guru');
-        
-        $tugas = Tugas::forceCreate([
-            'kelas' => '10A',
-            'judul' => 'Tugas 10A',
-            'mapel' => 'Matematika',
-            'mulai' => now(),
-            'deadline' => now()->addDays(7),
-            'created_by' => $guru->id,
-            'tenant_id' => 'tenant-a',
-        ]);
-        
-        $siswa = $this->createUserWithRole('tenant-a', 'siswa', ['kelas' => '10A']);
+        $teacher = $this->user('tenant-a', 'guru');
+        $this->schedule($teacher, '10A', 'Matematika');
+        Sanctum::actingAs($teacher);
 
-        \App\Models\TugasJawaban::forceCreate([
-            'tugas_id' => $tugas->id,
-            'user_id' => $siswa->id,
+        $this->postJson('/api/v2/assignments', [
+            'kelas' => '10B',
+            'judul' => 'Tugas',
+            'mapel' => 'Matematika',
+            'deadline' => now()->addDay()->toIso8601String(),
+        ], ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => 'wrong-class'])
+            ->assertForbidden()->assertJsonPath('code', 'ASSIGNMENT_SCOPE_FORBIDDEN');
+    }
+
+    public function test_student_only_sees_published_assignments_for_own_class(): void
+    {
+        $teacher = $this->user('tenant-a', 'guru');
+        $student = $this->user('tenant-a', 'siswa', ['kelas' => '10A']);
+        $this->assignment($teacher, ['judul' => 'Visible']);
+        $this->assignment($teacher, ['judul' => 'Draft', 'status' => 'draft']);
+        $this->assignment($teacher, ['judul' => 'Other class', 'kelas' => '10B']);
+        Sanctum::actingAs($student);
+
+        $this->getJson('/api/v2/assignments', ['X-Tenant' => 'tenant-a'])
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.judul', 'Visible');
+    }
+
+    public function test_same_tenant_other_teacher_cannot_manage_assignment(): void
+    {
+        $owner = $this->user('tenant-a', 'guru');
+        $other = $this->user('tenant-a', 'guru');
+        $assignment = $this->assignment($owner);
+        Sanctum::actingAs($other);
+
+        $this->getJson("/api/v2/assignments/{$assignment->id}", ['X-Tenant' => 'tenant-a'])->assertForbidden();
+        $this->patchJson("/api/v2/assignments/{$assignment->id}", ['judul' => 'Hijack'], [
+            'X-Tenant' => 'tenant-a',
+            'Idempotency-Key' => 'hijack',
+        ])->assertForbidden();
+        $this->deleteJson("/api/v2/assignments/{$assignment->id}", [], ['X-Tenant' => 'tenant-a'])->assertForbidden();
+    }
+
+    public function test_cross_tenant_assignment_is_not_disclosed(): void
+    {
+        $owner = $this->user('tenant-b', 'guru');
+        $actor = $this->user('tenant-a', 'admin');
+        $assignment = $this->assignment($owner);
+        Sanctum::actingAs($actor);
+
+        $this->getJson("/api/v2/assignments/{$assignment->id}", ['X-Tenant' => 'tenant-a'])->assertNotFound();
+    }
+
+    public function test_assignment_with_submission_cannot_be_deleted(): void
+    {
+        $teacher = $this->user('tenant-a', 'guru');
+        $student = $this->user('tenant-a', 'siswa', ['kelas' => '10A']);
+        $assignment = $this->assignment($teacher);
+        TugasJawaban::forceCreate([
+            'tenant_id' => 'tenant-a',
+            'tugas_id' => $assignment->id,
+            'user_id' => $student->id,
             'status' => 'menunggu',
             'waktu_submit' => now(),
         ]);
+        Sanctum::actingAs($teacher);
 
-        Sanctum::actingAs($guru);
-        $response = $this->deleteJson('/api/v2/assignments/' . $tugas->id, [], [
-            'X-Tenant' => 'tenant-a'
-        ]);
-
-        $response->assertStatus(409)
-                 ->assertJsonPath('code', 'ASSIGNMENT_HAS_SUBMISSIONS');
+        $this->deleteJson("/api/v2/assignments/{$assignment->id}", [], ['X-Tenant' => 'tenant-a'])
+            ->assertStatus(409)->assertJsonPath('code', 'ASSIGNMENT_HAS_SUBMISSIONS');
     }
 }
