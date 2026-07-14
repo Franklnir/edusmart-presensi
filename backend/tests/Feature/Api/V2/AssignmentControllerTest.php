@@ -149,7 +149,10 @@ class AssignmentControllerTest extends TestCase
             'X-Tenant' => 'tenant-a',
             'Idempotency-Key' => 'hijack',
         ])->assertForbidden();
-        $this->deleteJson("/api/v2/assignments/{$assignment->id}", [], ['X-Tenant' => 'tenant-a'])->assertForbidden();
+        $this->deleteJson("/api/v2/assignments/{$assignment->id}", [], [
+            'X-Tenant' => 'tenant-a',
+            'Idempotency-Key' => 'other-teacher-delete',
+        ])->assertForbidden();
     }
 
     public function test_cross_tenant_assignment_is_not_disclosed(): void
@@ -176,7 +179,29 @@ class AssignmentControllerTest extends TestCase
         ]);
         Sanctum::actingAs($teacher);
 
-        $this->deleteJson("/api/v2/assignments/{$assignment->id}", [], ['X-Tenant' => 'tenant-a'])
+        $this->deleteJson("/api/v2/assignments/{$assignment->id}", [], [
+            'X-Tenant' => 'tenant-a',
+            'Idempotency-Key' => 'assignment-with-submission',
+        ])
             ->assertStatus(409)->assertJsonPath('code', 'ASSIGNMENT_HAS_SUBMISSIONS');
+    }
+
+    public function test_assignment_delete_is_idempotent_and_audited(): void
+    {
+        $teacher = $this->user('tenant-a', 'guru');
+        $assignment = $this->assignment($teacher);
+        Sanctum::actingAs($teacher);
+        $headers = ['X-Tenant' => 'tenant-a', 'Idempotency-Key' => 'delete-assignment'];
+
+        $this->deleteJson("/api/v2/assignments/{$assignment->id}", [], $headers)->assertOk();
+        $this->deleteJson("/api/v2/assignments/{$assignment->id}", [], $headers)
+            ->assertOk()->assertHeader('Idempotency-Replayed', 'true');
+        $this->assertDatabaseMissing('tugas', ['id' => $assignment->id]);
+        $this->assertDatabaseHas('audit_log', [
+            'tenant_id' => 'tenant-a',
+            'table_name' => 'tugas',
+            'record_id' => (string) $assignment->id,
+            'action' => 'DELETE',
+        ]);
     }
 }

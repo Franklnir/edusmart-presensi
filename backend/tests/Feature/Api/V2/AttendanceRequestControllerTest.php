@@ -109,6 +109,7 @@ class AttendanceRequestControllerTest extends TestCase
 
         $response = $this->patchJson('/api/v2/attendance-requests/'.$ajuan->id, [
             'action' => 'izin',
+            'idempotency_key' => 'approve-request',
         ], [
             'X-Tenant' => 'tenant-a',
         ]);
@@ -149,6 +150,7 @@ class AttendanceRequestControllerTest extends TestCase
 
         $response = $this->patchJson('/api/v2/attendance-requests/'.$ajuan->id, [
             'action' => 'izin',
+            'idempotency_key' => 'student-approve-request',
         ], [
             'X-Tenant' => 'tenant-a',
         ]);
@@ -175,13 +177,19 @@ class AttendanceRequestControllerTest extends TestCase
         Sanctum::actingAs($guru);
 
         $this->withHeaders(['X-Tenant' => 'tenant-a'])
-            ->patchJson('/api/v2/attendance-requests/'.$ajuan->id, ['action' => 'sakit'])
+            ->patchJson('/api/v2/attendance-requests/'.$ajuan->id, [
+                'action' => 'sakit',
+                'idempotency_key' => 'final-sakit',
+            ])
             ->assertOk()
             ->assertJsonPath('data.status_guru', 'sakit')
             ->assertJsonPath('data.kategori_final', 'Sakit');
 
         $this->withHeaders(['X-Tenant' => 'tenant-a'])
-            ->patchJson('/api/v2/attendance-requests/'.$ajuan->id, ['action' => 'izin'])
+            ->patchJson('/api/v2/attendance-requests/'.$ajuan->id, [
+                'action' => 'izin',
+                'idempotency_key' => 'final-izin',
+            ])
             ->assertStatus(409)
             ->assertJsonPath('code', 'ATTENDANCE_REQUEST_ALREADY_PROCESSED');
 
@@ -216,12 +224,18 @@ class AttendanceRequestControllerTest extends TestCase
 
         Sanctum::actingAs($unassignedGuru);
         $this->withHeaders(['X-Tenant' => 'tenant-a'])
-            ->patchJson('/api/v2/attendance-requests/'.$ajuan->id, ['action' => 'izin'])
+            ->patchJson('/api/v2/attendance-requests/'.$ajuan->id, [
+                'action' => 'izin',
+                'idempotency_key' => 'unassigned-decision',
+            ])
             ->assertForbidden();
 
         Sanctum::actingAs($otherTenantGuru);
         $this->withHeaders(['X-Tenant' => 'tenant-b'])
-            ->patchJson('/api/v2/attendance-requests/'.$ajuan->id, ['action' => 'izin'])
+            ->patchJson('/api/v2/attendance-requests/'.$ajuan->id, [
+                'action' => 'izin',
+                'idempotency_key' => 'other-tenant-decision',
+            ])
             ->assertNotFound();
     }
 
@@ -273,12 +287,16 @@ class AttendanceRequestControllerTest extends TestCase
         ]);
         Sanctum::actingAs($siswa);
 
-        $this->withHeaders(['X-Tenant' => 'tenant-a'])
+        $this->withHeaders(['X-Tenant' => 'tenant-a', 'Idempotency-Key' => 'delete-final'])
             ->deleteJson('/api/v2/attendance-requests/'.$final->id)
             ->assertForbidden();
-        $this->withHeaders(['X-Tenant' => 'tenant-a'])
+        $this->withHeaders(['X-Tenant' => 'tenant-a', 'Idempotency-Key' => 'delete-pending'])
             ->deleteJson('/api/v2/attendance-requests/'.$pending->id)
             ->assertOk();
+        $this->withHeaders(['X-Tenant' => 'tenant-a', 'Idempotency-Key' => 'delete-pending'])
+            ->deleteJson('/api/v2/attendance-requests/'.$pending->id)
+            ->assertOk()
+            ->assertHeader('Idempotency-Replayed', 'true');
 
         $this->assertDatabaseMissing('absensi_ajuan', ['id' => $pending->id]);
         $this->assertDatabaseHas('absensi_ajuan', ['id' => $final->id]);

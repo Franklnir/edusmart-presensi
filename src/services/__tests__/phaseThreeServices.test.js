@@ -80,4 +80,14 @@ describe('Phase 3 API V2 services', () => {
       body: { action: 'izin', idempotency_key: 'generated-key' }
     })
   })
+
+  it('adds idempotency to assignment deletion', async () => {
+    await assignmentService.deleteAssignment(12)
+
+    expect(apiClient).toHaveBeenCalledWith('/api/v2/assignments/12', {
+      method: 'DELETE',
+      headers: { 'Idempotency-Key': 'generated-key' },
+      body: { idempotency_key: 'generated-key' }
+    })
+  })
 })

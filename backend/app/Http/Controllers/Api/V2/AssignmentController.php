@@ -216,24 +216,31 @@ class AssignmentController extends Controller
     public function destroy(Request $request, string $id): JsonResponse
     {
         $tenantId = (string) $request->attributes->get('tenant_id');
-        $assignment = Tugas::where('tenant_id', $tenantId)->findOrFail($id);
-        Gate::authorize('delete', $assignment);
-        if (TugasJawaban::where('tugas_id', $assignment->id)->exists()) {
-            return $this->error($request, 'ASSIGNMENT_HAS_SUBMISSIONS', 'Tugas dengan submission tidak dapat dihapus.', 409);
-        }
 
-        DB::transaction(function () use ($assignment, $request, $tenantId) {
-            $before = $assignment->toArray();
-            $assignment->delete();
-            $actor = $request->user()->profile;
-            $this->audit($tenantId, $actor->id, $actor->role, 'DELETE', $assignment, $before);
+        return $this->idempotencyService->handle($request, null, function () use ($request, $id, $tenantId) {
+            $assignment = Tugas::where('tenant_id', $tenantId)->findOrFail($id);
+            Gate::authorize('delete', $assignment);
+            if (TugasJawaban::where('tugas_id', $assignment->id)->exists()) {
+                return $this->error($request, 'ASSIGNMENT_HAS_SUBMISSIONS', 'Tugas dengan submission tidak dapat dihapus.', 409);
+            }
+
+            DB::transaction(function () use ($assignment, $request, $tenantId) {
+                $assignment = Tugas::where('tenant_id', $tenantId)
+                    ->whereKey($assignment->id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+                $before = $assignment->toArray();
+                $assignment->delete();
+                $actor = $request->user()->profile;
+                $this->audit($tenantId, $actor->id, $actor->role, 'DELETE', $assignment, $before);
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Tugas berhasil dihapus.',
+                'request_id' => $this->requestId($request),
+            ]);
         });
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Tugas berhasil dihapus.',
-            'request_id' => $this->requestId($request),
-        ]);
     }
 
     private function audit(string $tenantId, string $actorId, string $role, string $action, Tugas $assignment, ?array $before): void

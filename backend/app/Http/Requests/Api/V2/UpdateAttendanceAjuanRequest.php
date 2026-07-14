@@ -15,6 +15,7 @@ class UpdateAttendanceAjuanRequest extends FormRequest
     {
         return [
             'action' => ['required', 'string', 'in:izin,sakit,reject'],
+            'idempotency_key' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

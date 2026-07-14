@@ -20,7 +20,7 @@ key, bucket, dan permanent URL tidak menjadi kontrak attachment. Attachment ID
 harus berasal dari upload session completed, tenant/actor/purpose yang sama,
 dan diklaim dengan transaction + lock.
 
-Create/update memerlukan `Idempotency-Key` dan menulis audit log. Delete tugas
+Create/update/delete memerlukan `Idempotency-Key` dan menulis audit log. Delete tugas
 yang telah memiliki submission menghasilkan `ASSIGNMENT_HAS_SUBMISSIONS` (409),
 bukan cascade delete. Error scope guru adalah `ASSIGNMENT_SCOPE_FORBIDDEN`.
 

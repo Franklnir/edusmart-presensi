@@ -108,65 +108,80 @@ class AttendanceRequestController extends Controller
 
         Gate::authorize('update', $attendanceRequest);
 
-        try {
-            $updated = $this->respondRequest->execute(
-                $attendanceRequest,
-                $request->validated('action'),
-                $request->user()->profile,
-                $tenantId
-            );
-        } catch (\LogicException $exception) {
-            if ($exception->getMessage() === 'ATTENDANCE_REQUEST_ALREADY_PROCESSED') {
-                return $this->error($request, 'ATTENDANCE_REQUEST_ALREADY_PROCESSED', 'Pengajuan ini sudah memiliki keputusan final.', 409);
-            }
-            throw $exception;
-        }
+        $validated = $request->validated();
 
-        return (new AttendanceRequestResource($updated))->additional([
-            'success' => true,
-            'message' => 'Pengajuan presensi berhasil diproses.',
-            'request_id' => $this->requestId($request),
-        ])->response();
+        return $this->idempotencyService->handle(
+            $request,
+            $validated['idempotency_key'] ?? null,
+            function () use ($request, $attendanceRequest, $validated, $tenantId) {
+                try {
+                    $updated = $this->respondRequest->execute(
+                        $attendanceRequest,
+                        $validated['action'],
+                        $request->user()->profile,
+                        $tenantId
+                    );
+                } catch (\LogicException $exception) {
+                    if ($exception->getMessage() === 'ATTENDANCE_REQUEST_ALREADY_PROCESSED') {
+                        return $this->error($request, 'ATTENDANCE_REQUEST_ALREADY_PROCESSED', 'Pengajuan ini sudah memiliki keputusan final.', 409);
+                    }
+                    throw $exception;
+                }
+
+                return (new AttendanceRequestResource($updated))->additional([
+                    'success' => true,
+                    'message' => 'Pengajuan presensi berhasil diproses.',
+                    'request_id' => $this->requestId($request),
+                ])->response();
+            }
+        );
     }
 
     public function destroy(Request $request, string $id): JsonResponse
     {
         $tenantId = (string) $request->attributes->get('tenant_id');
-        $attendanceRequest = AbsensiAjuan::with('profile')->where('tenant_id', $tenantId)->find($id);
-        if (! $attendanceRequest) {
-            return $this->error($request, 'ATTENDANCE_REQUEST_NOT_FOUND', 'Pengajuan presensi tidak ditemukan.', 404);
-        }
 
-        Gate::authorize('delete', $attendanceRequest);
-
-        DB::transaction(function () use ($attendanceRequest, $request, $tenantId) {
-            $locked = AbsensiAjuan::whereKey($attendanceRequest->id)
-                ->where('tenant_id', $tenantId)
-                ->lockForUpdate()
-                ->firstOrFail();
-            if ($locked->status_guru !== 'pending') {
-                throw new \LogicException('ATTENDANCE_REQUEST_ALREADY_PROCESSED');
+        return $this->idempotencyService->handle($request, null, function () use ($request, $id, $tenantId) {
+            $attendanceRequest = AbsensiAjuan::with('profile')->where('tenant_id', $tenantId)->find($id);
+            if (! $attendanceRequest) {
+                return $this->error($request, 'ATTENDANCE_REQUEST_NOT_FOUND', 'Pengajuan presensi tidak ditemukan.', 404);
             }
 
-            DB::table('audit_log')->insert([
-                'tenant_id' => $tenantId,
-                'table_name' => 'absensi_ajuan',
-                'record_id' => $locked->id,
-                'action' => 'DELETE',
-                'old_data' => json_encode($locked->only(['uid', 'kelas', 'tanggal', 'mapel', 'status_guru'])),
-                'new_data' => null,
-                'user_id' => $request->user()->id,
-                'user_role' => $request->user()->profile->role,
-                'timestamp' => now(),
-            ]);
-            $locked->delete();
-        });
+            Gate::authorize('delete', $attendanceRequest);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Pengajuan presensi pending berhasil dihapus.',
-            'request_id' => $this->requestId($request),
-        ]);
+            try {
+                DB::transaction(function () use ($attendanceRequest, $request, $tenantId) {
+                    $locked = AbsensiAjuan::whereKey($attendanceRequest->id)
+                        ->where('tenant_id', $tenantId)
+                        ->lockForUpdate()
+                        ->firstOrFail();
+                    if ($locked->status_guru !== 'pending') {
+                        throw new \LogicException('ATTENDANCE_REQUEST_ALREADY_PROCESSED');
+                    }
+
+                    DB::table('audit_log')->insert([
+                        'tenant_id' => $tenantId,
+                        'table_name' => 'absensi_ajuan',
+                        'record_id' => $locked->id,
+                        'action' => 'DELETE',
+                        'old_data' => json_encode($locked->only(['uid', 'kelas', 'tanggal', 'mapel', 'status_guru'])),
+                        'new_data' => null,
+                        'user_id' => $request->user()->id,
+                        'user_role' => $request->user()->profile->role,
+                        'timestamp' => now(),
+                    ]);
+                    $locked->delete();
+                });
+            } catch (\LogicException $exception) {
+                return $this->error($request, $exception->getMessage(), 'Pengajuan ini sudah memiliki keputusan final.', 409);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Pengajuan presensi pending berhasil dihapus.',
+                'request_id' => $this->requestId($request),
+            ]);
+        });
     }
 
     private function requestId(Request $request): string

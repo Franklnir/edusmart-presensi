@@ -61,7 +61,7 @@ export const assignmentService = {
   },
 
   async deleteAssignment(id) {
-    return responsePayload(await apiClient(`/api/v2/assignments/${id}`, { method: 'DELETE' }))
+    return responsePayload(await apiClient(`/api/v2/assignments/${id}`, mutationOptions('DELETE')))
   }
 }
 
