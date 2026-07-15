@@ -27,6 +27,11 @@ therefore not proven to be isolated staging. No further remote inspection and
 no remote change was performed; the target is recorded as
 `TARGET_IDENTITY_UNSAFE`.
 
+The authorized topology inspection then confirmed the target is production:
+the active Compose project is `edusmart-prod`, the application root is
+`/opt/edusmart-presensi`, and the active resources use the `edusmart-*`
+production naming boundary. The staging procedure was stopped immediately.
+
 The legacy `/api/db` and `/api/db/batch` routes remain registered by design for
 the explicit compatibility register. They were not removed or bypassed by
 this release procedure.
@@ -48,7 +53,7 @@ this release procedure.
 | Legacy consumer guard | PASS | Existing release checkpoint guard reviewed the registered compatibility boundary | Runtime consumer evidence still required |
 | Staging flag audit | PASS STATIC / NOT EXECUTED | Workflow, Dockerfile, production example, and flag guard contain all eight explicit flags | `npm run audit:staging-flags` needs Node |
 | Immutable images | BLOCKED | Docker/Podman unavailable; registry build and digests do not exist | Build in CI and record digests |
-| Isolated staging configuration | TARGET_IDENTITY_UNSAFE | SSH target identified only as `sismu` at `/root`; `/opt/edusmart-staging` marker absent | Operator must provide a verifiable isolated staging target |
+| Isolated staging configuration | TARGET_IDENTITY_UNSAFE | SSH target is production: Compose project `edusmart-prod`, app root `/opt/edusmart-presensi`, production network and containers | Operator must provide a separate staging VPS/target |
 | Staging fixtures | BLOCKED | Required roles and second tenant are unavailable | Seed deterministic staging fixtures |
 | Database backup/checksum | BLOCKED | No staging database or approved backup location available | Backup before any staging migration |
 | Browser smoke | BLOCKED | No staging runtime, browser session, or role fixtures available | Execute the smoke checklist |
@@ -107,9 +112,10 @@ The staging workflow is fail-closed for missing hosts, credentials, storage,
 database, Redis, fixtures, and release images. `.env.staging.example` is a
 template and was not used as a deployment credential source.
 
-The authorized SSH attempt did not proceed beyond safe identity checks. No
-`.env`, container list, database connection, storage object, migration, or
-service configuration was read from the ambiguous host.
+The authorized SSH attempt performed only safe topology inspection. No `.env`,
+database connection, storage object, migration, or service configuration was
+read or changed. Because the target is production, it was not used for any
+staging operation.
 
 ## Smoke Evidence
 
@@ -170,7 +176,7 @@ redeploy target before rollout.
   domains and must stay aligned with `config/api-legacy-consumers.json`.
 - No immutable image digest, staging backup checksum, previous release SHA,
   readiness response, or browser Network trace is available.
-- The only reachable SSH target is not verified as staging and is recorded as
+- The only reachable SSH target is confirmed production and is recorded as
   `TARGET_IDENTITY_UNSAFE`; no remote configuration was changed.
 - No production deployment or VPS mutation was performed.
 
