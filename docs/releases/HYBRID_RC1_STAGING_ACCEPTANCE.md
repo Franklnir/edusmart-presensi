@@ -5,8 +5,8 @@
 - Base commit: `668e7fe923d607b36522ff0828b7a9b6f0fa7310`
 - Release SHA: verify with `git rev-parse release/hybrid-rc1` immediately
   before artifact creation
-- Last CI-validated SHA: `0b85f0ae059d897fdb33d602a97979ad0f7c784a`
-- Last CI run: `29427027194`
+- Last CI-validated SHA before this report snapshot: `e0a094ed424c71366f05341d216e64f561f36278`
+- Last CI run: `29428181560`
 - Migration set:
   `2026_07_15_000100_add_observability_context_to_frontend_error_logs.php`,
   `2026_07_15_000110_add_read_write_to_db_proxy_usage_telemetry.php`
@@ -45,19 +45,19 @@ this release procedure.
 |---|---|---|---|
 | Release branch identity | PASS | `git rev-parse release/hybrid-rc1` matched `HEAD`; branch clean | None locally |
 | Secret and release-file audit | PASS | No tracked `.env`, private key, dump, generated `dist`, or temporary release script; only log `.gitignore` matched the broad scan | None found |
-| Backend tests | PASS | `442 passed, 0 failed, 2321 assertions` in CI run `29427027194` for SHA `0b85f0ae` | Next report commit changes the SHA; rerun before artifacts |
+| Backend tests | PASS | `442 passed, 0 failed, 2321 assertions` in CI run `29428181560` for SHA `e0a094ed` | Verify the branch HEAD before artifacts |
 | Focused Grade/Report/Report Card tests | PASS | Grade `13 passed/65 assertions`; Report `21 passed/119`; Report Card `13 passed/53` | Runtime smoke still required |
-| Composer validate | PENDING | Added to the official CI job; not part of run `29427027194` | Verify on the next exact-SHA run |
-| Composer audit | PENDING | Added to the official CI job; not part of run `29427027194` | Verify on the next exact-SHA run |
+| Composer validate | PASS | `./composer.json is valid` in CI run `29428181560` | None |
+| Composer audit | PASS | `composer audit --locked --no-interaction` completed in CI run `29428181560` | None |
 | Database-dependent artisan gate | BLOCKED | PHP has PDO but no `pdo_pgsql`; local PostgreSQL service is unavailable | Run with PostgreSQL and `pdo_pgsql` |
 | Full Pint | PASS | `492 files` passed in CI run `29427027194` | None |
 | Changed-file Pint | PASS | Full Pint covers the changed backend files | None |
-| Frontend test/build/check | PASS | CI frontend quality gate completed successfully in run `29427027194` | Browser runtime still required |
+| Frontend test/build/check | PASS | `5 test files, 26 tests`; build and check completed in CI run `29428181560` | Browser runtime still required |
 | Legacy consumer guard | PASS | `33 registered source files reviewed` in CI | Runtime compatibility telemetry still required |
 | Staging flag audit | PASS | `8 explicit V2 flags verified` in CI | Runtime workflow still requires staging inputs |
 | Cloudflare Pages release wiring | PASS STATIC | Pages workflow now forwards all eight flags and `VITE_APP_RELEASE_SHA`; YAML parser passed | Runtime workflow has not run for this SHA |
 | GitHub staging environment | BLOCKED | Environment exists but has no staging secret or variable names | Operator must provision staging-scoped inputs |
-| CI for official release SHA | PASS | Run `29427027194`, SHA `0b85f0ae059d897fdb33d602a97979ad0f7c784a` | Rerun after this report/workflow commit |
+| CI for official release SHA | PASS | Run `29428181560`, SHA `e0a094ed424c71366f05341d216e64f561f36278` | Report-only commit advances the branch; verify HEAD before artifacts |
 | Immutable images | BLOCKED | Docker/Podman unavailable; registry build and digests do not exist | Build in CI and record digests |
 | Isolated staging configuration | TARGET_IDENTITY_UNSAFE | SSH target is production: Compose project `edusmart-prod`, app root `/opt/edusmart-presensi`, production network and containers | Operator must provide a separate staging VPS/target |
 | Staging fixtures | BLOCKED | Required roles and second tenant are unavailable | Seed deterministic staging fixtures |
@@ -237,10 +237,8 @@ redeploy target before rollout.
 
 ## Remaining Risks
 
-- The new Composer validate/audit steps are included in CI but require one
-  rerun after this report commit; run `29427027194` predates those steps.
 - Local PHP lacks `pdo_pgsql`, while local Node and Docker are unavailable;
-  CI supplied the backend/frontend source gates but not staging runtime proof.
+  CI supplied the complete source gates but not staging runtime proof.
 - `/api/db` and `/api/db/batch` remain active compatibility routes for other
   domains and must stay aligned with `config/api-legacy-consumers.json`.
 - No immutable image digest, staging backup checksum, previous release SHA,
@@ -248,7 +246,8 @@ redeploy target before rollout.
 - GitHub `staging` has no environment secrets or variables, so CI and Pages
   deployment are fail-closed until the operator provisions them.
 - The release branch is present on `origin` and the last exact-SHA CI run is
-  `29427027194`; the report/workflow commit requires a fresh exact-SHA run.
+  `29428181560`; this report-only commit requires a fresh exact-SHA run before
+  artifact creation.
 - The only reachable SSH target is confirmed production and is recorded as
   `TARGET_IDENTITY_UNSAFE`; no remote configuration was changed.
 - No production deployment or VPS mutation was performed.
