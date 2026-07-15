@@ -3,7 +3,6 @@
 namespace App\Services\Actions\Attendance;
 
 use App\Models\Profile;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -45,19 +44,19 @@ class BulkCreateAttendance
                 $mapel = $record['mapel'] ?? '';
                 $recTanggal = substr($record['tanggal'], 0, 10);
                 $key = "{$record['uid']}|{$recTanggal}|{$record['kelas']}|{$mapel}";
-                
+
                 // Skip if already exists
                 if (isset($existingMap[$key])) {
                     continue;
                 }
-                
+
                 // Prevent duplicate within the same batch
                 $existingMap[$key] = true;
 
                 $id = (string) Str::uuid(); // Generate ID for audit if needed? Wait, absensi table uses bigIncrements 'id'. We don't have to provide UUID for ID. We'll use insertGetId or just let it auto-increment.
                 // But for audit log, we need the inserted IDs. Since we might do bulk insert, we can't easily get the auto-increment IDs for audit log without doing it one by one or using returning().
                 // However, Laravel's insert() doesn't return IDs by default.
-                
+
                 $insertData[] = [
                     'tenant_id' => $tenantId,
                     'uid' => $record['uid'],
@@ -98,7 +97,7 @@ class BulkCreateAttendance
                         'kelas' => $data['kelas'],
                         'tanggal' => $data['tanggal'],
                         'mapel' => $data['mapel'],
-                        'status' => $data['status']
+                        'status' => $data['status'],
                     ]),
                     'user_id' => $creator->id,
                     'user_role' => $creator->role,

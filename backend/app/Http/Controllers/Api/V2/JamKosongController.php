@@ -6,24 +6,23 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Str;
-use App\Models\Profile;
 
 class JamKosongController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        if (!in_array($request->user()->profile->role, ['admin', 'guru'])) { abort(403, 'Unauthorized'); } 
+        if (! in_array($request->user()->profile->role, ['admin', 'guru'])) {
+            abort(403, 'Unauthorized');
+        }
         $tenantId = $request->attributes->get('tenant_id');
 
         $query = DB::table('jam_kosong as jk')
             ->join('profiles as p', 'jk.created_by', '=', 'p.id')
             ->where('p.tenant_id', $tenantId)
             ->select('jk.*');
-        
+
         $limit = min((int) $request->query('per_page', 50), 200);
-        
+
         $data = $query->orderBy('jk.tanggal', 'desc')->orderBy('jk.jam_mulai')->paginate($limit)->appends($request->query());
 
         return response()->json([
@@ -34,13 +33,15 @@ class JamKosongController extends Controller
                 'last_page' => $data->lastPage(),
                 'per_page' => $data->perPage(),
                 'total' => $data->total(),
-            ]
+            ],
         ]);
     }
 
     public function store(Request $request): JsonResponse
     {
-        if (!in_array($request->user()->profile->role, ['admin', 'guru'])) { abort(403, 'Unauthorized'); }
+        if (! in_array($request->user()->profile->role, ['admin', 'guru'])) {
+            abort(403, 'Unauthorized');
+        }
         $tenantId = $request->attributes->get('tenant_id');
         $userId = $request->user()?->id;
 
@@ -78,7 +79,9 @@ class JamKosongController extends Controller
 
     public function destroy(Request $request, string $id): JsonResponse
     {
-        if (!in_array($request->user()->profile->role, ['admin', 'guru'])) { abort(403, 'Unauthorized'); }
+        if (! in_array($request->user()->profile->role, ['admin', 'guru'])) {
+            abort(403, 'Unauthorized');
+        }
         $tenantId = $request->attributes->get('tenant_id');
 
         // Check if the jam_kosong belongs to this tenant
@@ -88,7 +91,7 @@ class JamKosongController extends Controller
             ->where('p.tenant_id', $tenantId)
             ->exists();
 
-        if (!$exists) {
+        if (! $exists) {
             return response()->json(['success' => false, 'message' => 'Not found'], 404);
         }
 

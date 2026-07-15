@@ -10,7 +10,7 @@ class Certificate extends Model
     use HasUuids;
 
     protected $table = 'certificates';
-    
+
     public $timestamps = false;
 
     protected $fillable = [
@@ -25,13 +25,13 @@ class Certificate extends Model
         'file_url',
         'sent',
         'sent_at',
-        'issued_at'
+        'issued_at',
     ];
 
     protected $casts = [
         'event_date' => 'date',
         'sent' => 'boolean',
         'sent_at' => 'datetime',
-        'issued_at' => 'datetime'
+        'issued_at' => 'datetime',
     ];
 }

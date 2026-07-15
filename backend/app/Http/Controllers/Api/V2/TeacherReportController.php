@@ -11,6 +11,4 @@ use App\Http\Controllers\Api\ReportController as LegacyReportController;
  * report domain. Keeping the V2 contract at a separate route lets consumers
  * leave the legacy URL without introducing a generic database proxy.
  */
-class TeacherReportController extends LegacyReportController
-{
-}
+class TeacherReportController extends LegacyReportController {}

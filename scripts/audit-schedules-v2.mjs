@@ -17,11 +17,8 @@ const approvedLegacySources = new Set([
   'src/pages/admin/Scan.jsx',
   'src/pages/guru/AbsensiGuru.jsx',
   'src/pages/guru/JadwalGuru.jsx',
-  'src/pages/guru/Laporan.jsx',
-  'src/pages/guru/Quiz.jsx',
   'src/pages/guru/RapotSiswa.jsx',
   'src/pages/guru/TugasGuru.jsx',
-  'src/pages/siswa/Quiz.jsx',
   'src/pages/siswa/Tugas.jsx'
 ])
 

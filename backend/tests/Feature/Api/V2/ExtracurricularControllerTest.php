@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api\V2;
 
+use App\Models\Profile;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -18,7 +19,7 @@ class ExtracurricularControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        
+
         $this->tenantId = (string) DB::table('tenants')->where('slug', 'default')->value('id');
 
         DB::table('settings')->insert([
@@ -40,13 +41,13 @@ class ExtracurricularControllerTest extends TestCase
     private function createUser(string $role): User
     {
         $user = User::factory()->create(['id' => (string) Str::uuid()]);
-        
-        \App\Models\Profile::create([
+
+        Profile::create([
             'id' => $user->id,
             'tenant_id' => $this->tenantId,
             'role' => $role,
             'email' => $user->email,
-            'nama' => 'Test ' . $role,
+            'nama' => 'Test '.$role,
             'status' => 'active',
         ]);
 
@@ -69,7 +70,7 @@ class ExtracurricularControllerTest extends TestCase
 
         $response = $this->withHeaders($this->tenantHeaders())
             ->postJson('/api/v2/extracurriculars', $payload);
-        
+
         $response->assertStatus(201)
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.nama', 'Pramuka')

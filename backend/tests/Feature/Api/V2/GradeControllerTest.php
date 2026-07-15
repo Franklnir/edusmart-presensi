@@ -152,7 +152,7 @@ class GradeControllerTest extends TestCase
         $teacher = $this->createUser('guru');
         $student = $this->createUser('siswa');
         $student->profile->update(['kelas' => 'Kelas 10']);
-        
+
         DB::table('kelas')->insert([
             'id' => 'Kelas 10',
             'tenant_id' => $this->tenantId,
@@ -161,7 +161,7 @@ class GradeControllerTest extends TestCase
             'created_at' => now(),
             'updated_at' => now(),
         ]);
-        
+
         DB::table('jadwal')->insert([
             'id' => (string) Str::uuid(),
             'tenant_id' => $this->tenantId,
@@ -174,7 +174,7 @@ class GradeControllerTest extends TestCase
             'jam_mulai' => '07:00:00',
             'jam_selesai' => '08:30:00',
             'created_at' => now(),
-            'updated_at' => now()
+            'updated_at' => now(),
         ]);
 
         Sanctum::actingAs($teacher);
@@ -211,7 +211,7 @@ class GradeControllerTest extends TestCase
         $teacher = $this->createUser('guru');
         $student = $this->createUser('siswa');
         $student->profile->update(['kelas' => 'Kelas 11']);
-        
+
         Sanctum::actingAs($teacher);
 
         $payload = $this->manualScorePayload([

@@ -2,7 +2,6 @@
 
 namespace App\Http\Requests\Api\V2;
 
-use App\Models\Profile;
 use Illuminate\Foundation\Http\FormRequest;
 
 class BulkStoreAttendanceRequest extends FormRequest

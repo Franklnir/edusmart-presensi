@@ -3,12 +3,12 @@
 namespace App\Http\Controllers\Api\V2;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Api\V2\ListManualScoresRequest;
 use App\Http\Requests\Api\V2\ListGradeWeightsRequest;
-use App\Http\Requests\Api\V2\UpsertManualScoreRequest;
+use App\Http\Requests\Api\V2\ListManualScoresRequest;
 use App\Http\Requests\Api\V2\UpsertGradeWeightRequest;
-use App\Http\Resources\Api\V2\ManualScoreResource;
+use App\Http\Requests\Api\V2\UpsertManualScoreRequest;
 use App\Http\Resources\Api\V2\GradeWeightResource;
+use App\Http\Resources\Api\V2\ManualScoreResource;
 use App\Services\Academic\AcademicContextResolver;
 use App\Services\Academic\AcademicMutationGuard;
 use App\Services\Academic\HistoricalEnrollmentResolver;

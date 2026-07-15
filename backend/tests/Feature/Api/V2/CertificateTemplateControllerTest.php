@@ -17,7 +17,7 @@ class CertificateTemplateControllerTest extends TestCase
     public function test_can_create_template(): void
     {
         $tenantId = $this->defaultTenantId();
-        
+
         $admin = User::query()->create([
             'id' => (string) Str::uuid(),
             'name' => 'Admin',
@@ -51,7 +51,7 @@ class CertificateTemplateControllerTest extends TestCase
     public function test_can_delete_template(): void
     {
         $tenantId = $this->defaultTenantId();
-        
+
         $admin = User::query()->create([
             'id' => (string) Str::uuid(),
             'name' => 'Admin',
@@ -75,7 +75,7 @@ class CertificateTemplateControllerTest extends TestCase
         ]);
 
         $response = $this->actingAs($admin)->deleteJson("/api/v2/certificate-templates/{$template->id}", [], [
-            'X-Tenant-Domain' => 'default.localhost'
+            'X-Tenant-Domain' => 'default.localhost',
         ]);
 
         $response->assertOk();

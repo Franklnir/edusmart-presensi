@@ -3,13 +3,12 @@
 namespace App\Http\Controllers\Api\V2;
 
 use App\Http\Controllers\Controller;
+use App\Models\Quiz;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
-
 use Illuminate\Support\Facades\Gate;
-use App\Models\Quiz;
+use Illuminate\Support\Str;
 
 class QuizSubmissionController extends Controller
 {
@@ -37,7 +36,7 @@ class QuizSubmissionController extends Controller
             ->where('siswa_id', $userId)
             ->first();
 
-        if (!$submission || $submission->status !== 'ongoing') {
+        if (! $submission || $submission->status !== 'ongoing') {
             return response()->json(['success' => false, 'message' => 'Invalid submission or quiz already finished.'], 403);
         }
 
@@ -111,7 +110,7 @@ class QuizSubmissionController extends Controller
             ->where('siswa_id', $userId)
             ->first();
 
-        if (!$submission || $submission->status !== 'ongoing') {
+        if (! $submission || $submission->status !== 'ongoing') {
             return response()->json(['success' => false, 'message' => 'Invalid submission or quiz already finished.'], 403);
         }
 
@@ -176,6 +175,7 @@ class QuizSubmissionController extends Controller
             'success' => true,
         ]);
     }
+
     public function gradeByUser(Request $request): JsonResponse
     {
         Gate::authorize('create', Quiz::class); // only teacher can grade

@@ -16,7 +16,7 @@ class CurrentProfileControllerTest extends TestCase
     public function test_provision_creates_profile(): void
     {
         $tenantId = $this->defaultTenantId();
-        
+
         $user = User::query()->create([
             'id' => (string) Str::uuid(),
             'name' => 'John Doe',
@@ -31,9 +31,8 @@ class CurrentProfileControllerTest extends TestCase
             'idempotency_key' => 'test-idempotency-key-1',
         ], [
             'X-Tenant-Domain' => 'default.localhost',
-            'Idempotency-Key' => 'test-idempotency-key-1'
+            'Idempotency-Key' => 'test-idempotency-key-1',
         ]);
-
 
         $response->assertCreated();
         $response->assertJsonPath('data.nama', 'John Doe');
@@ -51,7 +50,7 @@ class CurrentProfileControllerTest extends TestCase
     public function test_provision_returns_existing_profile(): void
     {
         $tenantId = $this->defaultTenantId();
-        
+
         $user = User::query()->create([
             'id' => (string) Str::uuid(),
             'name' => 'Jane Doe',
@@ -75,7 +74,7 @@ class CurrentProfileControllerTest extends TestCase
             'idempotency_key' => 'test-idempotency-key-2',
         ], [
             'X-Tenant-Domain' => 'default.localhost',
-            'Idempotency-Key' => 'test-idempotency-key-2'
+            'Idempotency-Key' => 'test-idempotency-key-2',
         ]);
 
         $response->assertOk();

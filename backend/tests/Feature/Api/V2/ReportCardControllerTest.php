@@ -2,10 +2,10 @@
 
 namespace Tests\Feature\Api\V2;
 
-use App\Support\AcademicPeriod;
 use App\Models\Profile;
 use App\Models\User;
 use App\Services\Academic\AcademicPeriodLifecycleService;
+use App\Support\AcademicPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -39,7 +39,7 @@ class ReportCardControllerTest extends TestCase
             'created_at' => now(),
             'updated_at' => now(),
         ]);
-        
+
         DB::table('jadwal')->insert([
             'id' => (string) Str::uuid(),
             'tenant_id' => $this->tenantId,
@@ -52,7 +52,7 @@ class ReportCardControllerTest extends TestCase
             'jam_mulai' => '07:00:00',
             'jam_selesai' => '08:30:00',
             'created_at' => now(),
-            'updated_at' => now()
+            'updated_at' => now(),
         ]);
 
         DB::table('guru_mapel_manual_nilai')->insert([
@@ -467,8 +467,8 @@ class ReportCardControllerTest extends TestCase
             ->assertJsonPath('data.status', 'published')
             ->assertJsonStructure([
                 'data' => [
-                    'id', 'siswa_id', 'kelas_id', 'tahun_pelajaran', 'semester', 'status', 'snapshot'
-                ]
+                    'id', 'siswa_id', 'kelas_id', 'tahun_pelajaran', 'semester', 'status', 'snapshot',
+                ],
             ]);
     }
 
@@ -483,7 +483,7 @@ class ReportCardControllerTest extends TestCase
             ->postJson("/api/v2/report-cards/{$student->id}/finalize?kelas_id=Kelas 10")
             ->assertStatus(403)
             ->assertJsonPath('code', 'ACCESS_DENIED');
-            
+
         $this->withHeaders($this->tenantHeaders())
             ->postJson("/api/v2/report-cards/{$student->id}/reopen?kelas_id=Kelas 10")
             ->assertStatus(403)

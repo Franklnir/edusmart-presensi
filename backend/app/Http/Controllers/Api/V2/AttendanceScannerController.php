@@ -29,7 +29,7 @@ class AttendanceScannerController extends Controller
         $tenantId = (string) $request->attributes->get('tenant_id');
         $actor = $request->user()->profile;
         $validated = $request->validated();
-        
+
         $records = $validated['records'];
         $idempotencyKey = $validated['idempotency_key'];
 
@@ -52,7 +52,7 @@ class AttendanceScannerController extends Controller
 
                 return response()->json([
                     'success' => true,
-                    'message' => count($inserted) . ' data presensi berhasil disimpan.',
+                    'message' => count($inserted).' data presensi berhasil disimpan.',
                     'data' => $inserted,
                     'request_id' => $this->requestId($request),
                 ], 201);
@@ -63,22 +63,22 @@ class AttendanceScannerController extends Controller
     public function storeTemp(StoreTempScanRequest $request): JsonResponse
     {
         Gate::authorize('create', Absensi::class); // Reusing the same gate for creating attendance
-        
+
         $tenantId = (string) $request->attributes->get('tenant_id');
         $validated = $request->validated();
-        
+
         // Ensure student belongs to tenant
         $studentExists = Profile::where('id', $validated['siswa_id'])
             ->where('tenant_id', $tenantId)
             ->where('role', 'siswa')
             ->exists();
-            
+
         if (! $studentExists) {
             return $this->error($request, 'ATTENDANCE_STUDENT_NOT_FOUND', 'Siswa tidak ditemukan atau tidak berada di tenant ini.', 422);
         }
 
         // Generate a synthetic idempotency key if not provided (temp scans might not have it)
-        $idempotencyKey = $validated['idempotency_key'] ?? 'scan_temp_' . $validated['siswa_id'] . '_' . $validated['tanggal'] . '_' . $validated['sesi'];
+        $idempotencyKey = $validated['idempotency_key'] ?? 'scan_temp_'.$validated['siswa_id'].'_'.$validated['tanggal'].'_'.$validated['sesi'];
 
         return $this->idempotencyService->handle(
             $request,
@@ -90,9 +90,9 @@ class AttendanceScannerController extends Controller
                     'tenant_id' => $tenantId,
                     'siswa_id' => $validated['siswa_id'],
                     'tanggal' => $validated['tanggal'],
-                    'sesi' => $validated['sesi']
+                    'sesi' => $validated['sesi'],
                 ];
-                
+
                 $updateData = [
                     'kelas' => $validated['kelas'],
                     'scan_at' => Carbon::parse($validated['scan_at'])->format('Y-m-d H:i:sP'),
@@ -101,7 +101,7 @@ class AttendanceScannerController extends Controller
                     'mapel_count' => $validated['mapel_count'] ?? 0,
                     'created_at' => now(),
                 ];
-                
+
                 DB::table('absensi_scan_temp')->updateOrInsert($keyData, $updateData);
 
                 return response()->json([

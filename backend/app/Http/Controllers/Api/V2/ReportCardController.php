@@ -3,12 +3,12 @@
 namespace App\Http\Controllers\Api\V2;
 
 use App\Http\Controllers\Controller;
-use App\Models\Profile;
-use App\Services\Academic\AcademicContextResolver;
-use App\Services\Academic\HistoricalEnrollmentResolver;
 use App\Http\Requests\Api\V2\UpdateReportCardMetadataRequest;
 use App\Http\Requests\Api\V2\UpsertReportCardItemRequest;
+use App\Models\Profile;
+use App\Services\Academic\AcademicContextResolver;
 use App\Services\Academic\AcademicMutationGuard;
+use App\Services\Academic\HistoricalEnrollmentResolver;
 use App\Services\IdempotencyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,8 +18,11 @@ use Illuminate\Support\Str;
 class ReportCardController extends Controller
 {
     private AcademicContextResolver $contextResolver;
+
     private HistoricalEnrollmentResolver $historicalEnrollment;
+
     private IdempotencyService $idempotency;
+
     private AcademicMutationGuard $academicMutationGuard;
 
     public function __construct(
@@ -37,18 +40,19 @@ class ReportCardController extends Controller
     private function checkAccess(Request $request, string $tenantId, string $kelasId, array $context, ?string $studentId = null): ?JsonResponse
     {
         $role = $this->role($request);
-        
+
         if ($role === 'superadmin') {
             return null;
         }
 
         if ($role === 'siswa') {
-            if (!$studentId) {
+            if (! $studentId) {
                 return $this->error($request, 'ACCESS_DENIED', 'Siswa tidak diizinkan mengakses daftar rapor kelas.', 403);
             }
             if ($this->profileId($request) !== $studentId) {
                 return $this->error($request, 'ACCESS_DENIED', 'Anda hanya dapat mengakses rapor milik sendiri.', 403);
             }
+
             return null;
         }
 
@@ -68,12 +72,13 @@ class ReportCardController extends Controller
                 ->where('tahun_ajaran', $context['tahun_ajaran'])
                 ->exists();
 
-            if (!$hasAccess && !$isHomeroom) {
+            if (! $hasAccess && ! $isHomeroom) {
                 return $this->error($request, 'CLASS_ACCESS_DENIED', 'Anda tidak memiliki akses ke kelas ini.', 403);
             }
+
             return null;
         }
-        
+
         return $this->error($request, 'ROLE_ACCESS_DENIED', 'Peran Anda tidak diizinkan.', 403);
     }
 
@@ -134,7 +139,7 @@ class ReportCardController extends Controller
             ->where('semester', $context['semester'])
             ->first();
 
-        if (!$report) {
+        if (! $report) {
             return $this->error($request, 'REPORT_CARD_NOT_FOUND', 'Rapor tidak ditemukan.', 404);
         }
 
@@ -328,7 +333,7 @@ class ReportCardController extends Controller
 
         // Validate student is in class
         $studentProfile = Profile::where('tenant_id', $tenantId)->where('id', $student)->first();
-        if (!$studentProfile) {
+        if (! $studentProfile) {
             return $this->error($request, 'STUDENT_NOT_FOUND', 'Siswa tidak ditemukan.', 404);
         }
 
@@ -357,7 +362,7 @@ class ReportCardController extends Controller
 
         foreach ($jadwal as $j) {
             $mapel = $j->mapel;
-            
+
             // Get weights
             $weight = DB::table('guru_mapel_bobot')
                 ->where('tenant_id', $tenantId)
@@ -411,7 +416,7 @@ class ReportCardController extends Controller
     {
         $tenantId = $this->tenantId($request);
         $context = $this->contextResolver->forRead($request, $tenantId);
-        
+
         $validated = $request->validated();
         $kelasId = $validated['kelas_id'];
 
@@ -433,14 +438,14 @@ class ReportCardController extends Controller
                 ->where('tahun_ajaran', $context['tahun_ajaran'])
                 ->exists();
 
-            if (!$isHomeroom) {
+            if (! $isHomeroom) {
                 return $this->error($request, 'NOT_HOMEROOM_TEACHER', 'Hanya wali kelas yang dapat mengubah metadata rapor.', 403);
             }
         }
 
         // Validate student is in class
         $studentProfile = Profile::where('tenant_id', $tenantId)->where('id', $student)->first();
-        if (!$studentProfile) {
+        if (! $studentProfile) {
             return $this->error($request, 'STUDENT_NOT_FOUND', 'Siswa tidak ditemukan.', 404);
         }
 
@@ -484,7 +489,7 @@ class ReportCardController extends Controller
                         DB::table('rapot_siswa')
                             ->where('id', $report->id)
                             ->update($data);
-                            
+
                         $reportId = $report->id;
                     } else {
                         $reportId = (string) Str::uuid();
@@ -512,7 +517,7 @@ class ReportCardController extends Controller
     {
         $tenantId = $this->tenantId($request);
         $context = $this->contextResolver->forRead($request, $tenantId);
-        
+
         // Finalize requires kelas_id
         $kelasId = $request->query('kelas_id');
         if (! $kelasId) {
@@ -537,7 +542,7 @@ class ReportCardController extends Controller
                 ->where('tahun_ajaran', $context['tahun_ajaran'])
                 ->exists();
 
-            if (!$isHomeroom) {
+            if (! $isHomeroom) {
                 return $this->error($request, 'NOT_HOMEROOM_TEACHER', 'Hanya wali kelas yang dapat finalisasi rapor.', 403);
             }
         }
@@ -555,7 +560,7 @@ class ReportCardController extends Controller
                         ->where('semester', $context['semester'])
                         ->first();
 
-                    if (!$report) {
+                    if (! $report) {
                         return $this->error($request, 'REPORT_CARD_NOT_FOUND', 'Rapor tidak ditemukan (draft belum dibuat).', 404);
                     }
 
@@ -652,7 +657,7 @@ class ReportCardController extends Controller
     {
         $tenantId = $this->tenantId($request);
         $context = $this->contextResolver->forRead($request, $tenantId);
-        
+
         $kelasId = $request->query('kelas_id');
         if (! $kelasId) {
             return $this->error($request, 'CLASS_ID_REQUIRED', 'Filter kelas_id diwajibkan.', 400);
@@ -675,7 +680,7 @@ class ReportCardController extends Controller
                 ->where('tahun_ajaran', $context['tahun_ajaran'])
                 ->exists();
 
-            if (!$isHomeroom) {
+            if (! $isHomeroom) {
                 return $this->error($request, 'NOT_HOMEROOM_TEACHER', 'Hanya wali kelas yang dapat publish rapor.', 403);
             }
         }
@@ -692,7 +697,7 @@ class ReportCardController extends Controller
                     ->where('semester', $context['semester'])
                     ->first();
 
-                if (!$report || $report->status !== 'finalized') {
+                if (! $report || $report->status !== 'finalized') {
                     return $this->error($request, 'REPORT_NOT_FINALIZED', 'Rapor harus difinalisasi sebelum di-publish.', 409);
                 }
 
@@ -713,7 +718,7 @@ class ReportCardController extends Controller
     {
         $tenantId = $this->tenantId($request);
         $context = $this->contextResolver->forRead($request, $tenantId);
-        
+
         $kelasId = $request->query('kelas_id');
         if (! $kelasId) {
             return $this->error($request, 'CLASS_ID_REQUIRED', 'Filter kelas_id diwajibkan.', 400);
@@ -736,7 +741,7 @@ class ReportCardController extends Controller
                 ->where('tahun_ajaran', $context['tahun_ajaran'])
                 ->exists();
 
-            if (!$isHomeroom) {
+            if (! $isHomeroom) {
                 return $this->error($request, 'NOT_HOMEROOM_TEACHER', 'Hanya wali kelas yang dapat reopen rapor.', 403);
             }
         }
@@ -753,7 +758,7 @@ class ReportCardController extends Controller
                     ->where('semester', $context['semester'])
                     ->first();
 
-                if (!$report) {
+                if (! $report) {
                     return $this->error($request, 'REPORT_CARD_NOT_FOUND', 'Rapor tidak ditemukan.', 404);
                 }
 
@@ -806,7 +811,7 @@ class ReportCardController extends Controller
             ->where('semester', $context['semester'])
             ->first();
 
-        if (!$report) {
+        if (! $report) {
             return $this->error($request, 'REPORT_CARD_NOT_FOUND', 'Rapor tidak ditemukan.', 404);
         }
 
@@ -829,7 +834,7 @@ class ReportCardController extends Controller
                 $isAuthorized = $isHomeroom;
             }
 
-            if (!$isAuthorized) {
+            if (! $isAuthorized) {
                 return $this->error($request, 'REPORT_NOT_PUBLISHED', 'Rapor belum di-publish dan Anda tidak memiliki akses preview.', 403);
             }
         }
@@ -852,10 +857,19 @@ class ReportCardController extends Controller
 
     private function calculatePredikat($nilai): ?string
     {
-        if ($nilai === null) return null;
-        if ($nilai >= 90) return 'A';
-        if ($nilai >= 80) return 'B';
-        if ($nilai >= 75) return 'C';
+        if ($nilai === null) {
+            return null;
+        }
+        if ($nilai >= 90) {
+            return 'A';
+        }
+        if ($nilai >= 80) {
+            return 'B';
+        }
+        if ($nilai >= 75) {
+            return 'C';
+        }
+
         return 'D';
     }
 
@@ -863,6 +877,7 @@ class ReportCardController extends Controller
     {
         $tenantId = trim((string) $request->attributes->get('tenant_id', ''));
         abort_if($tenantId === '', 403, 'Konteks tenant tidak tersedia.');
+
         return $tenantId;
     }
 

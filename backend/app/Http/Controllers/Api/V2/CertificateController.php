@@ -37,7 +37,7 @@ class CertificateController extends Controller
     public function store(Request $request): JsonResponse
     {
         $tenantId = $request->attributes->get('tenant_id');
-        
+
         Gate::authorize('manage-sertifikat', [$tenantId]);
 
         $validated = $request->validate([
@@ -60,7 +60,7 @@ class CertificateController extends Controller
         return response()->json([
             'success' => true,
             'data' => $certificate,
-            'message' => 'Sertifikat berhasil diterbitkan'
+            'message' => 'Sertifikat berhasil diterbitkan',
         ], 201);
     }
 
@@ -70,7 +70,7 @@ class CertificateController extends Controller
     public function show(Request $request, string $id): JsonResponse
     {
         $tenantId = $request->attributes->get('tenant_id');
-        
+
         $certificate = Certificate::query()
             ->where('tenant_id', $tenantId)
             ->findOrFail($id);
@@ -87,7 +87,7 @@ class CertificateController extends Controller
     public function update(Request $request, string $id): JsonResponse
     {
         $tenantId = $request->attributes->get('tenant_id');
-        
+
         Gate::authorize('manage-sertifikat', [$tenantId]);
 
         $certificate = Certificate::query()
@@ -111,7 +111,7 @@ class CertificateController extends Controller
         return response()->json([
             'success' => true,
             'data' => $certificate->fresh(),
-            'message' => 'Sertifikat berhasil diperbarui'
+            'message' => 'Sertifikat berhasil diperbarui',
         ]);
     }
 
@@ -121,7 +121,7 @@ class CertificateController extends Controller
     public function destroy(Request $request, string $id): JsonResponse
     {
         $tenantId = $request->attributes->get('tenant_id');
-        
+
         Gate::authorize('manage-sertifikat', [$tenantId]);
 
         $certificate = Certificate::query()
@@ -132,7 +132,7 @@ class CertificateController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Sertifikat berhasil dihapus'
+            'message' => 'Sertifikat berhasil dihapus',
         ]);
     }
 }

@@ -6,19 +6,19 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Str;
 
 class SubjectController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        if ($request->user()->profile->role !== 'admin') { abort(403, 'Unauthorized'); } 
-        
+        if ($request->user()->profile->role !== 'admin') {
+            abort(403, 'Unauthorized');
+        }
+
         $query = DB::table('mata_pelajaran');
-        
+
         $limit = min((int) $request->query('per_page', 50), 200);
-        
+
         $subjects = $query->orderBy('nama')->paginate($limit)->appends($request->query());
 
         return response()->json([
@@ -29,13 +29,15 @@ class SubjectController extends Controller
                 'last_page' => $subjects->lastPage(),
                 'per_page' => $subjects->perPage(),
                 'total' => $subjects->total(),
-            ]
+            ],
         ]);
     }
 
     public function store(Request $request): JsonResponse
     {
-        if ($request->user()->profile->role !== 'admin') { abort(403, 'Unauthorized'); }
+        if ($request->user()->profile->role !== 'admin') {
+            abort(403, 'Unauthorized');
+        }
 
         $request->validate([
             'nama' => 'required|string|max:255',
@@ -45,7 +47,7 @@ class SubjectController extends Controller
         // Cek kalau ada:
         $existing = DB::table('mata_pelajaran')->where('nama', $request->input('nama'))->first();
         if ($existing) {
-             return response()->json([
+            return response()->json([
                 'success' => true,
                 'message' => 'Mata pelajaran sudah ada.',
                 'data' => $existing,
@@ -71,10 +73,12 @@ class SubjectController extends Controller
 
     public function show(Request $request, string $id): JsonResponse
     {
-        if ($request->user()->profile->role !== 'admin') { abort(403, 'Unauthorized'); }
+        if ($request->user()->profile->role !== 'admin') {
+            abort(403, 'Unauthorized');
+        }
 
         $subject = DB::table('mata_pelajaran')->where('id', $id)->first();
-        if (!$subject) {
+        if (! $subject) {
             return response()->json(['success' => false, 'message' => 'Not found'], 404);
         }
 
@@ -86,7 +90,9 @@ class SubjectController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
-        if ($request->user()->profile->role !== 'admin') { abort(403, 'Unauthorized'); }
+        if ($request->user()->profile->role !== 'admin') {
+            abort(403, 'Unauthorized');
+        }
 
         $request->validate([
             'nama' => 'required|string|max:255',
@@ -99,8 +105,8 @@ class SubjectController extends Controller
                 'updated_at' => now(),
             ]);
 
-        if ($affected === 0 && !DB::table('mata_pelajaran')->where('id', $id)->exists()) {
-             return response()->json(['success' => false, 'message' => 'Not found'], 404);
+        if ($affected === 0 && ! DB::table('mata_pelajaran')->where('id', $id)->exists()) {
+            return response()->json(['success' => false, 'message' => 'Not found'], 404);
         }
 
         $subject = DB::table('mata_pelajaran')->where('id', $id)->first();
@@ -114,7 +120,9 @@ class SubjectController extends Controller
 
     public function destroy(Request $request, string $id): JsonResponse
     {
-        if ($request->user()->profile->role !== 'admin') { abort(403, 'Unauthorized'); }
+        if ($request->user()->profile->role !== 'admin') {
+            abort(403, 'Unauthorized');
+        }
 
         $affected = DB::table('mata_pelajaran')
             ->where('id', $id)

@@ -4,8 +4,10 @@ namespace Tests\Feature\Api\V2;
 
 use App\Models\Absensi;
 use App\Models\Profile;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -14,22 +16,24 @@ class AttendanceScannerControllerTest extends TestCase
     use RefreshDatabase;
 
     private Profile $admin;
+
     private Profile $student;
+
     private string $tenantId = 'test-tenant';
 
     protected function setUp(): void
     {
         parent::setUp();
         config(['tenancy.allow_header_override' => true]);
-        
+
         $this->tenantId = (string) DB::table('tenants')->where('slug', 'default')->value('id');
         if (! $this->tenantId) {
             $this->tenantId = 'test-tenant';
             DB::table('tenants')->insert(['id' => $this->tenantId, 'slug' => 'default', 'nama' => 'Test', 'created_at' => now(), 'updated_at' => now()]);
         }
-        
-        $adminUser = \App\Models\User::factory()->create([
-            'id' => \Illuminate\Support\Str::uuid()->toString()
+
+        $adminUser = User::factory()->create([
+            'id' => Str::uuid()->toString(),
         ]);
         $this->admin = Profile::create([
             'id' => $adminUser->id,
@@ -42,8 +46,8 @@ class AttendanceScannerControllerTest extends TestCase
         ]);
         $this->admin->user = $adminUser;
 
-        $studentUser = \App\Models\User::factory()->create([
-            'id' => \Illuminate\Support\Str::uuid()->toString()
+        $studentUser = User::factory()->create([
+            'id' => Str::uuid()->toString(),
         ]);
         $this->student = Profile::create([
             'id' => $studentUser->id,
@@ -70,9 +74,9 @@ class AttendanceScannerControllerTest extends TestCase
                     'status' => 'Hadir',
                     'mapel' => 'Matematika',
                     'nama' => $this->student->nama,
-                    'oleh' => 'SYSTEM_RFID'
-                ]
-            ]
+                    'oleh' => 'SYSTEM_RFID',
+                ],
+            ],
         ];
 
         Sanctum::actingAs($this->admin->user);
@@ -86,13 +90,13 @@ class AttendanceScannerControllerTest extends TestCase
             'tenant_id' => $this->tenantId,
             'uid' => $this->student->id,
             'mapel' => 'Matematika',
-            'status' => 'Hadir'
+            'status' => 'Hadir',
         ]);
 
         $this->assertDatabaseHas('audit_log', [
             'tenant_id' => $this->tenantId,
             'table_name' => 'absensi',
-            'action' => 'INSERT'
+            'action' => 'INSERT',
         ]);
     }
 
@@ -104,7 +108,7 @@ class AttendanceScannerControllerTest extends TestCase
             'tanggal' => now()->format('Y-m-d'),
             'kelas' => '10-A',
             'mapel' => 'Fisika',
-            'status' => 'Hadir'
+            'status' => 'Hadir',
         ]);
 
         $payload = [
@@ -123,8 +127,8 @@ class AttendanceScannerControllerTest extends TestCase
                     'tanggal' => now()->format('Y-m-d'),
                     'status' => 'Hadir',
                     'mapel' => 'Kimia',
-                ]
-            ]
+                ],
+            ],
         ];
 
         Sanctum::actingAs($this->admin->user);
@@ -132,7 +136,7 @@ class AttendanceScannerControllerTest extends TestCase
             ->postJson('/api/v2/attendance/scanner/bulk', $payload);
 
         $response->assertStatus(201);
-        
+
         // Fisika should not be duplicated, Kimia should be inserted
         $this->assertEquals(1, Absensi::where('mapel', 'Fisika')->count());
         $this->assertEquals(1, Absensi::where('mapel', 'Kimia')->count());
@@ -148,7 +152,7 @@ class AttendanceScannerControllerTest extends TestCase
             'scan_at' => now()->toIso8601String(),
             'source' => 'MANUAL_SCAN',
             'card_uid' => '12345',
-            'mapel_count' => 3
+            'mapel_count' => 3,
         ];
 
         Sanctum::actingAs($this->admin->user);
@@ -162,7 +166,7 @@ class AttendanceScannerControllerTest extends TestCase
             'tenant_id' => $this->tenantId,
             'siswa_id' => $this->student->id,
             'sesi' => 'masuk',
-            'card_uid' => '12345'
+            'card_uid' => '12345',
         ]);
     }
 }

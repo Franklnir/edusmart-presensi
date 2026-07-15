@@ -192,7 +192,7 @@ class ClassController extends Controller
             'request_id' => $reqId,
         ], 200);
     }
-    
+
     public function getStructure(Request $request, string $id): JsonResponse
     {
         $tenantId = $request->attributes->get('tenant_id');

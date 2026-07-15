@@ -67,7 +67,7 @@ class CertificateTemplateController extends Controller
         return response()->json([
             'success' => true,
             'data' => $template,
-            'message' => 'Template sertifikat berhasil ditambahkan'
+            'message' => 'Template sertifikat berhasil ditambahkan',
         ], 201);
     }
 
@@ -93,7 +93,7 @@ class CertificateTemplateController extends Controller
     public function update(Request $request, string $id): JsonResponse
     {
         $tenantId = $request->attributes->get('tenant_id');
-        
+
         Gate::authorize('manage-sertifikat', [$tenantId]);
 
         $template = CertificateTemplate::query()
@@ -122,7 +122,7 @@ class CertificateTemplateController extends Controller
         return response()->json([
             'success' => true,
             'data' => $template->fresh(),
-            'message' => 'Template sertifikat berhasil diperbarui'
+            'message' => 'Template sertifikat berhasil diperbarui',
         ]);
     }
 
@@ -132,7 +132,7 @@ class CertificateTemplateController extends Controller
     public function destroy(Request $request, string $id): JsonResponse
     {
         $tenantId = $request->attributes->get('tenant_id');
-        
+
         Gate::authorize('manage-sertifikat', [$tenantId]);
 
         $template = CertificateTemplate::query()
@@ -143,7 +143,7 @@ class CertificateTemplateController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Template sertifikat berhasil dihapus'
+            'message' => 'Template sertifikat berhasil dihapus',
         ]);
     }
 }

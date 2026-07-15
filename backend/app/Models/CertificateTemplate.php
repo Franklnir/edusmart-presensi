@@ -28,7 +28,7 @@ class CertificateTemplate extends Model
         'tanggal_y',
         'is_active',
         'created_by',
-        'fields'
+        'fields',
     ];
 
     protected $casts = [

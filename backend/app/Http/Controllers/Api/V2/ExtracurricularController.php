@@ -7,6 +7,7 @@ use App\Http\Requests\Api\V2\JoinExtracurricularRequest;
 use App\Http\Requests\Api\V2\StoreExtracurricularRequest;
 use App\Http\Requests\Api\V2\UpdateExtracurricularRequest;
 use App\Services\Academic\AcademicContextResolver;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -81,6 +82,7 @@ class ExtracurricularController extends Controller
         ]);
 
         $ekskul = DB::table('ekskul')->where('id', $id)->first();
+
         return $this->success($request, $ekskul, 201);
     }
 
@@ -109,12 +111,13 @@ class ExtracurricularController extends Controller
             }
         }
 
-        if (!empty($updateData)) {
+        if (! empty($updateData)) {
             $updateData['updated_at'] = now();
             DB::table('ekskul')->where('id', $extracurricular)->update($updateData);
         }
 
         $ekskul = DB::table('ekskul')->where('id', $extracurricular)->first();
+
         return $this->success($request, $ekskul);
     }
 
@@ -142,7 +145,7 @@ class ExtracurricularController extends Controller
     public function members(Request $request, string $extracurricular): JsonResponse
     {
         $tenantId = $this->tenantId($request);
-        
+
         $ekskul = DB::table('ekskul')
             ->where('tenant_id', $tenantId)
             ->where('id', $extracurricular)
@@ -177,7 +180,7 @@ class ExtracurricularController extends Controller
     public function join(JoinExtracurricularRequest $request, string $extracurricular): JsonResponse
     {
         $tenantId = $this->tenantId($request);
-        
+
         $ekskul = DB::table('ekskul')
             ->where('tenant_id', $tenantId)
             ->where('id', $extracurricular)
@@ -189,22 +192,22 @@ class ExtracurricularController extends Controller
 
         $role = $this->role($request);
         $data = $request->validated();
-        
+
         $studentId = $data['student_id'] ?? null;
-        
+
         if ($role === 'siswa') {
             $studentId = $this->profileId($request);
         } else {
             if ($role !== 'admin') {
                 return $this->error($request, 'FORBIDDEN', 'Hanya admin yang dapat mendaftarkan siswa lain.', 403);
             }
-            if (!$studentId) {
+            if (! $studentId) {
                 return $this->error($request, 'STUDENT_REQUIRED', 'ID siswa wajib disertakan.', 400);
             }
         }
 
         if ($role === 'siswa' && $ekskul->registration_deadline_at) {
-            $deadline = \Carbon\Carbon::parse($ekskul->registration_deadline_at);
+            $deadline = Carbon::parse($ekskul->registration_deadline_at);
             if (now()->gt($deadline)) {
                 return $this->error($request, 'DEADLINE_PASSED', 'Pendaftaran ekstrakurikuler sudah ditutup.', 400);
             }
@@ -221,17 +224,17 @@ class ExtracurricularController extends Controller
 
         $settings = DB::table('settings')->where('tenant_id', $tenantId)->first();
         $maxLimit = $settings->max_ekskul_per_siswa ?? null;
-        
+
         if ($maxLimit !== null) {
             $currentPeriod = $this->contextResolver->forRead($request, $tenantId);
-            
+
             $activeCount = DB::table('ekskul_anggota')
                 ->join('ekskul', 'ekskul_anggota.ekskul_id', '=', 'ekskul.id')
                 ->where('ekskul_anggota.user_id', $studentId)
                 ->where('ekskul.tahun_ajaran', $currentPeriod['tahun_ajaran'])
                 ->where('ekskul.semester', $currentPeriod['semester'])
                 ->count();
-                
+
             if ($activeCount >= $maxLimit) {
                 return $this->error($request, 'LIMIT_REACHED', "Maksimal ekstrakurikuler per siswa adalah {$maxLimit}.", 400);
             }
@@ -249,7 +252,7 @@ class ExtracurricularController extends Controller
     public function leave(Request $request, string $extracurricular): JsonResponse
     {
         $tenantId = $this->tenantId($request);
-        
+
         $ekskul = DB::table('ekskul')
             ->where('tenant_id', $tenantId)
             ->where('id', $extracurricular)
@@ -261,12 +264,12 @@ class ExtracurricularController extends Controller
 
         $role = $this->role($request);
         $studentId = $request->query('student_id');
-        
+
         if ($role === 'siswa') {
             $studentId = $this->profileId($request);
-            
+
             if ($ekskul->registration_deadline_at) {
-                $deadline = \Carbon\Carbon::parse($ekskul->registration_deadline_at);
+                $deadline = Carbon::parse($ekskul->registration_deadline_at);
                 if (now()->gt($deadline)) {
                     return $this->error($request, 'DEADLINE_PASSED', 'Batas waktu pendaftaran ekstrakurikuler sudah ditutup.', 400);
                 }
@@ -275,7 +278,7 @@ class ExtracurricularController extends Controller
             if ($role !== 'admin') {
                 return $this->error($request, 'FORBIDDEN', 'Hanya admin yang dapat mengeluarkan siswa.', 403);
             }
-            if (!$studentId) {
+            if (! $studentId) {
                 return $this->error($request, 'STUDENT_REQUIRED', 'Filter student_id wajib disertakan.', 400);
             }
         }
@@ -285,7 +288,7 @@ class ExtracurricularController extends Controller
             ->where('user_id', $studentId)
             ->delete();
 
-        if (!$deleted) {
+        if (! $deleted) {
             return $this->error($request, 'NOT_JOINED', 'Data anggota ekstrakurikuler tidak ditemukan.', 404);
         }
 
