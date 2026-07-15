@@ -2,8 +2,8 @@
 
 - Date: 2026-07-15 (Asia/Jakarta)
 - Branch: release/hybrid-rc1
-- Release SHA observed before this report: a62119c9895d73611bd75301437aca5835ba6083
-- CI run: 29431260140
+- Release SHA verified at the current release checkpoint: f8b1295bc4fc801e60120138081aa2b162d2a695
+- CI run: 29431541669
 - Production deploy: none
 - VPS mutation: none
 - Cloudflare production deployment: none
@@ -26,7 +26,7 @@ configuration change was performed.
 | Item | Result | Evidence |
 |---|---|---|
 | Release branch | PASS | release/hybrid-rc1 |
-| Local release SHA before report | PASS | a62119c9895d73611bd75301437aca5835ba6083 |
+| Local release SHA at current checkpoint | PASS | f8b1295bc4fc801e60120138081aa2b162d2a695 |
 | Remote branch SHA | PASS | matched local SHA after normal push |
 | Working tree before report | PASS | clean before report and workflow validation changes |
 | Force push | NOT USED | normal push only |
@@ -61,15 +61,15 @@ added or removed.
 
 | Gate | Result | Evidence | Blocker |
 |---|---|---|---|
-| Secret preflight | PASS | CI run 29431260140 | None |
-| Frontend tests and quality gate | PASS | CI run 29431260140 | None |
-| Frontend security audit | PASS | CI run 29431260140 | None |
-| Legacy consumer freeze gate | PASS | CI run 29431260140 | None |
-| Schedule V2 static gate | PASS | CI run 29431260140 | None |
-| DB proxy legacy migration gate | PASS | CI run 29431260140 | None |
-| Backend tests | PASS | CI run 29431260140 | None |
-| Pint | PASS | CI run 29431260140 | None |
-| Production frontend input validation | ADDED, NOT_RUN | Runs on the next release workflow | VITE_API_URL is not configured |
+| Secret preflight | PASS | CI run 29431541669 | None |
+| Frontend tests and quality gate | PASS | CI run 29431541669 | None |
+| Frontend security audit | PASS | CI run 29431541669 | None |
+| Legacy consumer freeze gate | PASS | CI run 29431541669 | None |
+| Schedule V2 static gate | PASS | CI run 29431541669 | None |
+| DB proxy legacy migration gate | PASS | CI run 29431541669 | None |
+| Backend tests | PASS | CI run 29431541669 | None |
+| Pint | PASS | CI run 29431541669 | None |
+| Production frontend input validation | PASS | CI run 29431541669; no production dispatch was attempted | Production Environment still lacks VITE_API_URL |
 | Immutable backend image | NOT_CREATED | Production build job skipped on normal release push | Deployment blocked |
 | Immutable frontend image | NOT_CREATED | Production build job skipped on normal release push | Deployment blocked |
 | Immutable Caddy image | NOT_CREATED | Production build job skipped on normal release push | Deployment blocked |
@@ -103,9 +103,9 @@ secret input is not available for a safe comparison.
 
 | CI Job | Run ID | Commit SHA | Result |
 |---|---:|---|---|
-| CI | 29431260140 | a62119c9895d73611bd75301437aca5835ba6083 | PASS |
-| Build Release Images | 29431260140 | a62119c9895d73611bd75301437aca5835ba6083 | SKIPPED by branch guard |
-| Deploy To VPS | 29431260140 | a62119c9895d73611bd75301437aca5835ba6083 | SKIPPED by branch guard |
+| CI | 29431541669 | f8b1295bc4fc801e60120138081aa2b162d2a695 | PASS |
+| Build Release Images | 29431541669 | f8b1295bc4fc801e60120138081aa2b162d2a695 | SKIPPED by branch guard |
+| Deploy To VPS | 29431541669 | f8b1295bc4fc801e60120138081aa2b162d2a695 | SKIPPED by branch guard |
 | Cloudflare Pages production | not run | not applicable | BLOCKED |
 
 The CI run completed successfully with frontend, backend, security, legacy
@@ -116,7 +116,7 @@ non-blocking Node.js 20 deprecation annotation for an action runtime.
 
 | Component | Previous Release | New Release | Status |
 |---|---|---|---|
-| Backend API | not captured | a62119c candidate | NOT_DEPLOYED |
+| Backend API | not captured | f8b1295 candidate | NOT_DEPLOYED |
 | Queue worker | not captured | same backend image required | NOT_DEPLOYED |
 | Scheduler | not captured | same backend image required | NOT_DEPLOYED |
 | Frontend | not captured | Cloudflare Pages SHA build required | NOT_DEPLOYED |
@@ -167,4 +167,3 @@ Required operator action before any production dispatch:
 8. Run production browser smoke and record request IDs.
 
 Do not use production deployment until these blockers are resolved.
-
