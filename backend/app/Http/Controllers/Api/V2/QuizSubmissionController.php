@@ -8,6 +8,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
+use Illuminate\Support\Facades\Gate;
+use App\Models\Quiz;
+
 class QuizSubmissionController extends Controller
 {
     public function submitAnswer(Request $request, string $quizId): JsonResponse
@@ -172,5 +175,55 @@ class QuizSubmissionController extends Controller
         return response()->json([
             'success' => true,
         ]);
+    }
+    public function gradeByUser(Request $request): JsonResponse
+    {
+        Gate::authorize('create', Quiz::class); // only teacher can grade
+
+        $tenantId = $request->attributes->get('tenant_id');
+        $reqId = $this->getRequestId($request);
+
+        $validated = $request->validate([
+            'quiz_id' => 'required|string',
+            'siswa_id' => 'required|string',
+            'score' => 'nullable|numeric|min:0|max:100',
+            'tahun_ajaran' => 'nullable|string',
+            'semester' => 'nullable|string',
+        ]);
+
+        $existing = DB::table('quiz_submissions')
+            ->where('tenant_id', $tenantId)
+            ->where('quiz_id', $validated['quiz_id'])
+            ->where('siswa_id', $validated['siswa_id'])
+            ->first();
+
+        if ($existing) {
+            DB::table('quiz_submissions')->where('id', $existing->id)->update([
+                'score' => $validated['score'],
+                'status' => 'finished',
+                'finished_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } else {
+            DB::table('quiz_submissions')->insert([
+                'id' => (string) Str::uuid(),
+                'tenant_id' => $tenantId,
+                'quiz_id' => $validated['quiz_id'],
+                'siswa_id' => $validated['siswa_id'],
+                'score' => $validated['score'],
+                'status' => 'finished',
+                'tahun_ajaran' => $validated['tahun_ajaran'] ?? null,
+                'semester' => $validated['semester'] ?? null,
+                'created_at' => now(),
+                'updated_at' => now(),
+                'finished_at' => now(),
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Nilai kuis berhasil disimpan.',
+            'request_id' => $reqId,
+        ], 200);
     }
 }

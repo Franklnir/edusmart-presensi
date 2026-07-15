@@ -7,6 +7,8 @@ use App\Models\Profile;
 use App\Services\Academic\AcademicContextResolver;
 use App\Services\Academic\HistoricalEnrollmentResolver;
 use App\Http\Requests\Api\V2\UpdateReportCardMetadataRequest;
+use App\Http\Requests\Api\V2\UpsertReportCardItemRequest;
+use App\Services\Academic\AcademicMutationGuard;
 use App\Services\IdempotencyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,15 +20,18 @@ class ReportCardController extends Controller
     private AcademicContextResolver $contextResolver;
     private HistoricalEnrollmentResolver $historicalEnrollment;
     private IdempotencyService $idempotency;
+    private AcademicMutationGuard $academicMutationGuard;
 
     public function __construct(
         AcademicContextResolver $contextResolver,
         HistoricalEnrollmentResolver $historicalEnrollment,
-        IdempotencyService $idempotency
+        IdempotencyService $idempotency,
+        AcademicMutationGuard $academicMutationGuard
     ) {
         $this->contextResolver = $contextResolver;
         $this->historicalEnrollment = $historicalEnrollment;
         $this->idempotency = $idempotency;
+        $this->academicMutationGuard = $academicMutationGuard;
     }
 
     private function checkAccess(Request $request, string $tenantId, string $kelasId, array $context, ?string $studentId = null): ?JsonResponse
@@ -47,7 +52,7 @@ class ReportCardController extends Controller
             return null;
         }
 
-        if ($role === 'guru') {
+        if (in_array($role, ['guru', 'teacher'], true)) {
             $guruId = $this->profileId($request);
             $hasAccess = DB::table('jadwal')
                 ->where('tenant_id', $tenantId)
@@ -93,6 +98,19 @@ class ReportCardController extends Controller
             ->where('semester', $context['semester'])
             ->get();
 
+        $reportIds = $reports->pluck('id')->filter()->values()->all();
+        $itemsByReport = empty($reportIds)
+            ? collect()
+            : DB::table('rapot_siswa_items')
+                ->where('tenant_id', $tenantId)
+                ->whereIn('rapot_id', $reportIds)
+                ->orderBy('nomor')
+                ->get()
+                ->groupBy('rapot_id');
+        $reports->each(function ($report) use ($itemsByReport): void {
+            $report->items = $itemsByReport->get($report->id, collect())->values();
+        });
+
         return $this->success($request, $reports, [
             'academic_context' => $context,
         ]);
@@ -131,6 +149,167 @@ class ReportCardController extends Controller
         return $this->success($request, $report, [
             'academic_context' => $context,
         ]);
+    }
+
+    public function upsertItem(UpsertReportCardItemRequest $request, string $student): JsonResponse
+    {
+        $tenantId = $this->tenantId($request);
+        $validated = $request->validated();
+        $context = $this->contextResolver->forRead($request, $tenantId);
+        $kelasId = trim((string) $validated['kelas_id']);
+        $mapel = trim((string) $validated['mapel']);
+
+        if ($errorResponse = $this->checkAccess($request, $tenantId, $kelasId, $context, $student)) {
+            return $errorResponse;
+        }
+
+        $studentProfile = DB::table('profiles')
+            ->where('tenant_id', $tenantId)
+            ->where('id', $student)
+            ->whereIn('role', ['siswa', 'student'])
+            ->first();
+        if (! $studentProfile) {
+            return $this->error($request, 'STUDENT_NOT_FOUND', 'Siswa tidak ditemukan pada tenant ini.', 404);
+        }
+
+        $studentClass = $this->historicalEnrollment->resolve(
+            $tenantId,
+            $student,
+            $context['tahun_ajaran'] ?? null,
+            $context['semester'] ?? null,
+            $studentProfile->kelas ?? null,
+            $context['tahun_ajaran'] ?? null
+        );
+        if ($studentClass !== $kelasId) {
+            return $this->error($request, 'REPORT_STUDENT_CLASS_MISMATCH', 'Siswa tidak terdaftar pada kelas periode ini.', 403);
+        }
+
+        if (in_array($this->role($request), ['guru', 'teacher'], true)) {
+            $teachesSubject = DB::table('jadwal')
+                ->where('tenant_id', $tenantId)
+                ->where('guru_id', $this->profileId($request))
+                ->where('kelas_id', $kelasId)
+                ->where('mapel', $mapel)
+                ->where('tahun_ajaran', $context['tahun_ajaran'])
+                ->exists();
+            if (! $teachesSubject) {
+                return $this->error($request, 'REPORT_SUBJECT_ACCESS_DENIED', 'Guru tidak memiliki penugasan mapel pada kelas dan periode ini.', 403);
+            }
+        }
+
+        $guard = $this->academicMutationGuard->authorize(
+            $request,
+            'rapot_siswa',
+            'upsert',
+            [
+                'tahun_pelajaran' => $context['tahun_ajaran'],
+                'semester' => $context['semester'],
+            ],
+            [
+                'eq' => [
+                    'tahun_pelajaran' => $context['tahun_ajaran'],
+                    'semester' => $context['semester'],
+                ],
+            ],
+            $tenantId
+        );
+        if (! ($guard['allowed'] ?? false)) {
+            return $this->error(
+                $request,
+                (string) ($guard['code'] ?? 'ACADEMIC_PERIOD_LOCKED'),
+                (string) ($guard['message'] ?? 'Periode akademik terkunci.'),
+                (int) ($guard['status'] ?? 409)
+            );
+        }
+
+        return $this->idempotency->handle(
+            $request,
+            $request->header('Idempotency-Key'),
+            function () use ($request, $tenantId, $student, $kelasId, $mapel, $validated, $context): JsonResponse {
+                return DB::transaction(function () use ($request, $tenantId, $student, $kelasId, $mapel, $validated, $context): JsonResponse {
+                    $report = DB::table('rapot_siswa')
+                        ->where('tenant_id', $tenantId)
+                        ->where('siswa_id', $student)
+                        ->where('kelas_id', $kelasId)
+                        ->where('tahun_pelajaran', $context['tahun_ajaran'])
+                        ->where('semester', $context['semester'])
+                        ->where('jenis', $validated['jenis'])
+                        ->lockForUpdate()
+                        ->first();
+
+                    if ($report?->locked_at) {
+                        return $this->error($request, 'REPORT_CARD_LOCKED', 'Rapot sudah dikunci dan tidak dapat diubah.', 409);
+                    }
+
+                    $now = now();
+                    if (! $report) {
+                        $reportId = (string) Str::uuid();
+                        DB::table('rapot_siswa')->insert([
+                            'id' => $reportId,
+                            'tenant_id' => $tenantId,
+                            'siswa_id' => $student,
+                            'kelas_id' => $kelasId,
+                            'jenis' => $validated['jenis'],
+                            'tahun_pelajaran' => $context['tahun_ajaran'],
+                            'semester' => $context['semester'],
+                            'status' => 'draft',
+                            'created_by' => $request->user()->id,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ]);
+                    } else {
+                        $reportId = (string) $report->id;
+                        DB::table('rapot_siswa')->where('id', $reportId)->update([
+                            'updated_by' => $request->user()->id,
+                            'updated_at' => $now,
+                        ]);
+                    }
+
+                    $itemQuery = DB::table('rapot_siswa_items')
+                        ->where('tenant_id', $tenantId)
+                        ->where('rapot_id', $reportId)
+                        ->where('mapel', $mapel)
+                        ->lockForUpdate();
+                    $existing = $itemQuery->first();
+                    $itemData = [
+                        'tenant_id' => $tenantId,
+                        'rapot_id' => $reportId,
+                        'nomor' => $existing?->nomor ?: ((int) DB::table('rapot_siswa_items')->where('tenant_id', $tenantId)->where('rapot_id', $reportId)->max('nomor')) + 1,
+                        'mapel' => $mapel,
+                        'kkm' => $validated['kkm'] ?? 75,
+                        'nilai' => $validated['nilai'] ?? null,
+                        'predikat' => $validated['predikat'] ?? $this->calculatePredikat($validated['nilai'] ?? null),
+                        'keterangan' => $validated['keterangan'] ?? null,
+                        'source' => 'laporan_mapel',
+                        'sent_by' => $request->user()->id,
+                        'sent_at' => $now,
+                        'updated_at' => $now,
+                    ];
+
+                    if ($existing) {
+                        DB::table('rapot_siswa_items')->where('id', $existing->id)->update($itemData);
+                        $itemId = (string) $existing->id;
+                    } else {
+                        $itemId = (string) Str::uuid();
+                        DB::table('rapot_siswa_items')->insert([
+                            'id' => $itemId,
+                            ...$itemData,
+                            'created_at' => $now,
+                        ]);
+                    }
+
+                    return $this->success($request, [
+                        'report_id' => $reportId,
+                        'item_id' => $itemId,
+                        'siswa_id' => $student,
+                        'mapel' => $mapel,
+                        'jenis' => $validated['jenis'],
+                    ], [
+                        'academic_context' => $context,
+                    ]);
+                });
+            }
+        );
     }
 
     public function preview(Request $request, string $student): JsonResponse
@@ -245,7 +424,7 @@ class ReportCardController extends Controller
         }
 
         // Must be homeroom teacher or superadmin
-        if ($this->role($request) === 'guru') {
+        if (in_array($this->role($request), ['guru', 'teacher'], true)) {
             $guruId = $this->profileId($request);
             $isHomeroom = DB::table('kelas_struktur')
                 ->where('tenant_id', $tenantId)
@@ -349,7 +528,7 @@ class ReportCardController extends Controller
         }
 
         // Must be homeroom teacher
-        if ($this->role($request) === 'guru') {
+        if (in_array($this->role($request), ['guru', 'teacher'], true)) {
             $guruId = $this->profileId($request);
             $isHomeroom = DB::table('kelas_struktur')
                 ->where('tenant_id', $tenantId)
@@ -487,7 +666,7 @@ class ReportCardController extends Controller
             return $this->error($request, 'ACCESS_DENIED', 'Siswa tidak diizinkan mempublikasi rapor.', 403);
         }
 
-        if ($this->role($request) === 'guru') {
+        if (in_array($this->role($request), ['guru', 'teacher'], true)) {
             $guruId = $this->profileId($request);
             $isHomeroom = DB::table('kelas_struktur')
                 ->where('tenant_id', $tenantId)
@@ -548,7 +727,7 @@ class ReportCardController extends Controller
             return $this->error($request, 'ACCESS_DENIED', 'Siswa tidak diizinkan membuka kembali rapor.', 403);
         }
 
-        if ($this->role($request) === 'guru') {
+        if (in_array($this->role($request), ['guru', 'teacher'], true)) {
             $guruId = $this->profileId($request);
             $isHomeroom = DB::table('kelas_struktur')
                 ->where('tenant_id', $tenantId)
@@ -639,7 +818,7 @@ class ReportCardController extends Controller
             $isAuthorized = false;
             if ($this->role($request) === 'superadmin') {
                 $isAuthorized = true;
-            } elseif ($this->role($request) === 'guru') {
+            } elseif (in_array($this->role($request), ['guru', 'teacher'], true)) {
                 $guruId = $this->profileId($request);
                 $isHomeroom = DB::table('kelas_struktur')
                     ->where('tenant_id', $tenantId)
