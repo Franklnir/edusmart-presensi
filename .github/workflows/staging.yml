@@ -178,6 +178,7 @@ jobs:
           docker buildx build \
             --file deploy/nginx/Dockerfile.prod \
             --build-arg VITE_API_URL="$STAGING_API_BASE_URL" \
+            --build-arg VITE_APP_RELEASE_SHA="$RELEASE_SHA" \
             --build-arg VITE_ROOT_DOMAIN="$STAGING_TENANT_ROOT_DOMAIN" \
             --build-arg VITE_TENANT_SLUG="$STAGING_DEFAULT_TENANT_SLUG" \
             --build-arg VITE_GOOGLE_AUTH_ENABLED=false \
@@ -316,6 +317,7 @@ jobs:
           STAGING_STORAGE_REGION=us-east-1
           STAGING_STORAGE_RETENTION_DAYS=14
           API_V2_UPLOADS_ENABLED=$STAGING_USE_UPLOADS_API_V2
+          VITE_APP_RELEASE_SHA=$RELEASE_SHA
           VITE_USE_ASSIGNMENTS_API_V2=$STAGING_USE_ASSIGNMENTS_API_V2
           VITE_USE_ASSIGNMENT_UPLOADS_API_V2=$STAGING_USE_ASSIGNMENT_UPLOADS_API_V2
           VITE_USE_SCHEDULES_API_V2=$STAGING_USE_SCHEDULES_API_V2

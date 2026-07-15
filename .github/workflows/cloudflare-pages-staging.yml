@@ -29,6 +29,7 @@ jobs:
 
     env:
       NODE_VERSION: "20.19.0"
+      RELEASE_SHA: ${{ github.sha }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.STAGING_CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.STAGING_CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.STAGING_FRONTEND_PROJECT }}
@@ -45,13 +46,25 @@ jobs:
       VITE_GOOGLE_CLIENT_ID: ""
       VITE_GOOGLE_AUTH_LOGIN_URL: /api/auth/google/redirect
       VITE_GOOGLE_AUTH_LINK_URL: /api/auth/google/link
+      VITE_APP_RELEASE_SHA: ${{ github.sha }}
       VITE_USE_ASSIGNMENTS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENTS_API_V2 || 'false' }}
       VITE_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
       VITE_USE_SCHEDULES_API_V2: ${{ vars.STAGING_USE_SCHEDULES_API_V2 || 'false' }}
+      VITE_USE_CLASSES_API_V2: ${{ vars.STAGING_USE_CLASSES_API_V2 || 'false' }}
+      VITE_USE_ATTENDANCE_API_V2: ${{ vars.STAGING_USE_ATTENDANCE_API_V2 || 'false' }}
+      VITE_USE_ANNOUNCEMENTS_API_V2: ${{ vars.STAGING_USE_ANNOUNCEMENTS_API_V2 || 'false' }}
+      VITE_USE_GRADES_API_V2: ${{ vars.STAGING_USE_GRADES_API_V2 || 'true' }}
+      VITE_USE_REPORT_CARDS_API_V2: ${{ vars.STAGING_USE_REPORT_CARDS_API_V2 || 'true' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify release identity
+        run: |
+          set -euo pipefail
+          test "$RELEASE_SHA" = "$(git rev-parse HEAD)"
+          echo "RELEASE_SHA=$RELEASE_SHA"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -85,8 +98,28 @@ jobs:
       - name: Frontend security audit
         run: npm run security:audit
 
+      - name: Verify staging feature flags
+        run: npm run audit:staging-flags
+
       - name: Build frontend
         run: npm run build
+
+      - name: Record frontend release metadata
+        run: |
+          set -euo pipefail
+          test "$VITE_APP_RELEASE_SHA" = "$RELEASE_SHA"
+          {
+            echo "release_sha=$RELEASE_SHA"
+            echo "frontend_release_sha=$VITE_APP_RELEASE_SHA"
+            echo "grades_v2=$VITE_USE_GRADES_API_V2"
+            echo "report_cards_v2=$VITE_USE_REPORT_CARDS_API_V2"
+            echo "schedules_v2=$VITE_USE_SCHEDULES_API_V2"
+            echo "assignments_v2=$VITE_USE_ASSIGNMENTS_API_V2"
+            echo "assignment_uploads_v2=$VITE_USE_ASSIGNMENT_UPLOADS_API_V2"
+            echo "classes_v2=$VITE_USE_CLASSES_API_V2"
+            echo "attendance_v2=$VITE_USE_ATTENDANCE_API_V2"
+            echo "announcements_v2=$VITE_USE_ANNOUNCEMENTS_API_V2"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Add Cloudflare Pages headers, backend proxy, and SPA fallback
         run: |

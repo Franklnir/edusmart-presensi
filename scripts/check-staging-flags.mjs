@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 
 const workflow = await readFile('.github/workflows/staging.yml', 'utf8')
+const cloudflareWorkflow = await readFile('.github/workflows/cloudflare-pages-staging.yml', 'utf8')
 const dockerfile = await readFile('deploy/nginx/Dockerfile.prod', 'utf8')
 const productionExample = await readFile('.env.production.example', 'utf8')
 
@@ -35,6 +36,11 @@ for (const [stagingName, defaultValue] of Object.entries(flags)) {
     failures.push(`${frontendName}: runtime staging environment entry is missing`)
   }
 
+  const cloudflareExpression = frontendName + ": ${{ vars." + stagingName + " || '" + defaultValue + "' }}"
+  if (!cloudflareWorkflow.includes(cloudflareExpression)) {
+    failures.push(`${frontendName}: Cloudflare Pages staging environment entry is missing or has the wrong default`)
+  }
+
   const evidenceName = frontendName.toLowerCase()
     .replaceAll('vite_', '')
     .replaceAll('use_', '')
@@ -46,6 +52,22 @@ for (const [stagingName, defaultValue] of Object.entries(flags)) {
   if (!dockerfile.includes(`ARG ${frontendName}=`) || !dockerfile.includes(`ENV ${frontendName}=`)) {
     failures.push(`${frontendName}: Dockerfile ARG/ENV declaration is missing`)
   }
+}
+
+if (!workflow.includes('--build-arg VITE_APP_RELEASE_SHA="$RELEASE_SHA"')) {
+  failures.push('VITE_APP_RELEASE_SHA: backend/nginx staging build arg is missing')
+}
+
+if (!cloudflareWorkflow.includes('VITE_APP_RELEASE_SHA: ${{ github.sha }}')) {
+  failures.push('VITE_APP_RELEASE_SHA: Cloudflare Pages release metadata is missing')
+}
+
+if (!dockerfile.includes('ARG VITE_APP_RELEASE_SHA=') || !dockerfile.includes('ENV VITE_APP_RELEASE_SHA=')) {
+  failures.push('VITE_APP_RELEASE_SHA: nginx Dockerfile declaration is missing')
+}
+
+if (!productionExample.includes('VITE_APP_RELEASE_SHA=')) {
+  failures.push('VITE_APP_RELEASE_SHA: production environment example is missing')
 }
 
 for (const frontendName of Object.keys(flags).map((name) => name.replace(/^STAGING_/, 'VITE_'))) {
