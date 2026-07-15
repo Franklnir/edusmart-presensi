@@ -135,7 +135,7 @@ export const apiClient = async (path, options = {}) => {
       if (contentType && contentType.includes('application/json')) {
         data = await response.json()
       } else {
-        data = await response.text() // Fallback
+        data = typeof response.text === 'function' ? await response.text() : null
       }
 
       if (!response.ok) {

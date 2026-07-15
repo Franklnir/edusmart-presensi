@@ -97,8 +97,8 @@ describe('API Client Regression Tests', () => {
 
   it('request ID tampil pada error', async () => {
     useAuthStore.getState.mockReturnValue({ authState: 'authenticated' })
-    mockFetch
-      .mockResolvedValueOnce({
+    const apiResponses = [
+      {
         ok: false,
         status: 500,
         headers: new Headers({
@@ -106,16 +106,18 @@ describe('API Client Regression Tests', () => {
           'X-Request-ID': '22222222-2222-4222-8222-222222222222'
         }),
         json: async () => ({ message: 'Server crash' })
-      })
-      // Fire-and-forget frontend logger must settle without recursion.
-      .mockResolvedValueOnce({ ok: true })
-      // A second request to the same URL proves failed GET deduplication is cleared.
-      .mockResolvedValueOnce({
+      },
+      {
         ok: true,
         status: 200,
         headers: new Headers({ 'content-type': 'application/json' }),
         json: async () => ({ data: 'recovered' })
-      })
+      }
+    ]
+    mockFetch.mockImplementation(async (url) => {
+      if (new URL(url).pathname === '/api/v2/frontend-logs') return { ok: true }
+      return apiResponses.shift()
+    })
 
     const requestPath = '/api/db?request-id-test=1'
     const rejectedRequest = apiClient(requestPath, { maxRetries: 0 })
