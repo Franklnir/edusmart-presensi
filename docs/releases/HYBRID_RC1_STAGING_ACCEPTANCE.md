@@ -4,8 +4,9 @@
 - Release branch: `release/hybrid-rc1`
 - Base commit: `668e7fe923d607b36522ff0828b7a9b6f0fa7310`
 - Release SHA: verify with `git rev-parse release/hybrid-rc1` immediately
-  before artifact creation; the verified checkpoint before the release wiring
-  changes was `15ab0e7604059654b7d78d9bbdea5d2bf29217ed`
+  before artifact creation
+- Last CI-validated SHA: `0b85f0ae059d897fdb33d602a97979ad0f7c784a`
+- Last CI run: `29427027194`
 - Migration set:
   `2026_07_15_000100_add_observability_context_to_frontend_error_logs.php`,
   `2026_07_15_000110_add_read_write_to_db_proxy_usage_telemetry.php`
@@ -14,11 +15,13 @@
 
 ## Decision Summary
 
-The release identity is locked locally and the release branch is clean. The
-selected checkpoint has a green backend test result and targeted formatting
-result, but it cannot be accepted for isolated staging or a production canary
-because the complete CI environment, immutable images, staging dependencies,
-backup evidence, rollback target, and browser smoke evidence are unavailable.
+The release branch is pushed normally, clean, and its last validated checkpoint
+passed the source CI gate. CI run `29427027194` completed with backend tests,
+Pint, frontend quality, legacy-consumer, staging-flag, schedule, and DB-proxy
+checks green. The release cannot be accepted for isolated staging or a
+production canary because staging inputs, immutable images, staging
+dependencies, backup evidence, rollback target, and browser smoke evidence are
+unavailable.
 
 A read-only SSH verification was attempted using the locally available
 hardening key. The target reported `hostname=sismu`, `user=root`,
@@ -42,19 +45,19 @@ this release procedure.
 |---|---|---|---|
 | Release branch identity | PASS | `git rev-parse release/hybrid-rc1` matched `HEAD`; branch clean | None locally |
 | Secret and release-file audit | PASS | No tracked `.env`, private key, dump, generated `dist`, or temporary release script; only log `.gitignore` matched the broad scan | None found |
-| Backend tests | PASS WITH SKIPS | `432 passed, 0 failed, 10 skipped, 2301 assertions` on the selected checkpoint | Full CI rerun requires Composer and PostgreSQL PDO |
+| Backend tests | PASS | `442 passed, 0 failed, 2321 assertions` in CI run `29427027194` for SHA `0b85f0ae` | Next report commit changes the SHA; rerun before artifacts |
 | Focused Grade/Report/Report Card tests | PASS | Grade `13 passed/65 assertions`; Report `21 passed/119`; Report Card `13 passed/53` | Runtime smoke still required |
-| Composer validate | BLOCKED | `composer` is not installed in this environment | Run in CI/container |
-| Composer audit | BLOCKED | `composer` is not installed in this environment | Run in CI/container |
+| Composer validate | PENDING | Added to the official CI job; not part of run `29427027194` | Verify on the next exact-SHA run |
+| Composer audit | PENDING | Added to the official CI job; not part of run `29427027194` | Verify on the next exact-SHA run |
 | Database-dependent artisan gate | BLOCKED | PHP has PDO but no `pdo_pgsql`; local PostgreSQL service is unavailable | Run with PostgreSQL and `pdo_pgsql` |
-| Full Pint | FAIL | Existing baseline/unrelated files remain unformatted | Must be triaged in CI; not caused by this release report |
-| Changed-file Pint | PASS | Release PHP changes were formatted and targeted `pint --test` passed | None for changed release PHP files |
-| Frontend test/build/check | BLOCKED | `node`, `npm`, and `npx` are unavailable in this shell | Run Node 20.19 CI gate |
-| Legacy consumer guard | PASS | Existing release checkpoint guard reviewed the registered compatibility boundary | Runtime consumer evidence still required |
-| Staging flag audit | PASS STATIC / NOT EXECUTED | Workflow, Dockerfile, production example, and flag guard contain all eight explicit flags | `npm run audit:staging-flags` needs Node |
+| Full Pint | PASS | `492 files` passed in CI run `29427027194` | None |
+| Changed-file Pint | PASS | Full Pint covers the changed backend files | None |
+| Frontend test/build/check | PASS | CI frontend quality gate completed successfully in run `29427027194` | Browser runtime still required |
+| Legacy consumer guard | PASS | `33 registered source files reviewed` in CI | Runtime compatibility telemetry still required |
+| Staging flag audit | PASS | `8 explicit V2 flags verified` in CI | Runtime workflow still requires staging inputs |
 | Cloudflare Pages release wiring | PASS STATIC | Pages workflow now forwards all eight flags and `VITE_APP_RELEASE_SHA`; YAML parser passed | Runtime workflow has not run for this SHA |
 | GitHub staging environment | BLOCKED | Environment exists but has no staging secret or variable names | Operator must provision staging-scoped inputs |
-| CI for official release SHA | NOT_RUN | Release branch is not present on origin and no workflow was triggered | Push/trigger requires explicit operator authorization |
+| CI for official release SHA | PASS | Run `29427027194`, SHA `0b85f0ae059d897fdb33d602a97979ad0f7c784a` | Rerun after this report/workflow commit |
 | Immutable images | BLOCKED | Docker/Podman unavailable; registry build and digests do not exist | Build in CI and record digests |
 | Isolated staging configuration | TARGET_IDENTITY_UNSAFE | SSH target is production: Compose project `edusmart-prod`, app root `/opt/edusmart-presensi`, production network and containers | Operator must provide a separate staging VPS/target |
 | Staging fixtures | BLOCKED | Required roles and second tenant are unavailable | Seed deterministic staging fixtures |
@@ -143,7 +146,7 @@ staging flag guard before build.
 | `STAGING_DATABASE_NAME`, `STAGING_DATABASE_USER`, `STAGING_DATABASE_PASSWORD` | GitHub `staging` environment | MISSING | redacted |
 | `STAGING_REDIS_PASSWORD`, `STAGING_APP_KEY` | GitHub `staging` environment | MISSING | redacted |
 | `STAGING_STORAGE_ACCESS_KEY`, `STAGING_STORAGE_SECRET_KEY`, `STAGING_STORAGE_BUCKET` | GitHub `staging` environment | MISSING | redacted |
-| `STAGING_CLOUDFLARE_ACCOUNT_ID`, `STAGING_CLOUDFLARE_API_TOKEN` | GitHub `staging` environment | MISSING | redacted |
+| `STAGING_CLOUDFLARE_ACCOUNT_ID`, `STAGING_CLOUDFLARE_API_TOKEN`, `STAGING_EDGE_PROXY_SECRET` | GitHub `staging` environment | MISSING | redacted |
 | `STAGING_FRONTEND_PROJECT`, `STAGING_BACKEND_ORIGIN`, `STAGING_TENANT_ROOT_DOMAIN` | GitHub `staging` variables | MISSING | public config |
 | `GHCR_USERNAME`, `GHCR_TOKEN` | Repository-level names exist | CONFIGURED, not used as staging fallback | redacted |
 | `VPS_HOST`, `VPS_USER`, `VPS_SSH_PRIVATE_KEY` | Repository-level names exist | CONFIGURED, not accepted by staging workflow | redacted |
@@ -234,18 +237,18 @@ redeploy target before rollout.
 
 ## Remaining Risks
 
-- Complete Composer, PostgreSQL/PDO, Redis, queue, storage, Node, and Docker
-  gates have not run in this environment.
-- Full Pint still reports baseline/unrelated style debt; targeted release PHP
-  files are clean.
+- The new Composer validate/audit steps are included in CI but require one
+  rerun after this report commit; run `29427027194` predates those steps.
+- Local PHP lacks `pdo_pgsql`, while local Node and Docker are unavailable;
+  CI supplied the backend/frontend source gates but not staging runtime proof.
 - `/api/db` and `/api/db/batch` remain active compatibility routes for other
   domains and must stay aligned with `config/api-legacy-consumers.json`.
 - No immutable image digest, staging backup checksum, previous release SHA,
   readiness response, or browser Network trace is available.
 - GitHub `staging` has no environment secrets or variables, so CI and Pages
   deployment are fail-closed until the operator provisions them.
-- The release branch is not present on `origin`; no CI run can validate this
-  exact SHA until an authorized push or equivalent CI checkout is provided.
+- The release branch is present on `origin` and the last exact-SHA CI run is
+  `29427027194`; the report/workflow commit requires a fresh exact-SHA run.
 - The only reachable SSH target is confirmed production and is recorded as
   `TARGET_IDENTITY_UNSAFE`; no remote configuration was changed.
 - No production deployment or VPS mutation was performed.

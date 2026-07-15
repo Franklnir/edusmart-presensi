@@ -75,8 +75,11 @@ jobs:
           extensions: mbstring, pdo_pgsql, pgsql, pdo_sqlite, sqlite3, dom, curl, fileinfo, zip
           coverage: none
 
-      - name: Install backend deps
-        run: composer install --no-interaction --prefer-dist --no-progress
+      - name: Validate and audit Composer dependencies
+        run: |
+          composer validate --strict
+          composer audit --locked --no-interaction
+          composer install --no-interaction --prefer-dist --no-progress
 
       - name: Prepare app key
         run: |
