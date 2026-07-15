@@ -41,8 +41,14 @@ jobs:
       - name: Frontend security audit (high)
         run: npm run security:audit
 
+      - name: Frontend tests
+        run: npm run test
+
       - name: Frontend quality gate
         run: npm run check
+
+      - name: Changed JavaScript lint
+        run: npx eslint scripts/audit-schedules-v2.mjs scripts/check-staging-flags.mjs
 
       - name: Legacy consumer freeze gate
         run: npm run lint:legacy
