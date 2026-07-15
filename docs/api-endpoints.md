@@ -1533,65 +1533,36 @@ routes; they must be removed only after the zero-consumer gate passes.
 | --- | --- | --- |
 | `POST` | `/api/db` | Temporary legacy compatibility proxy |
 | `POST` | `/api/db/batch` | Temporary legacy compatibility proxy |
-| `DELETE` | `/api/v2/academic-periods/{period}/correction-sessions/{sessionId}` | Close correction session |
 | `DELETE` | `/api/v2/certificate-templates/{template}` | Delete certificate template |
 | `DELETE` | `/api/v2/certificates/{certificate}` | Delete certificate |
 | `DELETE` | `/api/v2/jam-kosong/{jam_kosong}` | Delete free-period record |
-| `DELETE` | `/api/v2/organizations/{organization}` | Delete organization |
-| `DELETE` | `/api/v2/organizations/{organization}/members/{member}` | Remove organization member |
 | `DELETE` | `/api/v2/quizzes/{quiz}` | Delete quiz |
-| `DELETE` | `/api/v2/school-structure/{school_structure}` | Delete school structure |
 | `DELETE` | `/api/v2/subjects/{subject}` | Delete subject |
-| `GET` | `/api/v2/academic-periods` | List academic periods |
-| `GET` | `/api/v2/academic-periods/{period}/correction-sessions/active` | Get active correction session |
-| `GET` | `/api/v2/academic-periods/{period}/schedule-decision` | Get schedule decision |
-| `GET` | `/api/v2/attendance-settings` | Get attendance settings |
 | `GET` | `/api/v2/certificate-templates` | List certificate templates |
 | `GET` | `/api/v2/certificate-templates/{template}` | Get certificate template |
 | `GET` | `/api/v2/certificates` | List certificates |
 | `GET` | `/api/v2/certificates/{certificate}` | Get certificate |
-| `GET` | `/api/v2/classes/{class}/roster-history` | Get historical class roster |
 | `GET` | `/api/v2/classes/{class}/structure` | Get class structure |
 | `GET` | `/api/v2/jam-kosong` | List free-period records |
-| `GET` | `/api/v2/organizations` | List tenant organizations |
-| `GET` | `/api/v2/organizations/{organization}` | Get organization |
-| `GET` | `/api/v2/organizations/{organization}/members` | List organization members |
 | `GET` | `/api/v2/quizzes` | List quizzes |
 | `GET` | `/api/v2/reports/dashboard-aggregate` | Get scoped dashboard report aggregate |
-| `GET` | `/api/v2/school-structure` | Get school structure |
-| `GET` | `/api/v2/students/{student}/class-history` | Get student class history |
 | `GET` | `/api/v2/subjects` | List subjects |
 | `GET` | `/api/v2/subjects/{subject}` | Get subject |
-| `PATCH` | `/api/v2/organizations/{organization}` | Update organization |
 | `PATCH` | `/api/v2/quizzes/{quiz}` | Update quiz |
-| `PATCH` | `/api/v2/school-structure/{school_structure}` | Update school structure |
 | `PATCH` | `/api/v2/subjects/{subject}` | Update subject |
-| `POST` | `/api/v2/academic-periods/apply` | Apply academic period |
-| `POST` | `/api/v2/academic-periods/preview` | Preview academic period change |
-| `POST` | `/api/v2/academic-periods/{period}/copy-structure` | Copy academic structure |
-| `POST` | `/api/v2/academic-periods/{period}/correction-sessions` | Create correction session |
-| `POST` | `/api/v2/academic-periods/{period}/restore-roster` | Restore historical roster |
-| `POST` | `/api/v2/academic-periods/{period}/schedule-decision` | Save schedule decision |
-| `POST` | `/api/v2/attendance-settings` | Save attendance settings |
 | `POST` | `/api/v2/attendance/scanner/bulk` | Store scanner events in bulk |
 | `POST` | `/api/v2/attendance/scanner/temp` | Store temporary scanner event |
 | `POST` | `/api/v2/certificate-templates` | Create certificate template |
 | `POST` | `/api/v2/certificates` | Create certificate |
 | `POST` | `/api/v2/jam-kosong` | Create free-period record |
-| `POST` | `/api/v2/organizations` | Create organization |
-| `POST` | `/api/v2/organizations/{organization}/members` | Add organization member |
 | `POST` | `/api/v2/profile/provision` | Provision profile |
 | `POST` | `/api/v2/quiz-questions` | Create quiz question |
 | `POST` | `/api/v2/quizzes` | Create quiz |
 | `POST` | `/api/v2/quizzes/grade-by-user` | Grade quiz by user |
-| `POST` | `/api/v2/school-structure` | Create school structure |
 | `POST` | `/api/v2/subjects` | Create subject |
 | `PUT` | `/api/v2/certificate-templates/{template}` | Replace certificate template |
 | `PUT` | `/api/v2/certificates/{certificate}` | Replace certificate |
 | `PUT` | `/api/v2/classes/{class}/structure` | Replace class structure |
-| `PUT` | `/api/v2/organizations/{organization}` | Replace organization |
-| `PUT` | `/api/v2/organizations/{organization}/members/{member}` | Replace organization member |
-| `PUT` | `/api/v2/school-structure/{school_structure}` | Replace school structure |
 | `PUT` | `/api/v2/subjects/{subject}` | Replace subject |
 
 ## Observability and Phase 5 Follow-up Routes
