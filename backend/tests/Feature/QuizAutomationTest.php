@@ -403,37 +403,29 @@ class QuizAutomationTest extends TestCase
         [$guru] = $this->createUserWithProfile($tenantId, 'guru', 'X-1');
         $this->seedGuruTeachingMapel($tenantId, $guru->id, 'X-1', 'Matematika');
 
-        $invalidMapelResponse = $this->actingAs($guru)->postJson('/api/db', [
-            'table' => 'quizzes',
-            'action' => 'insert',
-            'payload' => [
-                'id' => (string) Str::uuid(),
+        $invalidMapelResponse = $this->actingAs($guru)
+            ->withHeader('Idempotency-Key', 'quiz-v2-invalid-mapel-1')
+            ->postJson('/api/v2/quizzes', [
                 'kelas_id' => 'X-1',
                 'mapel' => 'Fisika',
                 'nama' => 'Quiz Fisika',
                 'starts_at' => now()->addHour()->toISOString(),
                 'deadline_at' => now()->addHours(2)->toISOString(),
                 'mode' => 'regular',
-                'penilaian' => 'poin',
-            ],
-        ]);
-        $invalidMapelResponse->assertStatus(422);
-        $invalidMapelResponse->assertJsonPath('message', 'Kelas dan mapel quiz harus sesuai yang diampu guru');
+            ]);
+        $invalidMapelResponse->assertStatus(403);
+        $invalidMapelResponse->assertJsonPath('message', 'Kelas dan mata pelajaran tidak sesuai penugasan guru.');
 
-        $pastStartResponse = $this->actingAs($guru)->postJson('/api/db', [
-            'table' => 'quizzes',
-            'action' => 'insert',
-            'payload' => [
-                'id' => (string) Str::uuid(),
+        $pastStartResponse = $this->actingAs($guru)
+            ->withHeader('Idempotency-Key', 'quiz-v2-past-start-1')
+            ->postJson('/api/v2/quizzes', [
                 'kelas_id' => 'X-1',
                 'mapel' => 'Matematika',
                 'nama' => 'Quiz Matematika',
                 'starts_at' => now()->subHour()->toISOString(),
                 'deadline_at' => now()->addHour()->toISOString(),
                 'mode' => 'regular',
-                'penilaian' => 'poin',
-            ],
-        ]);
+            ]);
         $pastStartResponse->assertStatus(422);
         $pastStartResponse->assertJsonPath('message', 'Tanggal mulai quiz tidak boleh di masa lalu');
     }
@@ -525,16 +517,18 @@ class QuizAutomationTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $response = $this->actingAs($guru)->postJson('/api/quiz/clone', [
-            'source_quiz_id' => $quizId,
-            'target_kelas_id' => 'X-2',
-            'target_mapel' => 'Matematika',
-            'nama' => 'Salinan Quiz Sumber',
-            'copy_security' => true,
-            'copy_schedule' => false,
-            'tahun_ajaran' => $period['tahun_ajaran'],
-            'semester' => $period['semester'],
-        ]);
+        $response = $this->actingAs($guru)
+            ->withHeader('Idempotency-Key', 'quiz-v2-clone-1')
+            ->postJson('/api/v2/quizzes/clone', [
+                'source_quiz_id' => $quizId,
+                'target_kelas_id' => 'X-2',
+                'target_mapel' => 'Matematika',
+                'nama' => 'Salinan Quiz Sumber',
+                'copy_security' => true,
+                'copy_schedule' => false,
+                'tahun_ajaran' => $period['tahun_ajaran'],
+                'semester' => $period['semester'],
+            ]);
 
         $response->assertCreated();
         $response->assertJsonPath('data.question_count', 1);
@@ -631,38 +625,28 @@ class QuizAutomationTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $questionUpdate = $this->actingAs($guru)->postJson('/api/db', [
-            'table' => 'quiz_questions',
-            'action' => 'update',
-            'filters' => ['eq' => ['id' => $questionId]],
-            'payload' => ['soal' => 'Soal berubah'],
-        ]);
+        $questionUpdate = $this->actingAs($guru)
+            ->withHeader('Idempotency-Key', 'quiz-v2-question-update-1')
+            ->patchJson('/api/v2/quiz-questions/'.$questionId, ['soal' => 'Soal berubah']);
         $questionUpdate->assertStatus(409);
         $questionUpdate->assertJsonPath('message', 'Soal quiz tidak bisa diubah saat masih ada siswa yang mengerjakan quiz.');
 
-        $quizUpdate = $this->actingAs($guru)->postJson('/api/db', [
-            'table' => 'quizzes',
-            'action' => 'update',
-            'filters' => ['eq' => ['id' => $quizId]],
-            'payload' => ['nama' => 'Nama berubah'],
-        ]);
-        $quizUpdate->assertStatus(422);
+        $quizUpdate = $this->actingAs($guru)
+            ->withHeader('Idempotency-Key', 'quiz-v2-content-update-1')
+            ->patchJson('/api/v2/quizzes/'.$quizId, ['nama' => 'Nama berubah']);
+        $quizUpdate->assertStatus(409);
         $quizUpdate->assertJsonPath('message', 'Quiz sedang dikerjakan siswa. Hanya deadline yang boleh diubah.');
 
-        $securityUpdate = $this->actingAs($guru)->postJson('/api/quiz/publish', [
-            'quiz_id' => $quizId,
-            'shuffle_questions' => true,
-        ]);
+        $securityUpdate = $this->actingAs($guru)
+            ->withHeader('Idempotency-Key', 'quiz-v2-publish-1')
+            ->postJson('/api/v2/quizzes/'.$quizId.'/publish', ['shuffle_questions' => true]);
         $securityUpdate->assertStatus(409);
         $securityUpdate->assertJsonPath('message', 'Quiz sedang dikerjakan siswa. Keamanan dan pengaturan non-waktu tidak bisa diubah.');
 
         $newDeadline = now()->addHours(2)->startOfMinute();
-        $deadlineUpdate = $this->actingAs($guru)->postJson('/api/db', [
-            'table' => 'quizzes',
-            'action' => 'update',
-            'filters' => ['eq' => ['id' => $quizId]],
-            'payload' => ['deadline_at' => $newDeadline->toISOString()],
-        ]);
+        $deadlineUpdate = $this->actingAs($guru)
+            ->withHeader('Idempotency-Key', 'quiz-v2-deadline-update-1')
+            ->patchJson('/api/v2/quizzes/'.$quizId, ['deadline_at' => $newDeadline->toISOString()]);
         $deadlineUpdate->assertOk();
 
         $storedDeadline = DB::table('quizzes')->where('id', $quizId)->value('deadline_at');
@@ -699,15 +683,12 @@ class QuizAutomationTest extends TestCase
         ]);
 
         $outsideStart = now()->addYears(3)->startOfMinute();
-        $response = $this->actingAs($guru)->postJson('/api/db', [
-            'table' => 'quizzes',
-            'action' => 'update',
-            'filters' => ['eq' => ['id' => $quizId]],
-            'payload' => [
+        $response = $this->actingAs($guru)
+            ->withHeader('Idempotency-Key', 'quiz-v2-outside-year-1')
+            ->patchJson('/api/v2/quizzes/'.$quizId, [
                 'starts_at' => $outsideStart->toISOString(),
                 'deadline_at' => $outsideStart->copy()->addHour()->toISOString(),
-            ],
-        ]);
+            ]);
 
         $response->assertStatus(422);
         $this->assertStringContainsString('tahun periode', (string) $response->json('message'));
@@ -739,17 +720,14 @@ class QuizAutomationTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $response = $this->actingAs($guru)->postJson('/api/db', [
-            'table' => 'quizzes',
-            'action' => 'update',
-            'filters' => ['eq' => ['id' => $quizId]],
-            'payload' => [
+        $response = $this->actingAs($guru)
+            ->withHeader('Idempotency-Key', 'quiz-v2-draft-update-1')
+            ->patchJson('/api/v2/quizzes/'.$quizId, [
                 'nama' => 'Quiz Draft Edit',
                 'mode' => 'uas',
                 'is_live' => true,
                 'duration_minutes' => 60,
-            ],
-        ]);
+            ]);
 
         $response->assertOk();
         $this->assertDatabaseHas('quizzes', [
@@ -793,18 +771,15 @@ class QuizAutomationTest extends TestCase
 
         $startsAt = now()->addDays(2)->startOfMinute();
         $duration = 19;
-        $response = $this->actingAs($guru)->postJson('/api/db', [
-            'table' => 'quizzes',
-            'action' => 'update',
-            'filters' => ['eq' => ['id' => $quizId]],
-            'payload' => [
+        $response = $this->actingAs($guru)
+            ->withHeader('Idempotency-Key', 'quiz-v2-uts-update-1')
+            ->patchJson('/api/v2/quizzes/'.$quizId, [
                 'starts_at' => $startsAt->toISOString(),
                 'duration_minutes' => $duration,
                 'deadline_at' => $startsAt->copy()->addHours(3)->toISOString(),
                 'is_live' => true,
                 'is_active' => true,
-            ],
-        ]);
+            ]);
 
         $response->assertOk();
 
