@@ -15,7 +15,9 @@ vi.mock('../../../store/useAuthStore', () => ({
 
 describe('API Client Regression Tests', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    mockFetch.mockReset()
+    useAuthStore.getState.mockReset()
+    useAuthStore.getState.mockReturnValue({ authState: 'authenticated' })
     vi.useFakeTimers()
   })
   

@@ -130,7 +130,8 @@ export const apiClient = async (path, options = {}) => {
       const response = await fetch(url, fetchOptions)
       let data = null
       
-      const contentType = response.headers.get('content-type')
+      const responseHeaders = response.headers || new Headers()
+      const contentType = responseHeaders.get('content-type')
       if (contentType && contentType.includes('application/json')) {
         data = await response.json()
       } else {
@@ -138,7 +139,7 @@ export const apiClient = async (path, options = {}) => {
       }
 
       if (!response.ok) {
-        const responseHeader = response.headers.get('X-Request-ID')
+        const responseHeader = responseHeaders.get('X-Request-ID')
         const responseRequestId = isValidRequestId(responseHeader) ? responseHeader : requestId
         setLastRequestId(responseRequestId)
         if (response.status === 401 && typeof window !== 'undefined') {
@@ -150,11 +151,11 @@ export const apiClient = async (path, options = {}) => {
           data?.message || data?.error || 'API Request Failed', 
           response.status, 
           data?.code || (response.status === 401 ? 'AUTH_UNAUTHENTICATED' : undefined),
-          { requestId: responseRequestId, details: data?.details || data?.errors || {}, raw: data, retryAfter: response.headers.get('Retry-After') }
+          { requestId: responseRequestId, details: data?.details || data?.errors || {}, raw: data, retryAfter: responseHeaders.get('Retry-After') }
         )
       }
 
-      const responseHeader = response.headers.get('X-Request-ID')
+      const responseHeader = responseHeaders.get('X-Request-ID')
       const resolvedRequestId = isValidRequestId(responseHeader) ? responseHeader : requestId
       setLastRequestId(resolvedRequestId)
       return { data: data?.data ?? data, payload: data, response, requestId: resolvedRequestId }
