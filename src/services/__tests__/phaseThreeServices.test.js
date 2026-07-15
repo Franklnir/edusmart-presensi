@@ -58,7 +58,7 @@ describe('Phase 3 API V2 services', () => {
   it('loads the tenant-scoped organization shell through the V2 resource', async () => {
     await organizationService.getContext()
 
-    expect(apiClient).toHaveBeenCalledWith('/api/v2/organizations', {
+    expect(apiClient).toHaveBeenCalledWith('/api/v2/organization-context', {
       method: 'GET',
       cacheTtlMs: 60 * 1000,
       dedupe: true

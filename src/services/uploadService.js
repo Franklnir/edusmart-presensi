@@ -19,7 +19,8 @@ const toBase64 = (bytes) => {
 
 const sha256 = async (file) => {
   if (!globalThis.crypto?.subtle || typeof file?.arrayBuffer !== 'function') return null
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+  const contents = await file.arrayBuffer()
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new Uint8Array(contents))
   return toBase64(new Uint8Array(digest))
 }
 

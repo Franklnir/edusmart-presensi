@@ -115,7 +115,8 @@ describe('API Client Regression Tests', () => {
         json: async () => ({ data: 'recovered' })
       })
 
-    const rejectedRequest = apiClient('/api/db', { maxRetries: 0 })
+    const requestPath = '/api/db?request-id-test=1'
+    const rejectedRequest = apiClient(requestPath, { maxRetries: 0 })
     await expect(rejectedRequest).rejects.toMatchObject({
       name: 'ApiError',
       status: 500,
@@ -123,7 +124,7 @@ describe('API Client Regression Tests', () => {
       requestId: '22222222-2222-4222-8222-222222222222'
     })
 
-    const recovered = await apiClient('/api/db', { maxRetries: 0 })
+    const recovered = await apiClient(requestPath, { maxRetries: 0 })
     expect(recovered.data).toBe('recovered')
 
     const dbCalls = mockFetch.mock.calls.filter(([url]) => new URL(url).pathname === '/api/db')
@@ -136,7 +137,11 @@ describe('API Client Regression Tests', () => {
     useAuthStore.getState.mockReturnValue({ authState: 'authenticated' })
     mockFetch.mockImplementation(async (url, { signal }) => {
       return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => resolve({ ok: true, json: async () => ({}) }), 500)
+        const timeout = setTimeout(() => resolve({
+          ok: true,
+          headers: new Headers(),
+          json: async () => ({})
+        }), 500)
         signal.addEventListener('abort', () => {
           clearTimeout(timeout)
           const error = new Error('The operation was aborted.')
