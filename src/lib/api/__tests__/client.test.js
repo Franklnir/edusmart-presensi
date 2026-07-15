@@ -142,7 +142,8 @@ describe('API Client Regression Tests', () => {
         const timeout = setTimeout(() => resolve({
           ok: true,
           headers: new Headers(),
-          json: async () => ({})
+          json: async () => ({}),
+          text: async () => ''
         }), 500)
         signal.addEventListener('abort', () => {
           clearTimeout(timeout)
