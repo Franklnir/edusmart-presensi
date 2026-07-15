@@ -2,6 +2,12 @@ name: Production Cloudflare
 
 on:
   workflow_dispatch:
+    inputs:
+      deploy_production:
+        description: "Deploy exact release SHA to Cloudflare Pages production"
+        required: true
+        default: false
+        type: boolean
   push:
     branches:
       - main
@@ -31,7 +37,12 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       (
         github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/backup/vps-ready-20260430'
+        github.ref == 'refs/heads/backup/vps-ready-20260430' ||
+        (
+          github.ref == 'refs/heads/release/hybrid-rc1' &&
+          github.event_name == 'workflow_dispatch' &&
+          inputs.deploy_production == true
+        )
       )
 
     env:
@@ -54,12 +65,12 @@ jobs:
       VITE_GOOGLE_AUTH_LOGIN_URL: /api/auth/google/redirect
       VITE_GOOGLE_AUTH_LINK_URL: /api/auth/google/link
       VITE_APP_RELEASE_SHA: ${{ github.sha }}
-      VITE_USE_ASSIGNMENTS_API_V2: "true"
-      VITE_USE_ASSIGNMENT_UPLOADS_API_V2: "true"
-      VITE_USE_SCHEDULES_API_V2: "true"
-      VITE_USE_CLASSES_API_V2: "true"
-      VITE_USE_ATTENDANCE_API_V2: "true"
-      VITE_USE_ANNOUNCEMENTS_API_V2: "true"
+      VITE_USE_ASSIGNMENTS_API_V2: "false"
+      VITE_USE_ASSIGNMENT_UPLOADS_API_V2: "false"
+      VITE_USE_SCHEDULES_API_V2: "false"
+      VITE_USE_CLASSES_API_V2: "false"
+      VITE_USE_ATTENDANCE_API_V2: "false"
+      VITE_USE_ANNOUNCEMENTS_API_V2: "false"
       VITE_USE_GRADES_API_V2: "true"
       VITE_USE_REPORT_CARDS_API_V2: "true"
 

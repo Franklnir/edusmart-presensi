@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      deploy_production:
+        description: "Deploy exact release SHA to production after all gates"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -104,6 +110,7 @@ jobs:
   build-production-images:
     name: Build Release Images
     runs-on: ubuntu-latest
+    environment: production
     needs:
       - secret-preflight
       - frontend-build
@@ -112,7 +119,12 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       (
         github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/backup/vps-ready-20260430'
+        github.ref == 'refs/heads/backup/vps-ready-20260430' ||
+        (
+          github.ref == 'refs/heads/release/hybrid-rc1' &&
+          github.event_name == 'workflow_dispatch' &&
+          inputs.deploy_production == true
+        )
       )
     outputs:
       backend_image: ${{ steps.images.outputs.backend_image }}
@@ -179,6 +191,7 @@ jobs:
       - name: Build and push nginx image
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_APP_RELEASE_SHA: ${{ github.sha }}
           VITE_TENANT_SLUG: ${{ vars.VITE_TENANT_SLUG }}
           VITE_ROOT_DOMAIN: ${{ vars.VITE_ROOT_DOMAIN || secrets.VITE_ROOT_DOMAIN }}
           VITE_ADMIN_SUBDOMAIN: ${{ vars.VITE_ADMIN_SUBDOMAIN || secrets.VITE_ADMIN_SUBDOMAIN }}
@@ -188,12 +201,12 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
           VITE_GOOGLE_AUTH_LOGIN_URL: ${{ vars.VITE_GOOGLE_AUTH_LOGIN_URL }}
           VITE_GOOGLE_AUTH_LINK_URL: ${{ vars.VITE_GOOGLE_AUTH_LINK_URL }}
-          VITE_USE_ASSIGNMENTS_API_V2: "true"
-          VITE_USE_ASSIGNMENT_UPLOADS_API_V2: "true"
-          VITE_USE_CLASSES_API_V2: "true"
-          VITE_USE_SCHEDULES_API_V2: "true"
-          VITE_USE_ATTENDANCE_API_V2: "true"
-          VITE_USE_ANNOUNCEMENTS_API_V2: "true"
+          VITE_USE_ASSIGNMENTS_API_V2: "false"
+          VITE_USE_ASSIGNMENT_UPLOADS_API_V2: "false"
+          VITE_USE_CLASSES_API_V2: "false"
+          VITE_USE_SCHEDULES_API_V2: "false"
+          VITE_USE_ATTENDANCE_API_V2: "false"
+          VITE_USE_ANNOUNCEMENTS_API_V2: "false"
           VITE_USE_GRADES_API_V2: "true"
           VITE_USE_REPORT_CARDS_API_V2: "true"
         run: |
@@ -201,6 +214,7 @@ jobs:
           docker buildx build \
             --file deploy/nginx/Dockerfile.prod \
             --build-arg VITE_API_URL="${VITE_API_URL:-}" \
+            --build-arg VITE_APP_RELEASE_SHA="${VITE_APP_RELEASE_SHA}" \
             --build-arg VITE_TENANT_SLUG="${VITE_TENANT_SLUG:-}" \
             --build-arg VITE_ROOT_DOMAIN="${VITE_ROOT_DOMAIN:-}" \
             --build-arg VITE_ADMIN_SUBDOMAIN="${VITE_ADMIN_SUBDOMAIN:-admin26}" \
@@ -210,12 +224,12 @@ jobs:
             --build-arg VITE_GOOGLE_CLIENT_ID="${VITE_GOOGLE_CLIENT_ID:-}" \
             --build-arg VITE_GOOGLE_AUTH_LOGIN_URL="${VITE_GOOGLE_AUTH_LOGIN_URL:-/api/auth/google/redirect}" \
             --build-arg VITE_GOOGLE_AUTH_LINK_URL="${VITE_GOOGLE_AUTH_LINK_URL:-/api/auth/google/link}" \
-            --build-arg VITE_USE_ASSIGNMENTS_API_V2="${VITE_USE_ASSIGNMENTS_API_V2:-true}" \
-            --build-arg VITE_USE_ASSIGNMENT_UPLOADS_API_V2="${VITE_USE_ASSIGNMENT_UPLOADS_API_V2:-true}" \
-            --build-arg VITE_USE_CLASSES_API_V2="${VITE_USE_CLASSES_API_V2:-true}" \
-            --build-arg VITE_USE_SCHEDULES_API_V2="${VITE_USE_SCHEDULES_API_V2:-true}" \
-            --build-arg VITE_USE_ATTENDANCE_API_V2="${VITE_USE_ATTENDANCE_API_V2:-true}" \
-            --build-arg VITE_USE_ANNOUNCEMENTS_API_V2="${VITE_USE_ANNOUNCEMENTS_API_V2:-true}" \
+            --build-arg VITE_USE_ASSIGNMENTS_API_V2="${VITE_USE_ASSIGNMENTS_API_V2:-false}" \
+            --build-arg VITE_USE_ASSIGNMENT_UPLOADS_API_V2="${VITE_USE_ASSIGNMENT_UPLOADS_API_V2:-false}" \
+            --build-arg VITE_USE_CLASSES_API_V2="${VITE_USE_CLASSES_API_V2:-false}" \
+            --build-arg VITE_USE_SCHEDULES_API_V2="${VITE_USE_SCHEDULES_API_V2:-false}" \
+            --build-arg VITE_USE_ATTENDANCE_API_V2="${VITE_USE_ATTENDANCE_API_V2:-false}" \
+            --build-arg VITE_USE_ANNOUNCEMENTS_API_V2="${VITE_USE_ANNOUNCEMENTS_API_V2:-false}" \
             --build-arg VITE_USE_GRADES_API_V2="${VITE_USE_GRADES_API_V2:-true}" \
             --build-arg VITE_USE_REPORT_CARDS_API_V2="${VITE_USE_REPORT_CARDS_API_V2:-true}" \
             --tag "$NGINX_IMAGE" \
@@ -262,7 +276,12 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       (
         github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/backup/vps-ready-20260430'
+        github.ref == 'refs/heads/backup/vps-ready-20260430' ||
+        (
+          github.ref == 'refs/heads/release/hybrid-rc1' &&
+          github.event_name == 'workflow_dispatch' &&
+          inputs.deploy_production == true
+        )
       )
     concurrency:
       group: production-deploy
