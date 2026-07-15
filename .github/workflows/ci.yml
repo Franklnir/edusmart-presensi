@@ -175,6 +175,34 @@ jobs:
             echo "caddy_image=${caddy_image}"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Validate production frontend inputs
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_ROOT_DOMAIN: ${{ vars.VITE_ROOT_DOMAIN || secrets.VITE_ROOT_DOMAIN }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in VITE_API_URL VITE_ROOT_DOMAIN; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing production frontend input::${name} is required"
+              missing=1
+            fi
+          done
+          case "$VITE_API_URL" in
+            https://*) ;;
+            *)
+              echo "::error title=Invalid production API origin::VITE_API_URL must use HTTPS"
+              missing=1
+              ;;
+          esac
+          case "$VITE_API_URL" in
+            *staging*|*preview*|*localhost*|*127.0.0.1*)
+              echo "::error title=Unsafe production API origin::VITE_API_URL cannot target staging, preview, or local infrastructure"
+              missing=1
+              ;;
+          esac
+          exit "$missing"
+
       - name: Build and push backend image
         run: |
           set -euo pipefail
