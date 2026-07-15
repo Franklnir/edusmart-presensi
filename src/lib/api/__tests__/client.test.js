@@ -23,6 +23,7 @@ describe('API Client Regression Tests', () => {
   
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllEnvs()
   })
 
   it('auth loading tidak memanggil /api/db langsung (menunggu)', async () => {
@@ -97,6 +98,7 @@ describe('API Client Regression Tests', () => {
 
   it('request ID tampil pada error', async () => {
     useAuthStore.getState.mockReturnValue({ authState: 'authenticated' })
+    vi.stubEnv('VITE_API_URL', 'https://api.test')
     const apiResponses = [
       {
         ok: false,
