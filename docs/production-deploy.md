@@ -90,7 +90,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml run --rm ba
 
 ## 3. Jalankan Stack Production
 
-Deploy normal production dilakukan oleh GitHub Actions. Workflow membuild image backend dan nginx di GitHub, lalu VPS hanya pull image dan menjalankan container tanpa build lokal.
+Deploy normal production dilakukan oleh GitHub Actions. Workflow membuild image backend dan nginx di GitHub, lalu VPS hanya pull image dan menjalankan container tanpa build lokal. Frontend Cloudflare production dijalankan oleh workflow terpisah `.github/workflows/cloudflare-pages-production.yml` setelah push ke branch deploy yang diizinkan.
 
 Untuk menjalankan manual di VPS, pastikan `EDUSMART_BACKEND_IMAGE` dan `EDUSMART_NGINX_IMAGE` mengarah ke image registry yang sudah ada, lalu jalankan:
 

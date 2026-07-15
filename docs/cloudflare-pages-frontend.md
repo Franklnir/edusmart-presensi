@@ -35,6 +35,43 @@ Alur:
 5. Buat project Cloudflare Pages jika belum ada.
 6. Deploy `dist` ke Cloudflare Pages.
 
+## Workflow Cloudflare Production
+
+Frontend production dijalankan oleh `.github/workflows/cloudflare-pages-production.yml`.
+Workflow ini hanya menerima push atau manual dispatch dari branch
+`main` dan `backup/vps-ready-20260430`. Push ke `release/hybrid-rc1` tidak
+langsung mengubah Cloudflare production.
+
+Setelah backend VPS lulus workflow `CI`, workflow Cloudflare production:
+
+1. memverifikasi release SHA;
+2. menjalankan audit dependency, test frontend, dan legacy consumer gate;
+3. membangun frontend dengan seluruh flag V2 production;
+4. membuat Worker proxy API dan security headers;
+5. mem-publish deployment production ke project Cloudflare Pages.
+
+Konfigurasi wajib pada GitHub Environment `production`:
+
+Secrets:
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_PAGES_EDGE_PROXY_SECRET`
+
+Variables:
+
+- `CLOUDFLARE_PAGES_PROJECT_NAME`
+- `CLOUDFLARE_PAGES_BACKEND_ORIGIN` (contoh `https://origin.sismu.biz.id`)
+- `CLOUDFLARE_PAGES_PLATFORM_API_HOST` (contoh `sismu.biz.id`)
+- `VITE_API_URL`
+- `VITE_ROOT_DOMAIN`
+- `VITE_ADMIN_SUBDOMAIN` (opsional, default `admin26`)
+- `VITE_TENANT_SLUG` (opsional, default `tenant-a`)
+
+Project production tidak boleh memakai nama project staging, test, atau
+preview. Nilai origin production wajib memakai HTTPS. Secret tidak boleh
+ditulis ke repository atau dikirim melalui chat.
+
 ## GitHub Secrets
 
 Tambahkan di GitHub repository atau environment `cloudflare-pages-staging`:
