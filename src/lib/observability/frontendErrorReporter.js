@@ -1,4 +1,5 @@
 import { logFrontendError } from '../api/client'
+import { getLastRequestId } from '../api/requestId'
 
 const MAX_EVENTS_PER_WINDOW = 10
 const WINDOW_MS = 60_000
@@ -58,7 +59,8 @@ const report = ({ type, error, filename = '', line = 0, column = 0 }) => {
     event_type: type,
     error_name: name,
     route: safeRoute(),
-    filename: String(filename || '').slice(0, 500),
+    requestId: getLastRequestId(),
+    filename: normalizeMessage(filename).slice(0, 500),
     line: Number(line) || 0,
     column: Number(column) || 0
   })

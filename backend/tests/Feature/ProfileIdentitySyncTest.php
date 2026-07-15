@@ -14,7 +14,7 @@ class ProfileIdentitySyncTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_admin_profile_update_syncs_user_and_teacher_snapshots(): void
+    public function test_legacy_profile_update_is_blocked_without_snapshot_side_effects(): void
     {
         $tenantId = $this->defaultTenantId();
         $admin = $this->createUserWithProfile($tenantId, 'admin', 'Admin Sekolah', 'admin-sync@example.com');
@@ -90,24 +90,16 @@ class ProfileIdentitySyncTest extends TestCase
             ],
         ]);
 
-        $response->assertOk();
-        $response->assertJsonPath('data', 1);
+        $response
+            ->assertStatus(410)
+            ->assertJsonPath('code', 'DB_LEGACY_WRITE_BLOCKED')
+            ->assertHeader('X-Request-ID', $response->json('request_id'));
 
         $this->assertDatabaseHas('profiles', [
             'id' => $teacher->id,
-            'tenant_id' => $tenantId,
-            'nama' => 'Bu Rina Baru',
-            'email' => 'rina.baru@example.com',
+            'nama' => 'Bu Rina Lama',
+            'email' => 'rina.lama@example.com',
         ]);
-        $this->assertDatabaseHas('users', [
-            'id' => $teacher->id,
-            'name' => 'Bu Rina Baru',
-            'email' => 'rina.baru@example.com',
-        ]);
-        $this->assertDatabaseHas('jadwal', ['guru_id' => $teacher->id, 'guru_nama' => 'Bu Rina Baru']);
-        $this->assertDatabaseHas('kelas_struktur', ['wali_guru_id' => $teacher->id, 'wali_guru_nama' => 'Bu Rina Baru']);
-        $this->assertDatabaseHas('struktur_sekolah', ['guru_id' => $teacher->id, 'guru_nama' => 'Bu Rina Baru']);
-        $this->assertDatabaseHas('organisasi', ['pembina_guru_id' => $teacher->id, 'pembina_guru_nama' => 'Bu Rina Baru']);
     }
 
     public function test_ilike_filter_supports_schedule_conflict_queries(): void
@@ -160,7 +152,7 @@ class ProfileIdentitySyncTest extends TestCase
         $response->assertJsonPath('data.0.mapel', 'Fisika');
     }
 
-    public function test_admin_student_name_update_syncs_student_snapshots(): void
+    public function test_legacy_student_profile_update_is_blocked_without_snapshot_side_effects(): void
     {
         $tenantId = $this->defaultTenantId();
         $admin = $this->createUserWithProfile($tenantId, 'admin', 'Admin Siswa', 'admin-siswa@example.com');
@@ -240,14 +232,13 @@ class ProfileIdentitySyncTest extends TestCase
             ],
         ]);
 
-        $response->assertOk();
-        $response->assertJsonPath('data', 1);
+        $response
+            ->assertStatus(410)
+            ->assertJsonPath('code', 'DB_LEGACY_WRITE_BLOCKED')
+            ->assertHeader('X-Request-ID', $response->json('request_id'));
 
-        $this->assertDatabaseHas('users', ['id' => $student->id, 'name' => 'Nama Baru']);
-        $this->assertDatabaseHas('kelas_struktur', ['ketua_siswa_id' => $student->id, 'ketua_siswa_nama' => 'Nama Baru']);
-        $this->assertDatabaseHas('organisasi_anggota', ['siswa_id' => $student->id, 'nama' => 'Nama Baru']);
-        $this->assertDatabaseHas('absensi', ['uid' => $student->id, 'nama' => 'Nama Baru']);
-        $this->assertDatabaseHas('absensi_ajuan', ['uid' => $student->id, 'nama' => 'Nama Baru']);
+        $this->assertDatabaseHas('users', ['id' => $student->id, 'name' => 'Nama Lama']);
+        $this->assertDatabaseHas('profiles', ['id' => $student->id, 'nama' => 'Nama Lama']);
     }
 
     private function defaultTenantId(): string

@@ -3,6 +3,7 @@
 use App\Http\Middleware\BlockSuspiciousRequests;
 use App\Http\Middleware\ConcealDbGatewayFromGuests;
 use App\Http\Middleware\DenyRootDomainAuthAccess;
+use App\Http\Middleware\EnsureDbConsumerRegistered;
 use App\Http\Middleware\EnsureDbGatewayEnabled;
 use App\Http\Middleware\EnsureSuperAdminAccess;
 use App\Http\Middleware\EnsureSuperAdminDomain;
@@ -12,6 +13,7 @@ use App\Http\Middleware\RequireTrustedEdgeProxy;
 use App\Http\Middleware\ResolveTenant;
 use App\Http\Middleware\SecureHeaders;
 use App\Http\Middleware\TrackDbProxyUsage;
+use App\Support\Observability\ApiErrorResponse;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -19,7 +21,6 @@ use Illuminate\Http\Middleware\HandleCors;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
-use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -63,6 +64,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'auth.not_root_domain' => DenyRootDomainAuthAccess::class,
             'conceal.db.guests' => ConcealDbGatewayFromGuests::class,
+            'ensure.db.consumer' => EnsureDbConsumerRegistered::class,
             'ensure.db.enabled' => EnsureDbGatewayEnabled::class,
             'track.db.proxy' => TrackDbProxyUsage::class,
             'super.admin' => EnsureSuperAdminAccess::class,
@@ -93,9 +95,9 @@ return Application::configure(basePath: dirname(__DIR__))
             return $request->is('api/*') || $request->expectsJson();
         });
 
-        $exceptions->render(function (MethodNotAllowedHttpException $e, Request $request) {
+        $exceptions->render(function (Throwable $e, Request $request) {
             if ($request->is('api/*') || $request->expectsJson()) {
-                return response()->json(['message' => 'Not Found'], 404);
+                return ApiErrorResponse::fromException($e, $request);
             }
 
             return null;

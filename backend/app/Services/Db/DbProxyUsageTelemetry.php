@@ -2,6 +2,7 @@
 
 namespace App\Services\Db;
 
+use App\Support\Observability\RequestId;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -19,7 +20,7 @@ class DbProxyUsageTelemetry
         try {
             $metadata = $this->metadata($request, $status, $startedAt);
             $now = now();
-            
+
             Log::channel('legacy_db')->info('Legacy DB Access', $metadata);
 
             $updated = DB::table('db_proxy_usage_telemetry')
@@ -69,9 +70,15 @@ class DbProxyUsageTelemetry
         $tenantId = $this->uuidOrNull($request->attributes->get('tenant_id'));
         $actorId = $this->uuidOrNull($request->user()?->id);
         $route = $this->route($request->header('X-Frontend-Route'));
-        $consumer = $this->token($request->header('X-DB-Consumer'), 128) ?: 'legacy-supabase-adapter';
+        $consumer = $this->token(
+            $request->header('X-Client-Consumer') ?: $request->header('X-DB-Consumer'),
+            128
+        ) ?: 'legacy-supabase-adapter';
         $domain = $this->token($request->input('table'), 128) ?: 'unknown';
         $operation = $this->token($request->input('action', 'select'), 32) ?: 'select';
+        $readWrite = in_array(strtolower($operation), ['insert', 'update', 'upsert', 'delete', 'patch', 'write'], true)
+            ? 'write'
+            : 'read';
         $releaseSha = $this->token(config('app.release_sha'), 128) ?: 'unknown';
         $scope = implode('|', [
             $tenantId ?? 'guest',
@@ -86,13 +93,14 @@ class DbProxyUsageTelemetry
 
         return [
             'scope_key' => hash('sha256', $scope),
-            'request_id' => $this->token($request->attributes->get('request_id') ?: $request->header('X-Request-ID'), 128),
+            'request_id' => RequestId::get($request),
             'tenant_id' => $tenantId,
             'actor_id' => $actorId,
             'frontend_route' => $route,
             'consumer_id' => $consumer,
             'domain' => $domain,
             'operation' => $operation,
+            'read_write' => $readWrite,
             'response_status' => max(0, min(999, $status)),
             'duration_ms' => max(0, min(3_600_000, (int) round((hrtime(true) - $startedAt) / 1_000_000))),
             'release_sha' => $releaseSha,

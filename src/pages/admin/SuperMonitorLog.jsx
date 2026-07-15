@@ -5,6 +5,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Eye,
   FileWarning,
   RefreshCw,
@@ -13,10 +14,10 @@ import {
   TerminalSquare,
   X
 } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
 import { formatDateTime } from '../../lib/time'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
+import monitoringService from '../../services/monitoringService'
 
 const LOG_FILTER_STORAGE_KEY = 'edusmart.super.monitor-log.filters.v1'
 
@@ -25,6 +26,14 @@ const defaultFilters = () => ({
   to: '',
   level: '',
   endpoint: '',
+  request_id: '',
+  domain: '',
+  route: '',
+  status: '',
+  error_code: '',
+  tenant_id: '',
+  actor_id: '',
+  release_sha: '',
   q: '',
   per_page: 20,
   page: 1
@@ -132,6 +141,11 @@ function SkeletonRows() {
 function DetailModal({ detail, loading, onClose }) {
   if (!detail && !loading) return null
 
+  const copyRequestId = () => {
+    if (!detail?.request_id || typeof navigator === 'undefined' || !navigator.clipboard) return
+    navigator.clipboard.writeText(detail.request_id).catch(() => {})
+  }
+
   return (
     <div className="fixed inset-0 z-[90] bg-slate-950/60 p-4 backdrop-blur-sm">
       <div className="mx-auto flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
@@ -165,8 +179,17 @@ function DetailModal({ detail, loading, onClose }) {
               {[
                 ['Timestamp', detail?.timestamp ? formatDateTime(detail.timestamp) : '-'],
                 ['Log Level', levelLabel(detail?.level)],
+                ['Domain', detail?.domain || '-'],
+                ['Route', detail?.route_name || '-'],
+                ['Request ID', detail?.request_id || '-'],
                 ['Request URL', detail?.endpoint || '-'],
                 ['HTTP Method', detail?.method || '-'],
+                ['Status', detail?.response_status || '-'],
+                ['Duration', detail?.duration_ms ? `${detail.duration_ms} ms` : '-'],
+                ['Error Code', detail?.error_code || '-'],
+                ['Tenant ID', detail?.tenant_id || '-'],
+                ['Actor ID', detail?.actor_id || detail?.user || '-'],
+                ['Release SHA', detail?.release_sha || '-'],
                 ['User ID', detail?.user || '-'],
                 ['IP Address', detail?.ip_address || '-'],
                 ['File', detail?.file || '-'],
@@ -178,6 +201,12 @@ function DetailModal({ detail, loading, onClose }) {
                 </div>
               ))}
             </div>
+
+            {detail?.request_id && detail.request_id !== '-' ? (
+              <button type="button" onClick={copyRequestId} className="mt-4 inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-700 hover:bg-indigo-100">
+                <Copy size={14} /> Salin Request ID
+              </button>
+            ) : null}
 
             <section className="mt-4 rounded-2xl border border-slate-100 bg-white p-4">
               <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Error Message</p>
@@ -207,7 +236,7 @@ export default function SuperMonitorLog() {
   const { pushToast } = useUIStore()
   const [rows, setRows] = useState([])
   const [summary, setSummary] = useState({ errors: 0, warnings: 0, critical: 0, total: 0 })
-  const [options, setOptions] = useState({ levels: [], endpoints: [] })
+  const [options, setOptions] = useState({ levels: [], endpoints: [], domains: [], error_codes: [] })
   const [pagination, setPagination] = useState({ page: 1, per_page: 20, total: 0, last_page: 1 })
   const [loading, setLoading] = useState(false)
   const [detail, setDetail] = useState(null)
@@ -236,8 +265,7 @@ export default function SuperMonitorLog() {
   const loadLogs = async (nextFilters = queryFilters, { silent = false } = {}) => {
     if (!silent) setLoading(true)
     try {
-      const { data, error } = await supabase.super.monitoringLogs(nextFilters)
-      if (error) throw error
+      const data = await monitoringService.listSuperLogs(nextFilters)
       setRows(Array.isArray(data?.rows) ? data.rows : [])
       setSummary(data?.summary || { errors: 0, warnings: 0, critical: 0, total: 0 })
       setOptions(data?.filters || { levels: [], endpoints: [] })
@@ -294,8 +322,7 @@ export default function SuperMonitorLog() {
     setDetail(null)
     setDetailLoading(true)
     try {
-      const { data, error } = await supabase.super.monitoringLogDetail(id)
-      if (error) throw error
+      const data = await monitoringService.getSuperLog(id)
       setDetail(data || null)
     } catch (error) {
       pushToast('error', error?.message || 'Gagal memuat detail log')
@@ -366,7 +393,7 @@ export default function SuperMonitorLog() {
             </label>
             <label className="space-y-1.5">
               <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Endpoint</span>
-              <input id="log-endpoint" name="endpoint" list="log-endpoint-options" value={filters.endpoint} onChange={updateFilter('endpoint')} placeholder="/api/db" className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400" />
+              <input id="log-endpoint" name="endpoint" list="log-endpoint-options" value={filters.endpoint} onChange={updateFilter('endpoint')} placeholder="/api/v2/..." className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400" />
               <datalist id="log-endpoint-options">
                 {(options.endpoints || []).map((endpoint) => <option key={endpoint} value={endpoint} />)}
               </datalist>
@@ -375,6 +402,21 @@ export default function SuperMonitorLog() {
               <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Keyword</span>
               <input id="log-keyword" name="q" value={filters.q} onChange={updateFilter('q')} placeholder="Cari pesan/user/file" className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400" />
             </label>
+            {[
+              ['request_id', 'Request ID', 'UUID request'],
+              ['domain', 'Domain', 'reports, grades, auth'],
+              ['route', 'Route', 'Nama route/path'],
+              ['status', 'Status', '401, 404, 500'],
+              ['error_code', 'Error Code', 'Kode error'],
+              ['tenant_id', 'Tenant', 'Tenant ID'],
+              ['actor_id', 'Actor', 'User ID'],
+              ['release_sha', 'Release SHA', 'Versi rilis']
+            ].map(([key, label, placeholder]) => (
+              <label key={key} className="space-y-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
+                <input id={`log-${key}`} name={key} value={filters[key]} onChange={updateFilter(key)} placeholder={placeholder} className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400" />
+              </label>
+            ))}
             <div className="flex items-end gap-2">
               <button type="submit" className="h-12 flex-1 rounded-2xl bg-indigo-600 px-4 text-sm font-black text-white shadow-sm hover:bg-indigo-700">
                 Terapkan

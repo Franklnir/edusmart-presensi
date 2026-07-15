@@ -4,12 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Profile;
+use App\Support\Observability\RequestId;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Str;
 
 class ApiController extends Controller
 {
@@ -160,14 +160,16 @@ class ApiController extends Controller
             default => 'SERVER_ERROR',
         };
 
+        $requestId = RequestId::get(request());
+
         return response()->json([
             'success' => false,
             'code' => $errorCode ?? $defaultCode,
             'message' => $message,
-            'message' => $message, // Backward compatibility for legacy consumers
+            'details' => [],
             'errors' => (object) [],
-            'request_id' => request()->header('X-Request-ID') ?? (string) Str::uuid(),
-        ], $status);
+            'request_id' => $requestId,
+        ], $status)->header(RequestId::HEADER, $requestId);
     }
 
     protected function tenantId(Request $request): ?string

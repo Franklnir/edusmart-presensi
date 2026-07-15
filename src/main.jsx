@@ -8,6 +8,7 @@ import Toast from './components/Toast'
 import { queryClient } from './lib/queryClient'
 import { AcademicContextProvider } from './context/AcademicContext'
 import { installGlobalFrontendErrorReporter } from './lib/observability/frontendErrorReporter'
+import AppErrorBoundary from './components/observability/AppErrorBoundary'
 
 // Register PWA Service Worker
 import { registerSW } from 'virtual:pwa-register'
@@ -28,7 +29,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AcademicContextProvider>
-          <App />
+          <AppErrorBoundary>
+            <App />
+          </AppErrorBoundary>
           <Toast />
         </AcademicContextProvider>
       </BrowserRouter>

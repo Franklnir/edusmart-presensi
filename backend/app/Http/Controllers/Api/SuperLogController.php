@@ -65,6 +65,8 @@ class SuperLogController extends ApiController
             'filters' => [
                 'levels' => ['emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug'],
                 'endpoints' => $this->endpointOptions(),
+                'domains' => $this->filterOptions('domain'),
+                'error_codes' => $this->filterOptions('error_code'),
             ],
             'generated_at' => now()->toIso8601String(),
         ]);
@@ -82,7 +84,7 @@ class SuperLogController extends ApiController
             }
         }
 
-        return response()->json(['message' => 'Log tidak ditemukan atau sudah ter-rotate.'], 404);
+        return $this->deny('Log tidak ditemukan atau sudah ter-rotate.', 404, 'RESOURCE_NOT_FOUND');
     }
 
     private function normalizeFilters(Request $request): array
@@ -99,6 +101,14 @@ class SuperLogController extends ApiController
             'level' => Str::lower((string) $request->query('level', '')),
             'endpoint' => trim((string) $request->query('endpoint', '')),
             'q' => Str::lower(trim((string) $request->query('q', ''))),
+            'request_id' => Str::lower(trim((string) $request->query('request_id', ''))),
+            'domain' => Str::lower(trim((string) $request->query('domain', ''))),
+            'route' => trim((string) $request->query('route', '')),
+            'status' => trim((string) $request->query('status', '')),
+            'error_code' => Str::lower(trim((string) $request->query('error_code', ''))),
+            'tenant_id' => trim((string) $request->query('tenant_id', '')),
+            'actor_id' => trim((string) $request->query('actor_id', '')),
+            'release_sha' => trim((string) $request->query('release_sha', '')),
         ];
     }
 
@@ -125,6 +135,8 @@ class SuperLogController extends ApiController
             'level' => '',
             'endpoint' => '',
             'q' => '',
+            'request_id' => '', 'domain' => '', 'route' => '', 'status' => '',
+            'error_code' => '', 'tenant_id' => '', 'actor_id' => '', 'release_sha' => '',
         ], self::MAX_PARSED_ENTRIES);
 
         $summary = [
@@ -157,6 +169,19 @@ class SuperLogController extends ApiController
         return collect($entries)
             ->pluck('endpoint')
             ->filter(fn ($endpoint) => is_string($endpoint) && $endpoint !== '' && $endpoint !== '-')
+            ->unique()
+            ->take(50)
+            ->values()
+            ->all();
+    }
+
+    private function filterOptions(string $field): array
+    {
+        $entries = $this->readEntries([], 500);
+
+        return collect($entries)
+            ->pluck($field)
+            ->filter(fn ($value) => is_string($value) && $value !== '' && $value !== '-')
             ->unique()
             ->take(50)
             ->values()
@@ -209,12 +234,25 @@ class SuperLogController extends ApiController
             if (($filters['endpoint'] ?? '') !== '') {
                 $query->where('url', 'like', '%'.$filters['endpoint'].'%');
             }
+            foreach (['request_id', 'domain', 'error_code', 'tenant_id', 'actor_id', 'release_sha'] as $field) {
+                if (($filters[$field] ?? '') !== '') {
+                    $query->where($field, 'like', '%'.$filters[$field].'%');
+                }
+            }
+            if (($filters['route'] ?? '') !== '') {
+                $query->where('route_name', 'like', '%'.$filters['route'].'%');
+            }
+            if (($filters['status'] ?? '') !== '' && is_numeric($filters['status'])) {
+                $query->where('response_status', (int) $filters['status']);
+            }
             if (($filters['q'] ?? '') !== '') {
                 $needle = '%'.$filters['q'].'%';
                 $query->where(function ($builder) use ($needle): void {
                     $builder
                         ->whereRaw('LOWER(message) LIKE ?', [$needle])
-                        ->orWhereRaw('LOWER(COALESCE(url, \'\')) LIKE ?', [$needle]);
+                        ->orWhereRaw('LOWER(COALESCE(url, \'\')) LIKE ?', [$needle])
+                        ->orWhereRaw('LOWER(COALESCE(request_id, \'\')) LIKE ?', [$needle])
+                        ->orWhereRaw('LOWER(COALESCE(error_code, \'\')) LIKE ?', [$needle]);
                 });
             }
 
@@ -235,6 +273,16 @@ class SuperLogController extends ApiController
                         'line' => null,
                         'stack_trace' => '-',
                         'context' => $this->sanitizeValue($log->context ?: []),
+                        'request_id' => (string) ($log->request_id ?: '-'),
+                        'correlation_id' => (string) ($log->correlation_id ?: '-'),
+                        'domain' => (string) ($log->domain ?: '-'),
+                        'route_name' => (string) ($log->route_name ?: '-'),
+                        'response_status' => $log->response_status,
+                        'duration_ms' => $log->duration_ms,
+                        'error_code' => (string) ($log->error_code ?: '-'),
+                        'tenant_id' => (string) ($log->tenant_id ?: '-'),
+                        'actor_id' => (string) ($log->user_id ?: '-'),
+                        'release_sha' => (string) ($log->release_sha ?: '-'),
                     ];
                 })
                 ->all();
@@ -252,7 +300,10 @@ class SuperLogController extends ApiController
             return [];
         }
 
-        $files = File::glob($path.DIRECTORY_SEPARATOR.'laravel*.log') ?: [];
+        $files = array_merge(
+            File::glob($path.DIRECTORY_SEPARATOR.'laravel*.log') ?: [],
+            File::glob($path.DIRECTORY_SEPARATOR.'structured*.log') ?: []
+        );
         usort($files, fn ($left, $right) => filemtime($right) <=> filemtime($left));
 
         return array_slice($files, 0, 14);
@@ -271,6 +322,16 @@ class SuperLogController extends ApiController
 
         foreach (preg_split("/\r\n|\n|\r/", $content) as $line) {
             $lineNumber++;
+            $structured = json_decode(trim($line), true);
+            if (is_array($structured) && isset($structured['message'])) {
+                if ($current) {
+                    $entries[] = $this->normalizeEntry($file, $current);
+                    $current = null;
+                }
+                $entries[] = $this->normalizeStructuredEntry($file, $lineNumber, $structured);
+
+                continue;
+            }
             if (preg_match('/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+([A-Za-z0-9_-]+)\.([A-Za-z]+):\s?(.*)$/', $line, $matches)) {
                 if ($current) {
                     $entries[] = $this->normalizeEntry($file, $current);
@@ -293,6 +354,44 @@ class SuperLogController extends ApiController
         }
 
         return array_reverse($entries);
+    }
+
+    private function normalizeStructuredEntry(string $file, int $lineNumber, array $record): array
+    {
+        $context = is_array($record['context'] ?? null) ? $record['context'] : [];
+        foreach (['request_id', 'correlation_id', 'method', 'route_name', 'path_template', 'response_status', 'duration_ms', 'tenant_id', 'actor_id', 'actor_role', 'domain', 'release_sha', 'job_id', 'queue', 'error_code'] as $field) {
+            if (array_key_exists($field, $record) && ! array_key_exists($field, $context)) {
+                $context[$field] = $record[$field];
+            }
+        }
+        $timestamp = $record['datetime'] ?? $record['timestamp'] ?? null;
+        $message = (string) ($record['message'] ?? 'Structured log');
+        $level = Str::lower((string) ($record['level_name'] ?? $record['level'] ?? 'info'));
+
+        return [
+            'id' => sha1('structured|'.basename($file).'|'.$lineNumber),
+            'timestamp' => is_string($timestamp) ? $this->formatTimestamp($timestamp) : null,
+            'level' => $level,
+            'endpoint' => $this->resolveEndpoint($message, $context),
+            'message' => $this->sanitizeText($message, 700),
+            'user' => $this->resolveUser($context),
+            'method' => $this->resolveMethod($context),
+            'ip_address' => $this->resolveIp($context),
+            'file' => '-',
+            'line' => null,
+            'stack_trace' => $this->sanitizeText($this->stringFromPath($context, ['exception']), 12000),
+            'context' => $this->sanitizeValue($context),
+            'request_id' => $this->contextField($context, 'request_id'),
+            'correlation_id' => $this->contextField($context, 'correlation_id'),
+            'domain' => $this->contextField($context, 'domain'),
+            'route_name' => $this->contextField($context, 'route_name'),
+            'response_status' => $this->numericContextField($context, 'response_status'),
+            'duration_ms' => $this->numericContextField($context, 'duration_ms'),
+            'error_code' => $this->contextField($context, 'error_code'),
+            'tenant_id' => $this->contextField($context, 'tenant_id'),
+            'actor_id' => $this->contextField($context, 'actor_id'),
+            'release_sha' => $this->contextField($context, 'release_sha'),
+        ];
     }
 
     private function readLogTail(string $file): string
@@ -342,6 +441,16 @@ class SuperLogController extends ApiController
             'line' => $line,
             'stack_trace' => $this->sanitizeText($this->resolveStackTrace($exception, $raw), 12000),
             'context' => $this->sanitizeValue($context),
+            'request_id' => $this->contextField($context, 'request_id'),
+            'correlation_id' => $this->contextField($context, 'correlation_id'),
+            'domain' => $this->contextField($context, 'domain'),
+            'route_name' => $this->contextField($context, 'route_name') ?: $this->contextField($context, 'route'),
+            'response_status' => $this->numericContextField($context, 'response_status'),
+            'duration_ms' => $this->numericContextField($context, 'duration_ms'),
+            'error_code' => $this->contextField($context, 'error_code'),
+            'tenant_id' => $this->contextField($context, 'tenant_id'),
+            'actor_id' => $this->contextField($context, 'actor_id'),
+            'release_sha' => $this->contextField($context, 'release_sha'),
         ];
 
         return $normalized;
@@ -385,6 +494,17 @@ class SuperLogController extends ApiController
             }
         }
 
+        foreach (['request_id', 'domain', 'route_name', 'error_code', 'tenant_id', 'actor_id', 'release_sha'] as $field) {
+            $filterKey = $field === 'route_name' ? 'route' : $field;
+            if (($filters[$filterKey] ?? '') !== ''
+                && ! str_contains(Str::lower((string) ($entry[$field] ?? '')), Str::lower($filters[$filterKey]))) {
+                return false;
+            }
+        }
+        if (($filters['status'] ?? '') !== '' && (string) ($entry['response_status'] ?? '') !== (string) $filters['status']) {
+            return false;
+        }
+
         if (($filters['q'] ?? '') !== '') {
             $needle = $filters['q'];
             $haystack = Str::lower(implode(' ', [
@@ -393,6 +513,10 @@ class SuperLogController extends ApiController
                 $entry['user'] ?? '',
                 $entry['file'] ?? '',
                 $entry['stack_trace'] ?? '',
+                $entry['request_id'] ?? '',
+                $entry['error_code'] ?? '',
+                $entry['tenant_id'] ?? '',
+                $entry['release_sha'] ?? '',
             ]));
             if (! str_contains($haystack, $needle)) {
                 return false;
@@ -501,6 +625,18 @@ class SuperLogController extends ApiController
         }
 
         return is_scalar($cursor) ? (string) $cursor : '';
+    }
+
+    private function contextField(array $context, string $field): string
+    {
+        return $this->stringFromPath($context, [$field]) ?: '-';
+    }
+
+    private function numericContextField(array $context, string $field): ?int
+    {
+        $value = $this->stringFromPath($context, [$field]);
+
+        return is_numeric($value) ? (int) $value : null;
     }
 
     private function sanitizeValue($value)

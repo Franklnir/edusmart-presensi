@@ -24,13 +24,26 @@ class FrontendLogControllerTest extends TestCase
         ]);
 
         $response->assertStatus(201)
-            ->assertJson(['success' => true]);
+            ->assertJson(['success' => true])
+            ->assertJsonStructure(['request_id']);
 
         $this->assertDatabaseHas('frontend_error_logs', [
             'level' => 'error',
             'message' => 'Test error message',
             'url' => 'http://localhost/test',
         ]);
+    }
+
+    public function test_validation_error_uses_the_structured_contract_and_request_id(): void
+    {
+        $response = $this->postJson('/api/v2/frontend-logs', [
+            'level' => 'not-a-level',
+            'message' => '',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonStructure(['success', 'code', 'message', 'details' => ['errors'], 'request_id'])
+            ->assertHeader('X-Request-ID');
     }
 
     public function test_can_submit_frontend_log_authenticated_with_tenant()

@@ -5,15 +5,16 @@ Tanggal audit: 2026-07-14
 Dokumen ini merangkum kontrak endpoint API backend EduSmart dari source
 `backend/routes/api.php`, hasil verifikasi `php artisan route:list --path=api`,
 dan pembacaan controller utama. Total endpoint API aplikasi aktif saat audit:
-242 route. Route vendor seperti Horizon `horizon/api/*` tidak dihitung sebagai
-API aplikasi.
+367 route, termasuk dua route DB proxy yang saat ini dipertahankan sebagai
+kompatibilitas sementara. Route vendor seperti Horizon `horizon/api/*` tidak
+dihitung sebagai API aplikasi.
 
 ## Status Kualitas Dokumen
 
-Penilaian setelah hardening dokumentasi ini: 9/10 untuk dokumentasi API
-production internal.
+Status setelah Phase 5: katalog route lengkap untuk tree saat ini, tetapi
+migrasi API belum selesai dan belum menjadi persetujuan deploy.
 
-Alasan nilainya 9/10:
+Yang sudah diverifikasi:
 
 - Endpoint lengkap, diverifikasi dari route Laravel.
 - Auth, tenant, role, rate limit, dan status code terdokumentasi.
@@ -25,7 +26,7 @@ Alasan nilainya 9/10:
   aktif agar dokumentasi tidak diam-diam basi.
 - Ada checklist audit dan perawatan untuk mencegah dokumentasi basi.
 
-Batas menuju 10/10:
+Pekerjaan yang masih terbuka:
 
 - Buat `docs/openapi.yaml` lengkap untuk semua endpoint.
 - Generate Swagger UI/Postman collection dari OpenAPI.
@@ -199,7 +200,6 @@ Throttle yang terlihat dari route:
 
 - `auth`: login, register, reset password, Google auth.
 - `api`: endpoint aplikasi umum.
-- `db`: DB proxy `/api/db` dan `/api/db/batch`.
 - `storage`: upload, signed URL, dan object retrieval.
 - `rfid`: ingress device RFID.
 - `quiz-submit`: submit quiz.
@@ -291,7 +291,6 @@ tanpa mengubah data.
 
 ## DB Proxy
 
-`POST /api/db` adalah endpoint generic data access yang tetap dibatasi registry
 tabel, tenant, role, policy, dan audit.
 
 Payload umum:
@@ -327,7 +326,6 @@ Action yang diterima:
 Catatan:
 
 - Non admin wajib mengirim filter untuk `update` dan `delete`.
-- Batch `/api/db/batch` hanya mendukung `select`.
 - Limit select dibatasi env `DB_MAX_SELECT_LIMIT` dan
   `DB_MAX_SELECT_LIMIT_ADMIN`.
 - Default data transaksi adalah 250 baris. Tabel roster/master (`profiles`,
@@ -560,7 +558,6 @@ menyimpan snapshot agar nilai tidak berubah salah saat periode berganti.
 ### Tugas dan Reports (Legacy & V2)
 
 **API V2 Assignments:**
-Endpoint baru menggunakan prefix `/api/v2/assignments` dan `/api/v2/submissions` untuk menggantikan penggunaan `/api/db` dan endpoint legacy. 
 Semua endpoint ini secara otomatis ter-scope oleh `tenant_id` dan memvalidasi `profile.tenant_id`.
 - `GET /api/v2/assignments`: List tugas (mendukung filter `per_page=all`, `kelas`, `mapel`, `status`, `search`, `created_after`, dll).
 - `POST /api/v2/assignments`: Buat tugas baru.
@@ -831,7 +828,6 @@ Security and logic notes:
 - Semua operasi berjalan dalam transaksi.
 - Snapshot kelas dibuat sebelum dan sesudah perubahan periode.
 
-### `POST /api/db`
 
 Request select:
 
@@ -1017,7 +1013,6 @@ curl -X POST "https://<tenant-host>/api/auth/login" \
 Select DB proxy:
 
 ```bash
-curl -X POST "https://<tenant-host>/api/db" \
   -H "Accept: application/json" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
@@ -1186,8 +1181,6 @@ Total route API aplikasi aktif: 242.
 
 | Method | Endpoint | Handler | Auth |
 |---|---|---|---|
-| `POST` | `/api/db` | `DbController@handle` | Auth/policy, guests concealed |
-| `POST` | `/api/db/batch` | `DbController@batch` | Auth/policy, guests concealed |
 
 ### General
 
@@ -1448,7 +1441,7 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `PATCH` | `/api/v2/classes/{class}` | Mengupdate kelas (partial) |
 | `DELETE` | `/api/v2/classes/{class}` | Menghapus kelas |
 | `GET` | `/api/v2/academic-context` | Konteks tahun ajaran dan semester aktif tenant dari server; tidak menerima `tenant_id` dari browser. |
-| `GET` | `/api/v2/organizations` | Konteks organisasi tenant, branding terfilter, assignment wali kelas, dan delegated feature untuk pengguna aktif. |
+| `GET` | `/api/v2/organization-context` | Konteks organisasi tenant, branding terfilter, assignment wali kelas, dan delegated feature untuk pengguna aktif. |
 | `GET` | `/api/v2/profile` | Profil milik pengguna yang sedang terautentikasi dalam tenant aktif. Path atau URL avatar tidak dikembalikan sampai Attachment V2 tersedia. |
 | `PATCH` | `/api/v2/profile` | Mengubah field profil mandiri yang diizinkan menurut role. Gunakan `Idempotency-Key`; `tenant_id`, role, status, dan identitas pihak lain ditolak. |
 | `GET` | `/api/v2/dashboard/admin` | Ringkasan dashboard admin yang tenant-scoped; hanya mengembalikan settings, periode akademik, statistik, dan pengumuman terfilter. |
@@ -1529,3 +1522,109 @@ Dokumen ini sudah layak 9/10 untuk operasional internal. Untuk menjadikannya
 | `POST` | `/api/v2/attendance-requests` | Membuat pengajuan izin baru |
 | `PATCH` | `/api/v2/attendance-requests/{attendance_request}` | Merespon (approve/reject) pengajuan izin |
 | `DELETE` | `/api/v2/attendance-requests/{attendance_request}` | Menghapus pengajuan izin |
+
+## Phase 5 Route Inventory
+
+The following routes were added to the catalog during the Phase 5 audit. The
+database proxy entries are intentionally marked as temporary compatibility
+routes; they must be removed only after the zero-consumer gate passes.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `POST` | `/api/db` | Temporary legacy compatibility proxy |
+| `POST` | `/api/db/batch` | Temporary legacy compatibility proxy |
+| `DELETE` | `/api/v2/academic-periods/{period}/correction-sessions/{sessionId}` | Close correction session |
+| `DELETE` | `/api/v2/certificate-templates/{template}` | Delete certificate template |
+| `DELETE` | `/api/v2/certificates/{certificate}` | Delete certificate |
+| `DELETE` | `/api/v2/jam-kosong/{jam_kosong}` | Delete free-period record |
+| `DELETE` | `/api/v2/organizations/{organization}` | Delete organization |
+| `DELETE` | `/api/v2/organizations/{organization}/members/{member}` | Remove organization member |
+| `DELETE` | `/api/v2/quizzes/{quiz}` | Delete quiz |
+| `DELETE` | `/api/v2/school-structure/{school_structure}` | Delete school structure |
+| `DELETE` | `/api/v2/subjects/{subject}` | Delete subject |
+| `GET` | `/api/v2/academic-periods` | List academic periods |
+| `GET` | `/api/v2/academic-periods/{period}/correction-sessions/active` | Get active correction session |
+| `GET` | `/api/v2/academic-periods/{period}/schedule-decision` | Get schedule decision |
+| `GET` | `/api/v2/attendance-settings` | Get attendance settings |
+| `GET` | `/api/v2/certificate-templates` | List certificate templates |
+| `GET` | `/api/v2/certificate-templates/{template}` | Get certificate template |
+| `GET` | `/api/v2/certificates` | List certificates |
+| `GET` | `/api/v2/certificates/{certificate}` | Get certificate |
+| `GET` | `/api/v2/classes/{class}/roster-history` | Get historical class roster |
+| `GET` | `/api/v2/classes/{class}/structure` | Get class structure |
+| `GET` | `/api/v2/jam-kosong` | List free-period records |
+| `GET` | `/api/v2/organizations` | List tenant organizations |
+| `GET` | `/api/v2/organizations/{organization}` | Get organization |
+| `GET` | `/api/v2/organizations/{organization}/members` | List organization members |
+| `GET` | `/api/v2/quizzes` | List quizzes |
+| `GET` | `/api/v2/reports/dashboard-aggregate` | Get scoped dashboard report aggregate |
+| `GET` | `/api/v2/school-structure` | Get school structure |
+| `GET` | `/api/v2/students/{student}/class-history` | Get student class history |
+| `GET` | `/api/v2/subjects` | List subjects |
+| `GET` | `/api/v2/subjects/{subject}` | Get subject |
+| `PATCH` | `/api/v2/organizations/{organization}` | Update organization |
+| `PATCH` | `/api/v2/quizzes/{quiz}` | Update quiz |
+| `PATCH` | `/api/v2/school-structure/{school_structure}` | Update school structure |
+| `PATCH` | `/api/v2/subjects/{subject}` | Update subject |
+| `POST` | `/api/v2/academic-periods/apply` | Apply academic period |
+| `POST` | `/api/v2/academic-periods/preview` | Preview academic period change |
+| `POST` | `/api/v2/academic-periods/{period}/copy-structure` | Copy academic structure |
+| `POST` | `/api/v2/academic-periods/{period}/correction-sessions` | Create correction session |
+| `POST` | `/api/v2/academic-periods/{period}/restore-roster` | Restore historical roster |
+| `POST` | `/api/v2/academic-periods/{period}/schedule-decision` | Save schedule decision |
+| `POST` | `/api/v2/attendance-settings` | Save attendance settings |
+| `POST` | `/api/v2/attendance/scanner/bulk` | Store scanner events in bulk |
+| `POST` | `/api/v2/attendance/scanner/temp` | Store temporary scanner event |
+| `POST` | `/api/v2/certificate-templates` | Create certificate template |
+| `POST` | `/api/v2/certificates` | Create certificate |
+| `POST` | `/api/v2/jam-kosong` | Create free-period record |
+| `POST` | `/api/v2/organizations` | Create organization |
+| `POST` | `/api/v2/organizations/{organization}/members` | Add organization member |
+| `POST` | `/api/v2/profile/provision` | Provision profile |
+| `POST` | `/api/v2/quiz-questions` | Create quiz question |
+| `POST` | `/api/v2/quizzes` | Create quiz |
+| `POST` | `/api/v2/quizzes/grade-by-user` | Grade quiz by user |
+| `POST` | `/api/v2/school-structure` | Create school structure |
+| `POST` | `/api/v2/subjects` | Create subject |
+| `PUT` | `/api/v2/certificate-templates/{template}` | Replace certificate template |
+| `PUT` | `/api/v2/certificates/{certificate}` | Replace certificate |
+| `PUT` | `/api/v2/classes/{class}/structure` | Replace class structure |
+| `PUT` | `/api/v2/organizations/{organization}` | Replace organization |
+| `PUT` | `/api/v2/organizations/{organization}/members/{member}` | Replace organization member |
+| `PUT` | `/api/v2/school-structure/{school_structure}` | Replace school structure |
+| `PUT` | `/api/v2/subjects/{subject}` | Replace subject |
+
+## Observability and Phase 5 Follow-up Routes
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/api/ready` | Readiness probe with safe dependency status |
+| `DELETE` | `/api/v2/quiz-questions/{question}` | Delete quiz question |
+| `GET` | `/api/v2/quizzes/{quiz}` | Get quiz detail |
+| `GET` | `/api/v2/quizzes/{quiz}/attempts/{attempt}` | Get quiz attempt |
+| `GET` | `/api/v2/quizzes/{quiz}/participants` | List quiz participants |
+| `GET` | `/api/v2/quizzes/{quiz}/questions` | List quiz questions |
+| `GET` | `/api/v2/quizzes/{quiz}/retake-history` | Get quiz retake history |
+| `GET` | `/api/v2/reports/attendance-summary` | Get attendance summary |
+| `GET` | `/api/v2/reports/homeroom-options` | Get homeroom report options |
+| `GET` | `/api/v2/reports/homeroom-summary` | Get homeroom summary |
+| `GET` | `/api/v2/reports/quiz-summary` | Get quiz summary |
+| `GET` | `/api/v2/reports/task-summary` | Get task summary |
+| `GET` | `/api/v2/reports/teacher-summary` | Get teacher summary |
+| `PATCH` | `/api/v2/quiz-questions/{question}` | Update quiz question |
+| `POST` | `/api/v2/quiz-presence/ping` | Record quiz presence ping |
+| `POST` | `/api/v2/quizzes/clone` | Clone quiz |
+| `POST` | `/api/v2/quizzes/{quiz}/archive` | Archive quiz |
+| `POST` | `/api/v2/quizzes/{quiz}/attempts/start` | Start quiz attempt |
+| `POST` | `/api/v2/quizzes/{quiz}/attempts/{attempt}/answer` | Save quiz answer |
+| `POST` | `/api/v2/quizzes/{quiz}/attempts/{attempt}/answers/batch` | Save quiz answers in batch |
+| `POST` | `/api/v2/quizzes/{quiz}/attempts/{attempt}/essay/complete` | Complete quiz essay attempt |
+| `POST` | `/api/v2/quizzes/{quiz}/attempts/{attempt}/essay/grade` | Grade quiz essay attempt |
+| `POST` | `/api/v2/quizzes/{quiz}/attempts/{attempt}/submit` | Submit quiz attempt |
+| `POST` | `/api/v2/quizzes/{quiz}/attempts/{attempt}/violations` | Record quiz violation |
+| `POST` | `/api/v2/quizzes/{quiz}/close` | Close quiz for a specific quiz |
+| `POST` | `/api/v2/quizzes/{quiz}/publish` | Publish a specific quiz |
+| `POST` | `/api/v2/quizzes/{quiz}/retakes` | Create quiz retake |
+| `POST` | `/api/v2/quizzes/{quiz}/retakes/restore` | Restore quiz retake |
+| `POST` | `/api/v2/quizzes/{quiz}/schedule` | Schedule quiz |
+| `PUT` | `/api/v2/report-cards/{student}/items` | Replace report-card items |

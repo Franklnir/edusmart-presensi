@@ -2,9 +2,9 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\Observability\RequestId;
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 
 class EnsureDbGatewayEnabled
@@ -15,16 +15,13 @@ class EnsureDbGatewayEnabled
             return $next($request);
         }
 
-        $requestId = (string) (
-            $request->attributes->get('request_id')
-            ?: $request->header('X-Request-ID')
-            ?: Str::uuid()
-        );
+        $requestId = RequestId::get($request);
 
         return response()->json([
             'success' => false,
             'code' => 'API_DB_DEPRECATED',
             'message' => 'Endpoint ini sudah tidak tersedia.',
+            'details' => [],
             'request_id' => $requestId,
         ], 410)->header('X-Request-ID', $requestId);
     }

@@ -1,5 +1,6 @@
 // src/lib/supabase.js
 import { readAcademicCorrectionSession } from '../utils/academicCorrectionSession'
+import { generateRequestId, isValidRequestId, setLastRequestId } from './api/requestId'
 /* ===================== API BASE ===================== */
 const getRuntimeHostname = () => {
   if (typeof window === 'undefined') return 'localhost'
@@ -245,7 +246,9 @@ const cloneApiResult = (value) => {
   if (typeof structuredClone === 'function') {
     try {
       return structuredClone(value)
-    } catch { }
+    } catch {
+      // structuredClone is optional; JSON cloning below is the compatibility fallback.
+    }
   }
 
   try {
@@ -297,7 +300,9 @@ const readPersistedCacheIndex = (storage) => {
 const writePersistedCacheIndex = (storage, entries) => {
   try {
     storage.setItem(PERSISTED_API_CACHE_INDEX_KEY, JSON.stringify(entries.slice(-MAX_PERSISTED_API_CACHE_ENTRIES)))
-  } catch { }
+  } catch {
+    // Storage failures must not prevent the page from loading.
+  }
 }
 
 const getPersistedApiResponse = (key, options = {}) => {
@@ -364,7 +369,9 @@ const setPersistedApiResponse = (key, value, ttlMs, options = {}) => {
       if (oldest) storage.removeItem(oldest)
     }
     writePersistedCacheIndex(storage, nextIndex)
-  } catch { }
+  } catch {
+    // A cache write failure is non-fatal.
+  }
 }
 
 const clearPersistedApiCache = (matcher = null) => {
@@ -376,7 +383,11 @@ const clearPersistedApiCache = (matcher = null) => {
   for (const key of index) {
     const shouldDelete = typeof matcher === 'function' ? matcher(key) : true
     if (shouldDelete) {
-      try { storage.removeItem(key) } catch { }
+      try {
+        storage.removeItem(key)
+      } catch {
+        // A stale cache entry can be ignored when storage is unavailable.
+      }
     } else {
       keep.push(key)
     }
@@ -784,7 +795,9 @@ const setAbortReason = (signal, reason) => {
   if (!requestAbortReasons || !signal || !reason) return
   try {
     requestAbortReasons.set(signal, reason)
-  } catch { }
+  } catch {
+    // Abort reasons are advisory and may fail for non-extensible signals.
+  }
 }
 
 const getAbortReason = (signal) => {
@@ -942,7 +955,6 @@ const compressImageToTarget = async (file, maxBytes) => {
     ctx.fillRect(0, 0, width, height)
     ctx.drawImage(img, 0, 0, width, height)
 
-    // eslint-disable-next-line no-await-in-loop
     const blob = await canvasToJpegBlob(canvas, quality)
     if (!blob) break
 
@@ -1017,15 +1029,15 @@ const runApiFetch = async (path, options = {}) => {
     Accept: 'application/json',
     ...(options.headers || {})
   }
+  const requestId = generateRequestId()
+  headers['X-Request-ID'] = requestId
+  headers['X-Frontend-Route'] = typeof window !== 'undefined' ? window.location.pathname : ''
+  if (path === '/api/db' || path === '/api/db/batch') {
+    headers['X-Client-Consumer'] = options.clientConsumer || 'legacy-supabase-adapter'
+  }
 
   if (TENANT_SLUG) {
     headers['X-Tenant'] = TENANT_SLUG
-  }
-
-  if (path === '/api/db' || path === '/api/db/batch') {
-    const frontendRoute = typeof window !== 'undefined' ? window.location?.pathname || '' : ''
-    if (frontendRoute) headers['X-Frontend-Route'] = frontendRoute
-    headers['X-DB-Consumer'] = String(options.dbConsumer || 'legacy-supabase-adapter').slice(0, 128)
   }
 
   const delegatedFeatureKey = typeof window !== 'undefined'
@@ -1077,6 +1089,8 @@ const runApiFetch = async (path, options = {}) => {
   let res
   try {
     res = await runFetch(headers)
+    const responseRequestId = res.headers?.get?.('X-Request-ID')
+    setLastRequestId(isValidRequestId(responseRequestId) ? responseRequestId : requestId)
   } catch (error) {
     if (isAbortError(error)) {
       if (getAbortReason(signal) === 'timeout') {
@@ -1169,7 +1183,9 @@ const runApiFetch = async (path, options = {}) => {
   let json = null
   try {
     json = await res.json()
-  } catch { }
+  } catch {
+    // Some responses do not contain JSON.
+  }
 
   if (!res.ok) {
     if (isTransientApiStatus(res.status)) {
@@ -1190,7 +1206,7 @@ const runApiFetch = async (path, options = {}) => {
 
       return {
         data: null,
-        error: makeError(SESSION_EXPIRED_MESSAGE, res.status, 'SESSION_EXPIRED'),
+        error: makeError(SESSION_EXPIRED_MESSAGE, res.status, 'SESSION_EXPIRED', { requestId }),
         raw: json
       }
     }
@@ -1198,6 +1214,7 @@ const runApiFetch = async (path, options = {}) => {
     return {
       data: null,
       error: makeError(json?.error || json?.message || res.statusText, res.status, json?.code || json?.reason, {
+        requestId,
         retryAfter: json?.retry_after ?? json?.retry_after_seconds ?? null
       }),
       raw: json
@@ -1216,7 +1233,8 @@ const runApiFetch = async (path, options = {}) => {
   return {
     data: json?.data ?? json,
     error: null,
-    raw: json
+    raw: json,
+    requestId
   }
 }
 
@@ -1503,7 +1521,9 @@ const apiUploadFormData = async (path, form, options = {}) => {
     try {
       await ensureCsrf(true)
       result = await uploadOnce()
-    } catch { }
+    } catch {
+      // Retry is best effort; the original upload result is returned.
+    }
   }
 
   return result
@@ -1704,7 +1724,9 @@ export const downloadAuthenticatedFile = async (path, fallbackName = 'download.b
     try {
       const json = await res.json()
       message = json?.error || json?.message || message
-    } catch { }
+    } catch {
+      // Download errors retain the HTTP status message.
+    }
 
     if (isSessionExpiredStatus(res.status) && !shouldIgnoreSessionExpiredHandling(path)) {
       notifySessionExpired({
@@ -3680,6 +3702,8 @@ const superApi = createLazyRoleApi(() => import('./superApi'), 'super')
 
 /* ===================== MAIN CLIENT ===================== */
 export const supabase = {
+  // Temporary compatibility rollback while the remaining consumers migrate to
+  // their domain V2 endpoints. The route is intentionally release-blocked.
   from: (table) => new QueryBuilder(table),
   batch: dbBatch,
   invalidateCache: invalidateDbSelectCache,

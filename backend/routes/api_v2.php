@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V2\CurrentProfileController;
 use App\Http\Controllers\Api\V2\FrontendLogController;
 use App\Http\Controllers\Api\V2\GradeController;
 use App\Http\Controllers\Api\V2\OrganizationContextController;
+use App\Http\Controllers\Api\V2\ReportCardController;
 use App\Http\Controllers\Api\V2\QuizAttemptController;
 use App\Http\Controllers\Api\V2\QuizController;
 use App\Http\Controllers\Api\V2\QuizPresenceController;
@@ -22,6 +23,8 @@ use App\Http\Controllers\Api\V2\ScheduleController;
 use App\Http\Controllers\Api\V2\StudentController;
 use App\Http\Controllers\Api\V2\SubmissionController;
 use App\Http\Controllers\Api\V2\TeacherController;
+use App\Http\Controllers\Api\V2\TeacherDashboardController;
+use App\Http\Controllers\Api\V2\TeacherReportController;
 use App\Http\Controllers\Api\V2\UploadController;
 use Illuminate\Support\Facades\Route;
 
@@ -43,7 +46,7 @@ Route::post('/frontend-logs', [FrontendLogController::class, 'store'])
 Route::middleware('throttle:api')->group(function () {
     Route::get('/frontend-logs', [FrontendLogController::class, 'index']);
     Route::get('/academic-context', [AcademicContextController::class, 'show'])->name('academic-context.show');
-    Route::get('/organizations', [OrganizationContextController::class, 'show'])->name('organizations.show');
+    Route::get('/organization-context', [OrganizationContextController::class, 'show'])->name('organization-context.show');
     Route::get('/profile', [CurrentProfileController::class, 'show'])->name('profile.show');
     Route::post('/profile/provision', [CurrentProfileController::class, 'provision'])->name('profile.provision');
     Route::patch('/profile', [CurrentProfileController::class, 'update'])->name('profile.update');
@@ -82,14 +85,15 @@ Route::middleware('throttle:api')->group(function () {
     Route::get('attachments/{attachment}/download', [AttachmentController::class, 'download'])->name('attachments.download');
     Route::delete('attachments/{attachment}', [AttachmentController::class, 'destroy'])->name('attachments.destroy');
 
-    Route::get('report-cards', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'index'])->name('report-cards.index');
-    Route::get('report-cards/{student}', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'show'])->name('report-cards.show');
-    Route::get('report-cards/{student}/preview', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'preview'])->name('report-cards.preview');
-    Route::put('report-cards/{student}/metadata', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'updateMetadata'])->name('report-cards.metadata.update');
-    Route::post('report-cards/{student}/finalize', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'finalize'])->name('report-cards.finalize');
-    Route::post('report-cards/{student}/publish', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'publish'])->name('report-cards.publish');
-    Route::post('report-cards/{student}/reopen', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'reopen'])->name('report-cards.reopen');
-    Route::get('report-cards/{student}/print', [\App\Http\Controllers\Api\V2\ReportCardController::class, 'print'])->name('report-cards.print');
+    Route::get('report-cards', [ReportCardController::class, 'index'])->name('report-cards.index');
+    Route::get('report-cards/{student}', [ReportCardController::class, 'show'])->name('report-cards.show');
+    Route::get('report-cards/{student}/preview', [ReportCardController::class, 'preview'])->name('report-cards.preview');
+    Route::put('report-cards/{student}/metadata', [ReportCardController::class, 'updateMetadata'])->name('report-cards.metadata.update');
+    Route::put('report-cards/{student}/items', [ReportCardController::class, 'upsertItem'])->name('report-cards.items.upsert');
+    Route::post('report-cards/{student}/finalize', [ReportCardController::class, 'finalize'])->name('report-cards.finalize');
+    Route::post('report-cards/{student}/publish', [ReportCardController::class, 'publish'])->name('report-cards.publish');
+    Route::post('report-cards/{student}/reopen', [ReportCardController::class, 'reopen'])->name('report-cards.reopen');
+    Route::get('report-cards/{student}/print', [ReportCardController::class, 'print'])->name('report-cards.print');
 
     // Extracurriculars
     Route::get('extracurriculars', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'index'])->name('extracurriculars.index');
@@ -149,4 +153,12 @@ Route::middleware('throttle:api')->group(function () {
     Route::post('quizzes/{quiz}/retakes', [QuizAttemptController::class, 'retake'])->name('quizzes.retakes.store');
     Route::post('quizzes/{quiz}/retakes/restore', [QuizAttemptController::class, 'restoreRetakeScore'])->name('quizzes.retakes.restore');
     Route::post('quiz-presence/ping', [QuizPresenceController::class, 'ping'])->name('quiz-presence.ping');
+
+    Route::get('reports/homeroom-options', [TeacherReportController::class, 'homeroomOptions'])->name('reports.homeroom-options');
+    Route::get('reports/teacher-summary', [TeacherReportController::class, 'teacherSummary'])->name('reports.teacher-summary');
+    Route::get('reports/attendance-summary', [TeacherReportController::class, 'attendanceSummary'])->name('reports.attendance-summary');
+    Route::get('reports/task-summary', [TeacherReportController::class, 'taskSummary'])->name('reports.task-summary');
+    Route::get('reports/quiz-summary', [TeacherReportController::class, 'quizSummaryEndpoint'])->name('reports.quiz-summary');
+    Route::get('reports/homeroom-summary', [TeacherReportController::class, 'homeroomSummary'])->name('reports.homeroom-summary');
+    Route::get('reports/dashboard-aggregate', [TeacherDashboardController::class, 'dashboardAggregate'])->name('reports.dashboard-aggregate');
 });

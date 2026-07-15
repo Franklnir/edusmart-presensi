@@ -5,6 +5,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Eye,
   FileWarning,
   RefreshCw,
@@ -13,7 +14,6 @@ import {
   TerminalSquare,
   X
 } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
 import { formatDateTime } from '../../lib/time'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -27,6 +27,11 @@ const defaultFilters = () => ({
   level: '',
   endpoint: '',
   q: '',
+  request_id: '',
+  domain: '',
+  route: '',
+  status: '',
+  error_code: '',
   per_page: 20,
   page: 1
 })
@@ -75,20 +80,6 @@ const safeJson = (value) => {
   } catch {
     return String(value)
   }
-}
-
-function PageGate({ superAdminChecked, isSuperAdmin, children }) {
-  if (!superAdminChecked) return <div className="p-6 text-sm text-slate-500">Memuat akses super admin...</div>
-  if (!isSuperAdmin) {
-    return (
-      <div className="p-6">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
-          Halaman ini hanya untuk super admin.
-        </div>
-      </div>
-    )
-  }
-  return children
 }
 
 function StatCard({ label, value, icon: Icon, tone = 'slate', hint }) {
@@ -166,6 +157,12 @@ function DetailModal({ detail, loading, onClose }) {
               {[
                 ['Timestamp', detail?.timestamp ? formatDateTime(detail.timestamp) : '-'],
                 ['Log Level', levelLabel(detail?.level)],
+                ['Request ID', detail?.request_id || '-'],
+                ['Correlation ID', detail?.correlation_id || '-'],
+                ['Domain', detail?.domain || '-'],
+                ['Route', detail?.route_name || '-'],
+                ['HTTP Status', detail?.response_status ?? '-'],
+                ['Error Code', detail?.error_code || '-'],
                 ['Request URL', detail?.endpoint || '-'],
                 ['HTTP Method', detail?.method || '-'],
                 ['User ID', detail?.user || '-'],
@@ -179,6 +176,16 @@ function DetailModal({ detail, loading, onClose }) {
                 </div>
               ))}
             </div>
+
+            {detail?.request_id && detail.request_id !== '-' ? (
+              <button
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(detail.request_id).catch(() => {})}
+                className="mt-4 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50"
+              >
+                <Copy size={14} /> Salin Request ID
+              </button>
+            ) : null}
 
             <section className="mt-4 rounded-2xl border border-slate-100 bg-white p-4">
               <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Error Message</p>
@@ -204,7 +211,7 @@ function DetailModal({ detail, loading, onClose }) {
 }
 
 export default function MonitorLog() {
-  const { isAuthorized, user } = useAuthStore()
+  const { isAuthorized } = useAuthStore()
   const { pushToast } = useUIStore()
   const [rows, setRows] = useState([])
   const [summary, setSummary] = useState({ errors: 0, warnings: 0, critical: 0, total: 0 })
@@ -381,7 +388,7 @@ export default function MonitorLog() {
             </label>
             <label className="space-y-1.5">
               <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Endpoint</span>
-              <input id="log-endpoint" name="endpoint" list="log-endpoint-options" value={filters.endpoint} onChange={updateFilter('endpoint')} placeholder="/api/db" className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400" />
+              <input id="log-endpoint" name="endpoint" list="log-endpoint-options" value={filters.endpoint} onChange={updateFilter('endpoint')} placeholder="/api/v2/..." className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400" />
               <datalist id="log-endpoint-options">
                 {(options.endpoints || []).map((endpoint) => <option key={endpoint} value={endpoint} />)}
               </datalist>
@@ -390,6 +397,18 @@ export default function MonitorLog() {
               <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Keyword</span>
               <input id="log-keyword" name="q" value={filters.q} onChange={updateFilter('q')} placeholder="Cari pesan/user/file" className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400" />
             </label>
+            {[
+              ['request_id', 'Request ID', 'UUID request'],
+              ['domain', 'Domain', 'reports, grades, auth'],
+              ['route', 'Route', 'Halaman atau route'],
+              ['status', 'Status', '401, 404, 500'],
+              ['error_code', 'Error Code', 'Kode error']
+            ].map(([key, label, placeholder]) => (
+              <label key={key} className="space-y-1.5">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
+                <input id={`log-${key}`} name={key} value={filters[key]} onChange={updateFilter(key)} placeholder={placeholder} className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400" />
+              </label>
+            ))}
             <div className="flex items-end gap-2">
               <button type="submit" className="h-12 flex-1 rounded-2xl bg-indigo-600 px-4 text-sm font-black text-white shadow-sm hover:bg-indigo-700">
                 Terapkan

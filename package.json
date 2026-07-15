@@ -7,7 +7,7 @@
     "dev": "vite",
     "local:start": "powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1",
     "lint": "eslint .",
-    "lint:legacy": "./scripts/check-legacy-db.sh",
+    "lint:legacy": "node scripts/check-legacy-consumers.mjs",
     "test": "vitest run",
     "build": "node --max-old-space-size=4096 ./node_modules/vite/bin/vite.js build",
     "preview": "vite preview",
@@ -17,6 +17,7 @@
     "security:audit:full": "npm audit",
     "audit:api-db-legacy": "node scripts/audit-api-db-legacy.mjs",
     "audit:schedules-v2": "node scripts/audit-schedules-v2.mjs",
+    "audit:staging-flags": "node scripts/check-staging-flags.mjs",
     "smoke:public": "node scripts/smoke/public-site-smoke.mjs"
   },
   "engines": {

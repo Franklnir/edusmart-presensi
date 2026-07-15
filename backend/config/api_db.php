@@ -12,4 +12,9 @@ return [
     |
     */
     'enabled' => filter_var(env('API_DB_ENABLED', true), FILTER_VALIDATE_BOOL),
+
+    'allowed_consumers' => array_values(array_filter(array_map(
+        static fn (string $consumer): string => trim($consumer),
+        explode(',', (string) env('API_DB_ALLOWED_CONSUMERS', 'legacy-supabase-adapter,admin-class-page'))
+    ))),
 ];

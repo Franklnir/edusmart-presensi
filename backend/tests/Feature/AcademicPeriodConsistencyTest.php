@@ -160,55 +160,65 @@ class AcademicPeriodConsistencyTest extends TestCase
         $student = $this->createUserWithProfile($tenantId, 'siswa', 'student-manual-score-term@example.com', 'X-A');
         $this->seedClass($tenantId, 'X-A');
 
+        DB::table('jadwal')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'kelas_id' => 'X-A',
+            'hari' => 'Senin',
+            'mapel' => 'Matematika',
+            'guru_id' => $teacher->id,
+            'guru_nama' => 'Guru Nilai',
+            'jam_mulai' => '07:00:00',
+            'jam_selesai' => '08:00:00',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
         $payload = [
-            'table' => 'guru_mapel_manual_nilai',
-            'action' => 'upsert',
-            'onConflict' => 'tenant_id,guru_id,siswa_id,kelas_id,mapel,tahun_ajaran,semester',
-            'payload' => [
-                'id' => (string) Str::uuid(),
-                'siswa_id' => $student->id,
-                'kelas_id' => 'X-A',
-                'mapel' => 'Matematika',
-                'tahun_ajaran' => '2026/2027',
-                'nilai_manual' => 81,
-                'nilai_uts_manual' => 78,
-                'nilai_uas_manual' => 84,
-            ],
+            'siswa_id' => $student->id,
+            'kelas_id' => 'X-A',
+            'mapel' => 'Matematika',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            'nilai_manual' => 81,
+            'nilai_uts_manual' => 78,
+            'nilai_uas_manual' => 84,
         ];
 
-        $spoofedPayload = $payload;
-        $spoofedPayload['payload']['semester'] = AcademicPeriod::SEMESTER_GENAP;
         $this->actingAs($teacher)
-            ->postJson('/api/db', $spoofedPayload)
+            ->withHeader('X-Tenant', 'default')
+            ->withHeader('Idempotency-Key', 'academic-manual-score-ganjil')
+            ->putJson('/api/v2/grades/manual-scores', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.semester', AcademicPeriod::SEMESTER_GANJIL);
+
+        $this->actingAs($teacher)
+            ->withHeader('X-Tenant', 'default')
+            ->withHeader('Idempotency-Key', 'academic-manual-score-archive')
+            ->putJson('/api/v2/grades/manual-scores', [
+                ...$payload,
+                'semester' => AcademicPeriod::SEMESTER_GENAP,
+            ])
             ->assertStatus(409)
-            ->assertJsonPath('code', 'ACADEMIC_PERIOD_LOCKED');
-
-        $this->actingAs($teacher)->postJson('/api/db', $payload)->assertOk();
-
-        $invalidPayload = $payload;
-        $invalidPayload['payload']['id'] = (string) Str::uuid();
-        $invalidPayload['payload']['nilai_uts_manual'] = 101;
-        $this->actingAs($teacher)
-            ->postJson('/api/db', $invalidPayload)
-            ->assertStatus(422);
-
-        $ganjilRow = DB::table('guru_mapel_manual_nilai')
-            ->where('tenant_id', $tenantId)
-            ->where('guru_id', $teacher->id)
-            ->where('siswa_id', $student->id)
-            ->first();
-        $this->assertSame(AcademicPeriod::SEMESTER_GANJIL, $ganjilRow?->semester);
+            ->assertJsonPath('code', 'academic_period_locked');
 
         DB::table('settings')
             ->where('tenant_id', $tenantId)
             ->update(['semester_aktif' => AcademicPeriod::SEMESTER_GENAP, 'updated_at' => now()]);
 
-        $genapPayload = $payload;
-        $genapPayload['payload']['id'] = (string) Str::uuid();
-        $genapPayload['payload']['nilai_manual'] = 88;
-        $genapPayload['payload']['nilai_uts_manual'] = 86;
-        $genapPayload['payload']['nilai_uas_manual'] = 92;
-        $this->actingAs($teacher)->postJson('/api/db', $genapPayload)->assertOk();
+        $this->actingAs($teacher)
+            ->withHeader('X-Tenant', 'default')
+            ->withHeader('Idempotency-Key', 'academic-manual-score-genap')
+            ->putJson('/api/v2/grades/manual-scores', [
+                ...$payload,
+                'semester' => AcademicPeriod::SEMESTER_GENAP,
+                'nilai_manual' => 88,
+                'nilai_uts_manual' => 86,
+                'nilai_uas_manual' => 92,
+            ])
+            ->assertOk();
 
         $rows = DB::table('guru_mapel_manual_nilai')
             ->where('tenant_id', $tenantId)
@@ -254,26 +264,24 @@ class AcademicPeriodConsistencyTest extends TestCase
         ]);
 
         $payload = [
-            'table' => 'guru_mapel_bobot',
-            'action' => 'upsert',
-            'onConflict' => 'tenant_id,guru_id,mapel,tahun_ajaran,semester',
-            'payload' => [
-                'id' => (string) Str::uuid(),
-                'mapel' => 'Matematika',
-                'tahun_ajaran' => '2026/2027',
-                'semester' => AcademicPeriod::SEMESTER_GANJIL,
-                'bobot_tugas_pr' => 25,
-                'bobot_quiz_reguler' => 15,
-                'bobot_quiz_uts' => 20,
-                'bobot_quiz_uas' => 30,
-                'sumber_uts' => 'manual',
-                'sumber_uas' => 'manual',
-                'jenis_manual' => 'nilai_tambah',
-                'label_manual' => null,
-            ],
+            'mapel' => 'Matematika',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            'bobot_tugas_pr' => 25,
+            'bobot_quiz_reguler' => 15,
+            'bobot_quiz_uts' => 20,
+            'bobot_quiz_uas' => 30,
+            'sumber_uts' => 'manual',
+            'sumber_uas' => 'manual',
+            'jenis_manual' => 'nilai_tambah',
+            'label_manual' => null,
         ];
 
-        $this->actingAs($teacher)->postJson('/api/db', $payload)->assertOk();
+        $this->actingAs($teacher)
+            ->withHeader('X-Tenant', 'default')
+            ->withHeader('Idempotency-Key', 'academic-weight-ganjil')
+            ->putJson('/api/v2/grades/weights', $payload)
+            ->assertOk();
 
         $ganjilRow = DB::table('guru_mapel_bobot')
             ->where('tenant_id', $tenantId)
@@ -285,13 +293,13 @@ class AcademicPeriodConsistencyTest extends TestCase
         $this->assertSame('manual', $ganjilRow?->sumber_uas);
         $this->assertSame('nilai_tambah', $ganjilRow?->jenis_manual);
 
-        $archivePayload = $payload;
-        $archivePayload['payload']['id'] = (string) Str::uuid();
-        $archivePayload['payload']['semester'] = AcademicPeriod::SEMESTER_GENAP;
+        $archivePayload = [...$payload, 'semester' => AcademicPeriod::SEMESTER_GENAP];
         $this->actingAs($teacher)
-            ->postJson('/api/db', $archivePayload)
+            ->withHeader('X-Tenant', 'default')
+            ->withHeader('Idempotency-Key', 'academic-weight-archive')
+            ->putJson('/api/v2/grades/weights', $archivePayload)
             ->assertStatus(409)
-            ->assertJsonPath('code', 'ACADEMIC_PERIOD_LOCKED');
+            ->assertJsonPath('code', 'academic_period_locked');
     }
 
     public function test_promoted_student_reads_previous_year_schedule_tasks_and_quiz_only_for_historical_class(): void
@@ -560,7 +568,7 @@ class AcademicPeriodConsistencyTest extends TestCase
         ]);
     }
 
-    public function test_archive_mutation_requires_scoped_correction_session_and_is_tenant_isolated(): void
+    public function test_archive_mutation_is_blocked_at_legacy_boundary_and_remains_tenant_scoped(): void
     {
         $tenantId = $this->defaultTenantId();
         $this->seedSettings($tenantId, '2026/2027', AcademicPeriod::SEMESTER_GANJIL);
@@ -585,117 +593,11 @@ class AcademicPeriodConsistencyTest extends TestCase
             'filters' => ['eq' => ['id' => $taskId, 'tahun_ajaran' => '2025/2026']],
             'payload' => ['judul' => 'Tidak Boleh Berubah'],
         ]);
-        $locked->assertStatus(409)->assertJsonPath('code', 'ACADEMIC_PERIOD_LOCKED');
-
-        $periods = $this->actingAs($admin)->getJson('/api/admin/academic-periods');
-        $periods->assertOk();
-        $archivedTerm = collect($periods->json('data.years') ?? [])
-            ->firstWhere('label', '2025/2026')['terms'][1] ?? null;
-        $this->assertIsArray($archivedTerm);
-
-        $session = $this->actingAs($admin)->postJson('/api/admin/academic-periods/correction-sessions', [
-            'academic_term_id' => $archivedTerm['id'],
-            'reason' => 'Memperbaiki judul tugas arsip berdasarkan berita acara sekolah.',
-            'allowed_scopes' => ['tugas'],
-            'duration_minutes' => 30,
-        ]);
-        $session->assertCreated();
-        $sessionId = (string) $session->json('data.id');
-        $this->assertNotSame('', $sessionId);
-
-        $updated = $this->actingAs($admin)
-            ->withHeader('X-Academic-Correction-Session', $sessionId)
-            ->postJson('/api/db', [
-                'table' => 'tugas',
-                'action' => 'update',
-                'filters' => [
-                    'eq' => [
-                        'id' => $taskId,
-                        'tahun_ajaran' => '2025/2026',
-                        'semester' => AcademicPeriod::SEMESTER_GENAP,
-                    ],
-                ],
-                'payload' => ['judul' => 'Judul Arsip Terkoreksi'],
-            ]);
-        $updated->assertOk();
-        $this->assertDatabaseHas('tugas', ['id' => $taskId, 'judul' => 'Judul Arsip Terkoreksi']);
-
-        $audit = DB::table('audit_log')
-            ->where('tenant_id', $tenantId)
-            ->where('table_name', 'tugas')
-            ->where('action', 'UPDATE')
-            ->latest('timestamp')
-            ->first();
-        $this->assertNotNull($audit);
-        $auditAfter = json_decode((string) $audit->new_data, true);
-        $this->assertSame('correction', $auditAfter['academic_context']['mode'] ?? null);
-        $this->assertSame($sessionId, $auditAfter['academic_context']['correction_session_id'] ?? null);
-        $this->assertSame(
-            'Memperbaiki judul tugas arsip berdasarkan berita acara sekolah.',
-            $auditAfter['academic_context']['reason'] ?? null
-        );
-
-        DB::table('academic_correction_sessions')->where('id', $sessionId)->update([
-            'expires_at' => now()->subMinute(),
-        ]);
-        $this->actingAs($admin)
-            ->withHeader('X-Academic-Correction-Session', $sessionId)
-            ->postJson('/api/db', [
-                'table' => 'tugas',
-                'action' => 'update',
-                'filters' => ['eq' => ['id' => $taskId]],
-                'payload' => ['judul' => 'Tidak Boleh Setelah Kedaluwarsa'],
-            ])
-            ->assertStatus(409)
-            ->assertJsonPath('code', 'ACADEMIC_CORRECTION_SESSION_INVALID');
-        $this->assertDatabaseHas('academic_correction_sessions', ['id' => $sessionId, 'status' => 'expired']);
-        $this->assertDatabaseHas('tugas', ['id' => $taskId, 'judul' => 'Judul Arsip Terkoreksi']);
-
-        $otherTenantId = (string) Str::uuid();
-        DB::table('tenants')->insert([
-            'id' => $otherTenantId,
-            'name' => 'Tenant Lain',
-            'slug' => 'tenant-lain',
-            'status' => 'active',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-        $otherTermId = (string) DB::table('academic_terms')
-            ->where('tenant_id', $otherTenantId)
-            ->value('id');
-        if ($otherTermId === '') {
-            $otherYearId = (string) Str::uuid();
-            $otherTermId = (string) Str::uuid();
-            DB::table('academic_years')->insert([
-                'id' => $otherYearId,
-                'tenant_id' => $otherTenantId,
-                'label' => '2025/2026',
-                'starts_at' => '2025-07-01',
-                'ends_at' => '2026-06-30',
-                'status' => 'closed',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-            DB::table('academic_terms')->insert([
-                'id' => $otherTermId,
-                'tenant_id' => $otherTenantId,
-                'academic_year_id' => $otherYearId,
-                'semester' => AcademicPeriod::SEMESTER_GENAP,
-                'starts_at' => '2026-01-01',
-                'ends_at' => '2026-06-30',
-                'status' => 'closed',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-        }
-
-        $this->actingAs($admin)
-            ->postJson('/api/admin/academic-periods/correction-sessions', [
-                'academic_term_id' => $otherTermId,
-                'reason' => 'Percobaan akses periode milik tenant lain harus ditolak.',
-                'allowed_scopes' => ['tugas'],
-            ])
-            ->assertNotFound();
+        $locked
+            ->assertStatus(410)
+            ->assertJsonPath('code', 'DB_LEGACY_WRITE_BLOCKED')
+            ->assertHeader('X-Request-ID', $locked->json('request_id'));
+        $this->assertDatabaseHas('tugas', ['id' => $taskId, 'judul' => 'Judul Arsip']);
     }
 
     public function test_closed_period_cannot_be_reactivated_and_term_ranges_cannot_overlap(): void
@@ -772,7 +674,7 @@ class AcademicPeriodConsistencyTest extends TestCase
         $read->assertOk();
         $this->assertSame([], $read->json('data'));
 
-        $this->actingAs($admin)->postJson('/api/db', [
+        $write = $this->actingAs($admin)->postJson('/api/db', [
             'table' => 'tugas',
             'action' => 'insert',
             'payload' => [
@@ -781,11 +683,12 @@ class AcademicPeriodConsistencyTest extends TestCase
                 'judul' => 'Tetap Milik Tenant A',
                 'mapel' => 'Biologi',
             ],
-        ])->assertOk();
-        $this->assertDatabaseHas('tugas', [
-            'tenant_id' => $tenantId,
-            'judul' => 'Tetap Milik Tenant A',
         ]);
+        $write
+            ->assertStatus(410)
+            ->assertJsonPath('code', 'DB_LEGACY_WRITE_BLOCKED')
+            ->assertHeader('X-Request-ID', $write->json('request_id'));
+        $this->assertDatabaseMissing('tugas', ['judul' => 'Tetap Milik Tenant A']);
         $this->assertDatabaseMissing('tugas', [
             'tenant_id' => $otherTenantId,
             'judul' => 'Tetap Milik Tenant A',

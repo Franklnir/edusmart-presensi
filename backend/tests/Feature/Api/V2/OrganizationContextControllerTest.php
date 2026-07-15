@@ -29,7 +29,7 @@ class OrganizationContextControllerTest extends TestCase
     public function test_context_requires_authentication(): void
     {
         $this->withHeaders($this->tenantHeaders('tenant-a'))
-            ->getJson('/api/v2/organizations')
+            ->getJson('/api/v2/organization-context')
             ->assertUnauthorized();
     }
 
@@ -69,7 +69,7 @@ class OrganizationContextControllerTest extends TestCase
         Sanctum::actingAs($guru);
 
         $this->withHeaders($this->tenantHeaders('tenant-a'))
-            ->getJson('/api/v2/organizations')
+            ->getJson('/api/v2/organization-context')
             ->assertOk()
             ->assertJsonPath('success', true)
             ->assertJsonPath('data.organization.name', 'SMA A')

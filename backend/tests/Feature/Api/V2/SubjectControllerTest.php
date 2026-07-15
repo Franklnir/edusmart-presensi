@@ -21,17 +21,17 @@ class SubjectControllerTest extends TestCase
     {
         parent::setUp();
         
-        DB::table('tenants')->insert(['id' => 'tenant-1', 'slug' => 'testschool', 'name' => 'Test School']);
-        $this->tenantId = 'tenant-1';
+        $this->tenantId = (string) DB::table('tenants')->where('slug', 'default')->value('id');
 
         $this->adminUser = User::factory()->create(['id' => (string) \Illuminate\Support\Str::uuid()]);
-        $this->adminProfile = Profile::create([
+        DB::table('profiles')->insert([
             'id' => $this->adminUser->id,
             'tenant_id' => $this->tenantId,
             'nama' => 'Admin Test',
             'email' => $this->adminUser->email,
             'role' => 'admin',
         ]);
+        $this->adminProfile = Profile::find($this->adminUser->id);
         
         // Setup academic setting
         DB::table('settings')->insert([
@@ -49,17 +49,17 @@ class SubjectControllerTest extends TestCase
         ]);
 
         $response = $this->actingAs($this->adminUser)
-            ->withHeader('X-Tenant', 'testschool')
+            ->withHeader('X-Tenant', 'default')
             ->getJson('/api/v2/subjects');
 
-        dump($response->getContent()); $response->assertStatus(200)
+        $response->assertStatus(200)
             ->assertJsonCount(2, 'data');
     }
 
     public function test_can_create_subject()
     {
         $response = $this->actingAs($this->adminUser)
-            ->withHeader('X-Tenant', 'testschool')
+            ->withHeader('X-Tenant', 'default')
             ->postJson('/api/v2/subjects', [
                 'nama' => 'Fisika Dasar'
             ]);

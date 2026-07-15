@@ -19,6 +19,7 @@ use App\Policies\ProfilePolicy;
 use App\Policies\SettingPolicy;
 use App\Policies\TugasJawabanPolicy;
 use App\Policies\TugasPolicy;
+use App\Services\Observability\QueueObservability;
 use App\Services\StagingIsolationGuard;
 use App\Services\Storage\LocalFakeUploadStorageProvider;
 use App\Services\Storage\S3CompatibleUploadStorageProvider;
@@ -58,6 +59,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->app->make(StagingIsolationGuard::class)->assertSafe();
+        $this->app->make(QueueObservability::class)->register();
 
         $clampInt = static fn (string $key, int $default, int $min, int $max): int => max(
             $min,

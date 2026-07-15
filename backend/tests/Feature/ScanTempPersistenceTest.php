@@ -27,36 +27,39 @@ class ScanTempPersistenceTest extends TestCase
 
         $this->actingAs($adminA)
             ->withHeader('X-Tenant', 'sma-bali')
-            ->postJson('/api/db', $this->scanTempUpsertPayload([
+            ->postJson('/api/v2/attendance/scanner/temp', $this->scanTempPayload([
                 'siswa_id' => $studentA->id,
                 'kelas' => 'XI-A',
                 'card_uid' => 'AAAA1111',
                 'scan_at' => '2026-05-03T07:00:00+07:00',
+                'idempotency_key' => 'scan-bali-1',
             ]))
-            ->assertOk()
-            ->assertJsonPath('data.0.card_uid', 'AAAA1111');
+            ->assertCreated()
+            ->assertJsonPath('success', true);
 
         $this->actingAs($adminA)
             ->withHeader('X-Tenant', 'sma-bali')
-            ->postJson('/api/db', $this->scanTempUpsertPayload([
+            ->postJson('/api/v2/attendance/scanner/temp', $this->scanTempPayload([
                 'siswa_id' => $studentA->id,
                 'kelas' => 'XI-A',
                 'card_uid' => 'BBBB2222',
                 'scan_at' => '2026-05-03T07:05:00+07:00',
+                'idempotency_key' => 'scan-bali-2',
             ]))
-            ->assertOk()
-            ->assertJsonPath('data.0.card_uid', 'BBBB2222');
+            ->assertCreated()
+            ->assertJsonPath('success', true);
 
         $this->actingAs($adminB)
             ->withHeader('X-Tenant', 'sma-lombok')
-            ->postJson('/api/db', $this->scanTempUpsertPayload([
+            ->postJson('/api/v2/attendance/scanner/temp', $this->scanTempPayload([
                 'siswa_id' => $studentB->id,
                 'kelas' => 'XI-A',
                 'card_uid' => 'CCCC3333',
                 'scan_at' => '2026-05-03T07:00:00+07:00',
+                'idempotency_key' => 'scan-lombok-1',
             ]))
-            ->assertOk()
-            ->assertJsonPath('data.0.card_uid', 'CCCC3333');
+            ->assertCreated()
+            ->assertJsonPath('success', true);
 
         $this->assertSame(1, DB::table('absensi_scan_temp')
             ->where('tenant_id', $tenantA->id)
@@ -100,23 +103,18 @@ class ScanTempPersistenceTest extends TestCase
             ->assertJsonPath('data.0.card_uid', 'BBBB2222');
     }
 
-    private function scanTempUpsertPayload(array $overrides): array
+    private function scanTempPayload(array $overrides): array
     {
-        return [
-            'table' => 'absensi_scan_temp',
-            'action' => 'upsert',
-            'payload' => array_merge([
-                'tanggal' => '2026-05-03',
-                'siswa_id' => null,
-                'kelas' => 'XI-A',
-                'sesi' => 'masuk',
-                'scan_at' => '2026-05-03T07:00:00+07:00',
-                'mapel_count' => 6,
-                'source' => 'web_admin',
-                'card_uid' => 'AAAA1111',
-            ], $overrides),
-            'onConflict' => 'tanggal,siswa_id,sesi',
-        ];
+        return array_merge([
+            'tanggal' => '2026-05-03',
+            'siswa_id' => null,
+            'kelas' => 'XI-A',
+            'sesi' => 'masuk',
+            'scan_at' => '2026-05-03T07:00:00+07:00',
+            'mapel_count' => 6,
+            'source' => 'web_admin',
+            'card_uid' => 'AAAA1111',
+        ], $overrides);
     }
 
     private function createTenant(string $slug): object

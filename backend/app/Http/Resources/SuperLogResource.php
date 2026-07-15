@@ -22,6 +22,16 @@ class SuperLogResource extends JsonResource
             'line' => $this->resource['line'] ?? null,
             'stack_trace' => $this->resource['stack_trace'] ?? '',
             'context' => $this->resource['context'] ?? [],
+            'request_id' => $this->resource['request_id'] ?? '-',
+            'correlation_id' => $this->resource['correlation_id'] ?? '-',
+            'domain' => $this->resource['domain'] ?? '-',
+            'route_name' => $this->resource['route_name'] ?? '-',
+            'response_status' => $this->resource['response_status'] ?? null,
+            'duration_ms' => $this->resource['duration_ms'] ?? null,
+            'error_code' => $this->resource['error_code'] ?? '-',
+            'tenant_id' => $this->resource['tenant_id'] ?? '-',
+            'actor_id' => $this->resource['actor_id'] ?? '-',
+            'release_sha' => $this->resource['release_sha'] ?? '-',
         ];
     }
 }

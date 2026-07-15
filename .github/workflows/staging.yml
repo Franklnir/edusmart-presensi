@@ -81,6 +81,8 @@ jobs:
           npm ci --legacy-peer-deps
           npm audit --audit-level=high
           npm run test
+          npm run lint:legacy
+          npm run audit:staging-flags
           npm run build
 
   build:
@@ -101,6 +103,11 @@ jobs:
       STAGING_USE_ASSIGNMENTS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENTS_API_V2 || 'false' }}
       STAGING_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
       STAGING_USE_SCHEDULES_API_V2: ${{ vars.STAGING_USE_SCHEDULES_API_V2 || 'false' }}
+      STAGING_USE_CLASSES_API_V2: ${{ vars.STAGING_USE_CLASSES_API_V2 || 'false' }}
+      STAGING_USE_ATTENDANCE_API_V2: ${{ vars.STAGING_USE_ATTENDANCE_API_V2 || 'false' }}
+      STAGING_USE_ANNOUNCEMENTS_API_V2: ${{ vars.STAGING_USE_ANNOUNCEMENTS_API_V2 || 'false' }}
+      STAGING_USE_GRADES_API_V2: ${{ vars.STAGING_USE_GRADES_API_V2 || 'true' }}
+      STAGING_USE_REPORT_CARDS_API_V2: ${{ vars.STAGING_USE_REPORT_CARDS_API_V2 || 'true' }}
     steps:
       - name: Checkout selected release
         uses: actions/checkout@v4
@@ -177,6 +184,11 @@ jobs:
             --build-arg VITE_USE_ASSIGNMENTS_API_V2="$STAGING_USE_ASSIGNMENTS_API_V2" \
             --build-arg VITE_USE_ASSIGNMENT_UPLOADS_API_V2="$STAGING_USE_ASSIGNMENT_UPLOADS_API_V2" \
             --build-arg VITE_USE_SCHEDULES_API_V2="$STAGING_USE_SCHEDULES_API_V2" \
+            --build-arg VITE_USE_CLASSES_API_V2="$STAGING_USE_CLASSES_API_V2" \
+            --build-arg VITE_USE_ATTENDANCE_API_V2="$STAGING_USE_ATTENDANCE_API_V2" \
+            --build-arg VITE_USE_ANNOUNCEMENTS_API_V2="$STAGING_USE_ANNOUNCEMENTS_API_V2" \
+            --build-arg VITE_USE_GRADES_API_V2="$STAGING_USE_GRADES_API_V2" \
+            --build-arg VITE_USE_REPORT_CARDS_API_V2="$STAGING_USE_REPORT_CARDS_API_V2" \
             --tag "$NGINX_IMAGE" \
             --cache-from type=gha,scope=nginx-staging \
             --cache-to type=gha,mode=max,scope=nginx-staging \
@@ -228,6 +240,11 @@ jobs:
       STAGING_USE_ASSIGNMENTS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENTS_API_V2 || 'false' }}
       STAGING_USE_ASSIGNMENT_UPLOADS_API_V2: ${{ vars.STAGING_USE_ASSIGNMENT_UPLOADS_API_V2 || 'false' }}
       STAGING_USE_SCHEDULES_API_V2: ${{ vars.STAGING_USE_SCHEDULES_API_V2 || 'false' }}
+      STAGING_USE_CLASSES_API_V2: ${{ vars.STAGING_USE_CLASSES_API_V2 || 'false' }}
+      STAGING_USE_ATTENDANCE_API_V2: ${{ vars.STAGING_USE_ATTENDANCE_API_V2 || 'false' }}
+      STAGING_USE_ANNOUNCEMENTS_API_V2: ${{ vars.STAGING_USE_ANNOUNCEMENTS_API_V2 || 'false' }}
+      STAGING_USE_GRADES_API_V2: ${{ vars.STAGING_USE_GRADES_API_V2 || 'true' }}
+      STAGING_USE_REPORT_CARDS_API_V2: ${{ vars.STAGING_USE_REPORT_CARDS_API_V2 || 'true' }}
     steps:
       - name: Checkout selected release
         uses: actions/checkout@v4
@@ -302,6 +319,11 @@ jobs:
           VITE_USE_ASSIGNMENTS_API_V2=$STAGING_USE_ASSIGNMENTS_API_V2
           VITE_USE_ASSIGNMENT_UPLOADS_API_V2=$STAGING_USE_ASSIGNMENT_UPLOADS_API_V2
           VITE_USE_SCHEDULES_API_V2=$STAGING_USE_SCHEDULES_API_V2
+          VITE_USE_CLASSES_API_V2=$STAGING_USE_CLASSES_API_V2
+          VITE_USE_ATTENDANCE_API_V2=$STAGING_USE_ATTENDANCE_API_V2
+          VITE_USE_ANNOUNCEMENTS_API_V2=$STAGING_USE_ANNOUNCEMENTS_API_V2
+          VITE_USE_GRADES_API_V2=$STAGING_USE_GRADES_API_V2
+          VITE_USE_REPORT_CARDS_API_V2=$STAGING_USE_REPORT_CARDS_API_V2
           EOF
           dotenv_secret APP_KEY "$STAGING_APP_KEY"
           dotenv_secret DB_USERNAME "$STAGING_DATABASE_USER"
@@ -353,6 +375,11 @@ jobs:
             echo "assignments_v2=$STAGING_USE_ASSIGNMENTS_API_V2"
             echo "assignment_uploads_v2=$STAGING_USE_ASSIGNMENT_UPLOADS_API_V2"
             echo "schedules_v2=$STAGING_USE_SCHEDULES_API_V2"
+            echo "classes_v2=$STAGING_USE_CLASSES_API_V2"
+            echo "attendance_v2=$STAGING_USE_ATTENDANCE_API_V2"
+            echo "announcements_v2=$STAGING_USE_ANNOUNCEMENTS_API_V2"
+            echo "grades_v2=$STAGING_USE_GRADES_API_V2"
+            echo "report_cards_v2=$STAGING_USE_REPORT_CARDS_API_V2"
           } > staging-release-evidence.txt
 
       - name: Upload safe deployment evidence

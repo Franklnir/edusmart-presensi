@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClassHistoryController;
 use App\Http\Controllers\Api\DbController;
 use App\Http\Controllers\Api\GoogleDriveController;
+use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\InfrastructureController;
 use App\Http\Controllers\Api\JadwalController;
 use App\Http\Controllers\Api\PresenceController;
@@ -35,6 +36,12 @@ Route::get('/health', function () {
         'release_sha' => (string) config('app.release_sha', 'unknown'),
     ];
 });
+
+Route::get('/ready', [HealthController::class, 'ready'])
+    ->withoutMiddleware([
+        ResolveTenant::class,
+        EnsureTenantMatchesProfile::class,
+    ]);
 
 Route::get('/internal/tls/authorize', [InfrastructureController::class, 'authorizeTlsDomain'])
     ->middleware('throttle:api')
@@ -165,7 +172,9 @@ Route::prefix('quiz')->middleware(['auth:sanctum', 'throttle:api'])->group(funct
     Route::post('/complete-essay-review', [QuizController::class, 'completeEssayReview']);
 });
 
-Route::middleware(['track.db.proxy', 'ensure.db.enabled', 'conceal.db.guests', 'throttle:db'])->group(function () {
+Route::middleware(['track.db.proxy', 'ensure.db.enabled', 'conceal.db.guests', 'ensure.db.consumer', 'throttle:db'])->group(function () {
+    // Temporary compatibility rollback: active legacy consumers remain in the
+    // frontend. Remove only after the zero-consumer gate passes in staging.
     Route::post('/db', [DbController::class, 'handle']);
     Route::post('/db/batch', [DbController::class, 'batch']);
 });

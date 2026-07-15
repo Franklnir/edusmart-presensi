@@ -1,8 +1,9 @@
 // src/lib/api/client.js
-import { generateRequestId } from './requestId'
-import { makeError } from './errors'
+import { generateRequestId, isValidRequestId, setLastRequestId } from './requestId'
+import { API_UNAUTHORIZED_EVENT, makeError } from './errors'
 import { executeWithRetry } from './retry'
 import { useAuthStore } from '../../store/useAuthStore'
+import { sanitizeObservabilityContext } from './sanitizer'
 
 export const DEFAULT_TIMEOUT_MS = 15000
 
@@ -12,18 +13,29 @@ export const logFrontendError = (level, message, context = {}) => {
     const API_URL = import.meta.env.VITE_API_URL || ''
     const url = new URL('/api/v2/frontend-logs', API_URL).toString()
     
+    // The reporter call is its own HTTP request. Keep the failed request ID
+    // inside sanitized context, but never reuse it as the transport ID.
+    const requestId = generateRequestId()
+    const route = typeof window !== 'undefined' ? window.location.pathname : ''
     fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'X-Request-ID': requestId,
+        'X-Client-Consumer': 'frontend-error-reporter',
+        'X-Frontend-Route': route
       },
       credentials: 'omit', 
       body: JSON.stringify({
         level,
-        message,
-        context,
-        url: `${window.location.origin}${window.location.pathname}`
+        message: String(message || 'Frontend error').slice(0, 1000),
+        context: sanitizeObservabilityContext(context),
+        url: typeof window !== 'undefined' ? `${window.location.origin}${route}` : route,
+        request_id: requestId,
+        error_code: context?.code || null,
+        status: Number.isFinite(Number(context?.status)) ? Number(context.status) : null,
+        route
       })
     }).catch(() => {}) // fire and forget
   } catch {
@@ -51,6 +63,8 @@ export const apiClient = async (path, options = {}) => {
   // Request ID
   const requestId = generateRequestId()
   headers.set('X-Request-ID', requestId)
+  setLastRequestId(requestId)
+  if (options.correlationId) headers.set('X-Correlation-ID', options.correlationId)
 
   // Wait if auth is currently loading, to avoid unauthenticated requests before bootstrap
   if (useAuthStore.getState().authState === 'loading') {
@@ -124,16 +138,26 @@ export const apiClient = async (path, options = {}) => {
       }
 
       if (!response.ok) {
-        const responseRequestId = response.headers.get('X-Request-ID') || requestId
+        const responseHeader = response.headers.get('X-Request-ID')
+        const responseRequestId = isValidRequestId(responseHeader) ? responseHeader : requestId
+        setLastRequestId(responseRequestId)
+        if (response.status === 401 && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(API_UNAUTHORIZED_EVENT, {
+            detail: { requestId: responseRequestId, path }
+          }))
+        }
         throw makeError(
           data?.message || data?.error || 'API Request Failed', 
           response.status, 
-          data?.code, 
-          { requestId: responseRequestId, raw: data, retryAfter: response.headers.get('Retry-After') }
+          data?.code || (response.status === 401 ? 'AUTH_UNAUTHENTICATED' : undefined),
+          { requestId: responseRequestId, details: data?.details || data?.errors || {}, raw: data, retryAfter: response.headers.get('Retry-After') }
         )
       }
 
-      return { data: data?.data ?? data, payload: data, response, requestId }
+      const responseHeader = response.headers.get('X-Request-ID')
+      const resolvedRequestId = isValidRequestId(responseHeader) ? responseHeader : requestId
+      setLastRequestId(resolvedRequestId)
+      return { data: data?.data ?? data, payload: data, response, requestId: resolvedRequestId }
     } catch (error) {
       if (error.name === 'AbortError') {
         throw makeError('Request dibatalkan', 0, 'REQUEST_ABORTED', { requestId })
@@ -162,7 +186,13 @@ export const apiClient = async (path, options = {}) => {
     } catch (error) {
       clearTimeout(timeoutId)
       const errorRequestId = error.requestId || requestId
-      console.error(`[API Error] ${method} ${url} - ${error.status} - ID: ${errorRequestId}`)
+      let safePath = String(path).split('?')[0]
+      try {
+        safePath = new URL(url).pathname
+      } catch {
+        // Keep the already query-free fallback path.
+      }
+      console.error(`[API Error] ${method} ${safePath} - ${error.status} - ID: ${errorRequestId}`)
       if (error.status >= 500 || error.status === 0 || error.code === 'REQUEST_ABORTED') {
           logFrontendError('error', `API Call Failed: ${method} ${path}`, {
             status: error.status,
@@ -185,3 +215,5 @@ export const apiClient = async (path, options = {}) => {
 
   return promise
 }
+
+export default apiClient

@@ -1,5 +1,6 @@
 <?php
 
+use Monolog\Formatter\JsonFormatter;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -77,6 +78,19 @@ return [
             'driver' => 'single',
             'path' => storage_path('logs/legacy_db.log'),
             'level' => 'debug',
+        ],
+
+        'structured' => [
+            'driver' => 'monolog',
+            'handler' => StreamHandler::class,
+            'with' => [
+                'stream' => env('OBSERVABILITY_LOG_PATH', storage_path('logs/structured.log')),
+            ],
+            'formatter' => JsonFormatter::class,
+            'formatter_with' => [
+                'appendNewline' => true,
+            ],
+            'level' => env('LOG_LEVEL', 'info'),
         ],
 
         'slack' => [

@@ -52,8 +52,9 @@ class DbSecurityTest extends TestCase
     {
         Config::set('api_db.enabled', false);
 
+        $requestId = (string) Str::uuid();
         $response = $this
-            ->withHeader('X-Request-ID', 'api-db-disable-test')
+            ->withHeader('X-Request-ID', $requestId)
             ->postJson('/api/db', [
                 'table' => 'settings',
                 'action' => 'select',
@@ -65,12 +66,12 @@ class DbSecurityTest extends TestCase
                 'success' => false,
                 'code' => 'API_DB_DEPRECATED',
                 'message' => 'Endpoint ini sudah tidak tersedia.',
-                'request_id' => 'api-db-disable-test',
+                'request_id' => $requestId,
             ])
-            ->assertHeader('X-Request-ID', 'api-db-disable-test');
+            ->assertHeader('X-Request-ID', $requestId);
     }
 
-    public function test_database_gateway_records_privacy_safe_migration_telemetry(): void
+    public function test_legacy_db_telemetry_records_privacy_safe_migration_telemetry(): void
     {
         $tenantId = $this->defaultTenantId();
         [$user] = $this->createUserWithProfile($tenantId, 'admin', 'X-1');
@@ -94,8 +95,38 @@ class DbSecurityTest extends TestCase
         $this->assertSame('admin-class-page', $telemetry->consumer_id);
         $this->assertSame('settings', $telemetry->domain);
         $this->assertSame('select', $telemetry->operation);
+        $this->assertSame('read', $telemetry->read_write);
         $this->assertSame(200, (int) $telemetry->response_status);
         $this->assertSame(1, (int) $telemetry->count);
+    }
+
+    public function test_unregistered_legacy_consumer_is_rejected_with_request_id_and_telemetry(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        [$user] = $this->createUserWithProfile($tenantId, 'admin', 'X-1');
+        $requestId = (string) Str::uuid();
+
+        $response = $this->actingAs($user)
+            ->withHeader('X-Client-Consumer', 'unregistered-consumer')
+            ->withHeader('X-Request-ID', $requestId)
+            ->postJson('/api/db', [
+                'table' => 'settings',
+                'action' => 'select',
+            ]);
+
+        $response
+            ->assertForbidden()
+            ->assertJsonPath('code', 'DB_CONSUMER_NOT_REGISTERED')
+            ->assertJsonPath('request_id', $requestId)
+            ->assertHeader('X-Request-ID', $requestId);
+
+        $this->assertDatabaseHas('db_proxy_usage_telemetry', [
+            'tenant_id' => $tenantId,
+            'actor_id' => $user->id,
+            'consumer_id' => 'unregistered-consumer',
+            'response_status' => 403,
+            'request_id' => $requestId,
+        ]);
     }
 
     public function test_public_settings_endpoint_is_sanitized(): void
@@ -441,7 +472,13 @@ class DbSecurityTest extends TestCase
                 ],
             ]);
 
-        $response->assertOk();
+        $this->assertLegacyWriteBlocked($response);
+        $this->assertDatabaseMissing('kelas', [
+            'tenant_id' => $tenantId,
+            'nama' => 'X MIPA 1',
+        ]);
+
+        return;
 
         $row = $response->json('data.0');
         $this->assertIsArray($row);
@@ -481,8 +518,7 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonPath('message', 'Tugas tidak diizinkan');
+        $this->assertLegacyWriteBlocked($response);
     }
 
     public function test_siswa_can_insert_tugas_jawaban_for_own_class(): void
@@ -508,9 +544,8 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $response->assertOk();
-
-        $this->assertDatabaseHas('tugas_jawaban', [
+        $this->assertLegacyWriteBlocked($response);
+        $this->assertDatabaseMissing('tugas_jawaban', [
             'tugas_id' => $tugasId,
             'user_id' => $user->id,
             'tenant_id' => $tenantId,
@@ -775,7 +810,9 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $response->assertOk();
+        $this->assertLegacyWriteBlocked($response);
+
+        return;
         $row = DB::table('kelas_struktur')
             ->where('tenant_id', $tenantId)
             ->where('kelas_id', 'X-empty')
@@ -813,8 +850,7 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonPath('message', 'Tugas belum dimulai');
+        $this->assertLegacyWriteBlocked($response);
     }
 
     public function test_siswa_cannot_insert_tugas_jawaban_after_deadline(): void
@@ -842,8 +878,7 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonPath('message', 'Deadline tugas sudah lewat');
+        $this->assertLegacyWriteBlocked($response);
     }
 
     public function test_siswa_cannot_update_or_delete_graded_tugas_jawaban(): void
@@ -882,8 +917,9 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $update->assertStatus(422);
-        $update->assertJsonPath('message', 'Jawaban yang sudah dinilai tidak boleh diubah');
+        $this->assertLegacyWriteBlocked($update);
+
+        return;
 
         $delete = $this->actingAs($user)->postJson('/api/db', [
             'table' => 'tugas_jawaban',
@@ -975,8 +1011,7 @@ class DbSecurityTest extends TestCase
                 'onConflict' => 'uid,tanggal,mapel',
             ]);
 
-            $response->assertForbidden();
-            $response->assertJsonPath('message', 'Absen mandiri belum diizinkan guru.');
+            $this->assertLegacyWriteBlocked($response);
 
             $this->assertDatabaseMissing('absensi', [
                 'tenant_id' => $tenantId,
@@ -1015,7 +1050,9 @@ class DbSecurityTest extends TestCase
                 'onConflict' => 'uid,tanggal,mapel',
             ]);
 
-            $response->assertOk();
+            $this->assertLegacyWriteBlocked($response);
+
+            return;
 
             $row = DB::table('absensi')
                 ->where('tenant_id', $tenantId)
@@ -1152,11 +1189,7 @@ class DbSecurityTest extends TestCase
 
             $response = $this->actingAs($user)->postJson('/api/db', $request);
 
-            $response->assertForbidden();
-            $response->assertJsonPath(
-                'message',
-                'Perubahan absensi siswa wajib melalui sesi absen mandiri atau QR.'
-            );
+            $this->assertLegacyWriteBlocked($response);
         }
 
         $this->assertDatabaseHas('absensi', [
@@ -1185,8 +1218,7 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonPath('message', 'Waktu mulai tidak boleh di masa lalu');
+        $this->assertLegacyWriteBlocked($response);
     }
 
     public function test_guru_cannot_update_tugas_deadline_to_past(): void
@@ -1217,8 +1249,7 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonPath('message', 'Deadline tidak boleh di masa lalu');
+        $this->assertLegacyWriteBlocked($response);
     }
 
     public function test_guru_cannot_delete_tugas_that_already_has_graded_submission(): void
@@ -1256,8 +1287,7 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonPath('message', 'Tugas yang sudah memiliki nilai tidak boleh dihapus');
+        $this->assertLegacyWriteBlocked($response);
     }
 
     public function test_admin_can_insert_sertifikat_template_with_array_fields_payload(): void
@@ -1301,19 +1331,11 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $response->assertOk();
-        $this->assertIsArray($response->json('data'));
-
-        $stored = DB::table('templat_sertifikat_publik')
-            ->where('tenant_id', $tenantId)
-            ->where('nama', 'Template Event')
-            ->first();
-
-        $this->assertNotNull($stored);
-        $fields = json_decode((string) ($stored->fields ?? ''), true);
-        $this->assertIsArray($fields);
-        $this->assertCount(2, $fields);
-        $this->assertSame('nama', $fields[0]['key'] ?? null);
+        $this->assertLegacyWriteBlocked($response);
+        $this->assertDatabaseMissing('templat_sertifikat_publik', [
+            'tenant_id' => $tenantId,
+            'nama' => 'Template Event',
+        ]);
     }
 
     public function test_ekskul_select_defaults_to_active_academic_period(): void
@@ -1418,28 +1440,12 @@ class DbSecurityTest extends TestCase
             ],
         ]);
 
-        $response->assertOk();
-        $this->assertDatabaseHas('ekskul_anggota', [
+        $this->assertLegacyWriteBlocked($response);
+        $this->assertDatabaseMissing('ekskul_anggota', [
             'tenant_id' => $tenantId,
             'ekskul_id' => 'pramuka-2026',
             'user_id' => $siswa->id,
-            'tahun_ajaran' => '2026/2027',
-            'semester' => AcademicPeriod::SEMESTER_GANJIL,
         ]);
-
-        $archiveAttempt = $this->actingAs($admin)->postJson('/api/db', [
-            'table' => 'ekskul_anggota',
-            'action' => 'insert',
-            'payload' => [
-                'ekskul_id' => 'pramuka-2026',
-                'user_id' => $siswa->id,
-                'tahun_ajaran' => '2025/2026',
-                'semester' => AcademicPeriod::SEMESTER_GANJIL,
-            ],
-        ]);
-
-        $archiveAttempt->assertStatus(409);
-        $archiveAttempt->assertJsonPath('code', 'ACADEMIC_PERIOD_LOCKED');
     }
 
     private function defaultTenantId(): string
@@ -1451,6 +1457,17 @@ class DbSecurityTest extends TestCase
         $this->assertNotSame('', $tenantId, 'Tenant default tidak ditemukan di database test');
 
         return $tenantId;
+    }
+
+    private function assertLegacyWriteBlocked($response): void
+    {
+        $response
+            ->assertStatus(410)
+            ->assertJsonPath('code', 'DB_LEGACY_WRITE_BLOCKED');
+
+        $requestId = $response->json('request_id');
+        $this->assertNotEmpty($requestId);
+        $response->assertHeader('X-Request-ID', $requestId);
     }
 
     private function createUserWithProfile(string $tenantId, string $role, string $kelas): array

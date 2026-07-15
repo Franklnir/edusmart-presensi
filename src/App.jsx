@@ -9,6 +9,7 @@ import { BrowserNfcProvider } from './components/browser-nfc/BrowserNfcProvider'
 import AppRoutes from './router'
 import { useAuthStore } from './store/useAuthStore'
 import { API_UNAVAILABLE_EVENT, SESSION_EXPIRED_EVENT, hasAuthSessionHint, supabase } from './lib/supabase'
+import { API_UNAUTHORIZED_EVENT } from './lib/api/errors'
 import { useUIStore } from './store/useUIStore'
 import { scheduleRoutePrefetch } from './lib/routePrefetch'
 import { isMarketingLandingPath } from './utils/marketingHost'
@@ -140,7 +141,11 @@ const App = () => {
     }
 
     window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired)
-    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired)
+    window.addEventListener(API_UNAUTHORIZED_EVENT, handleSessionExpired)
+    return () => {
+      window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired)
+      window.removeEventListener(API_UNAUTHORIZED_EVENT, handleSessionExpired)
+    }
   }, [
     expireSession,
     isAuthPage,
@@ -177,14 +182,18 @@ const App = () => {
     let id = ''
     try {
       id = localStorage.getItem(key) || ''
-    } catch { }
+    } catch {
+      // Local storage is optional and may be blocked by privacy settings.
+    }
     if (!id) {
       if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
         id = crypto.randomUUID()
       } else {
         id = `dev-${Date.now()}-${Math.random().toString(16).slice(2)}`
       }
-      try { localStorage.setItem(key, id) } catch { }
+      try { localStorage.setItem(key, id) } catch {
+        // A device ID is best-effort when storage is unavailable.
+      }
     }
     deviceIdRef.current = id
   }, [])

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "review_date": "2026-10-15",
+  "entries": [
+    {"domain":"attendance","file":"src/features/attendance/components/CalendarOverlay.jsx","owner":"attendance","operation":"legacy schedule lookup","read_only":true,"reason":"Remaining attendance compatibility consumer","migration_target":"attendance and schedules V2"},
+    {"domain":"attendance","file":"src/features/attendance/components/MapelOptions.jsx","owner":"attendance","operation":"legacy subject lookup","read_only":true,"reason":"Remaining attendance compatibility consumer","migration_target":"schedules V2"},
+    {"domain":"attendance","file":"src/features/attendance/components/RingkasanKelasTable.jsx","owner":"attendance","operation":"legacy attendance summary","read_only":true,"reason":"Remaining attendance compatibility consumer","migration_target":"attendance V2"},
+    {"domain":"attendance","file":"src/features/attendance/hooks/useStudentAttendanceData.js","owner":"attendance","operation":"legacy attendance read","read_only":true,"reason":"Remaining attendance compatibility consumer","migration_target":"attendance V2"},
+    {"domain":"attendance","file":"src/features/attendance/hooks/useStudentRfidAttendanceListener.js","owner":"rfid","operation":"legacy realtime attendance","read_only":false,"reason":"Device event transport migration pending","migration_target":"device attendance events V2"},
+    {"domain":"students","file":"src/features/students/hooks/useStudentClassActions.js","owner":"students","operation":"legacy class mutation","read_only":false,"reason":"Student domain migration pending","migration_target":"students V2"},
+    {"domain":"students","file":"src/features/students/hooks/useStudentDetailActions.js","owner":"students","operation":"legacy student mutation","read_only":false,"reason":"Student domain migration pending","migration_target":"students V2"},
+    {"domain":"students","file":"src/features/students/hooks/useStudentDetailData.js","owner":"students","operation":"legacy student read","read_only":true,"reason":"Student domain migration pending","migration_target":"students V2"},
+    {"domain":"rfid","file":"src/features/students/hooks/useStudentRfidActions.js","owner":"rfid","operation":"legacy RFID enrollment","read_only":false,"reason":"RFID cards V2 pending","migration_target":"RFID cards V2"},
+    {"domain":"students","file":"src/features/students/services/studentImportService.js","owner":"students","operation":"legacy student import","read_only":false,"reason":"Import domain migration pending","migration_target":"students V2"},
+    {"domain":"attendance","file":"src/pages/admin/Guru.jsx","owner":"admin","operation":"legacy teacher attendance dependency","read_only":false,"reason":"Shared admin migration pending","migration_target":"teachers and attendance V2"},
+    {"domain":"dashboard","file":"src/pages/admin/Home.jsx","owner":"admin","operation":"legacy dashboard aggregates","read_only":true,"reason":"Dashboard migration pending","migration_target":"dashboard V2"},
+    {"domain":"admin","file":"src/pages/admin/PermissionAdmin.jsx","owner":"admin","operation":"legacy permission reads","read_only":false,"reason":"Permission domain migration pending","migration_target":"permissions V2"},
+    {"domain":"attendance","file":"src/pages/admin/Scan.jsx","owner":"admin","operation":"legacy RFID and attendance scan","read_only":false,"reason":"Device event migration pending","migration_target":"attendance and devices V2"},
+    {"domain":"certificates","file":"src/pages/admin/Sertifikat.jsx","owner":"admin","operation":"legacy certificate data and storage","read_only":false,"reason":"Certificate and attachment migration pending","migration_target":"certificates and attachments V2"},
+    {"domain":"students","file":"src/pages/admin/Siswa.jsx","owner":"admin","operation":"legacy student management","read_only":false,"reason":"Student domain migration pending","migration_target":"students V2"},
+    {"domain":"admin","file":"src/pages/admin/pengaturan.jsx","owner":"admin","operation":"legacy settings and profile assets","read_only":false,"reason":"Settings and attachment migration pending","migration_target":"settings and attachments V2"},
+    {"domain":"schedules","file":"src/pages/guru/JadwalGuru.jsx","owner":"teacher","operation":"legacy dashboard schedule dependency","read_only":true,"reason":"Non-schedule dashboard panels remain hybrid","migration_target":"dashboard and extracurricular V2"},
+    {"domain":"dashboard","file":"src/pages/siswa/Home.jsx","owner":"student","operation":"legacy dashboard aggregates","read_only":true,"reason":"Student dashboard migration pending","migration_target":"dashboard V2"},
+    {"domain":"assignments","file":"src/pages/siswa/Tugas.jsx","owner":"student","operation":"legacy assignment compatibility","read_only":false,"reason":"Assignment attachment cutover pending","migration_target":"assignments and attachments V2"},
+    {"domain":"auth","file":"src/store/useAuthStore.js","owner":"identity","operation":"legacy profile provisioning","read_only":false,"reason":"Identity profile contract migration pending","migration_target":"identity V2"},
+    {"domain":"settings","file":"src/utils/absensiSettings.js","owner":"attendance","operation":"legacy attendance settings","read_only":true,"reason":"Attendance settings migration pending","migration_target":"attendance V2"},
+    {"domain":"compatibility","file":"src/lib/api/__tests__/client.test.js","owner":"platform","operation":"compatibility client regression test","read_only":true,"reason":"Tests document the temporary compatibility client","migration_target":"remove after all consumers migrate"},
+    {"domain":"compatibility","file":"src/lib/api/__tests__/db.test.js","owner":"platform","operation":"compatibility DB client regression test","read_only":true,"reason":"Tests document the temporary compatibility client","migration_target":"remove after all consumers migrate"},
+    {"domain":"compatibility","file":"src/lib/supabase.js","owner":"platform","operation":"legacy compatibility adapter","read_only":false,"reason":"Temporary hybrid boundary; no new consumers allowed","migration_target":"domain services V2"},
+    {"domain":"documentation","file":"src/docs/SWR_CACHING_GUIDE.md","owner":"platform","operation":"legacy adapter example","read_only":true,"reason":"Migration documentation example","migration_target":"rewrite after hybrid boundary removal"}
+  ]
+}

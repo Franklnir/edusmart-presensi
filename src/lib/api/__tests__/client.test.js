@@ -101,7 +101,7 @@ describe('API Client Regression Tests', () => {
         status: 500,
         headers: new Headers({
           'content-type': 'application/json',
-          'X-Request-ID': 'req-server-500'
+          'X-Request-ID': '22222222-2222-4222-8222-222222222222'
         }),
         json: async () => ({ message: 'Server crash' })
       })
@@ -120,7 +120,7 @@ describe('API Client Regression Tests', () => {
       name: 'ApiError',
       status: 500,
       message: 'Server crash',
-      requestId: 'req-server-500'
+      requestId: '22222222-2222-4222-8222-222222222222'
     })
 
     const recovered = await apiClient('/api/db', { maxRetries: 0 })
