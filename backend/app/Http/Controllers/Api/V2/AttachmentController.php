@@ -42,7 +42,7 @@ class AttachmentController extends Controller
         ]);
     }
 
-    public function download(Request $request, string $id): JsonResponse
+    public function download(Request $request, string $id)
     {
         $startedAt = hrtime(true);
         if ($response = $this->unavailable($request)) {
@@ -59,6 +59,10 @@ class AttachmentController extends Controller
             $attachment->object_key,
             (int) config('api_v2.uploads.download_ttl_seconds', 600)
         );
+
+        if ($request->boolean('redirect') && empty($instruction['headers']) && ! empty($instruction['url'])) {
+            return redirect()->away($instruction['url']);
+        }
 
         $this->telemetry->record($request, 'download_sign', 'succeeded', $startedAt, [
             'upload_session_id' => $attachment->upload_session_id,

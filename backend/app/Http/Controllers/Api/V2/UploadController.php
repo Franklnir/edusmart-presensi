@@ -19,6 +19,7 @@ use App\Services\IdempotencyService;
 use App\Services\UploadTelemetry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 
@@ -46,7 +47,16 @@ class UploadController extends Controller
             ? Tugas::where('tenant_id', $tenantId)->findOrFail($validated['assignment_id'])
             : null;
 
-        if ($validated['purpose'] === 'assignment_attachment') {
+        $quiz = null;
+        if ($validated['purpose'] === 'quiz_media_attachment') {
+            $quiz = DB::table('quizzes')
+                ->where('tenant_id', $tenantId)
+                ->where('id', $validated['quiz_id'])
+                ->first();
+            if (! $quiz || ($actor->role === 'guru' && (string) $quiz->guru_id !== (string) $actor->id)) {
+                return $this->error($request, 'UPLOAD_SCOPE_FORBIDDEN', 'Quiz tidak ditemukan atau tidak diizinkan.', 403);
+            }
+        } elseif ($validated['purpose'] === 'assignment_attachment') {
             $assignment ? Gate::authorize('update', $assignment) : Gate::authorize('create', Tugas::class);
         } elseif ($actor->role !== 'siswa' || ! $assignment) {
             return $this->error($request, 'UPLOAD_SCOPE_FORBIDDEN', 'Upload submission hanya tersedia bagi siswa untuk tugas yang valid.', 403);

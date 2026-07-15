@@ -23,6 +23,7 @@ class Attachment extends Model
         'provider',
         'bucket',
         'assignment_id',
+        'quiz_id',
         'object_key',
         'filename',
         'content_type',

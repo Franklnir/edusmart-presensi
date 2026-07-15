@@ -2,169 +2,279 @@
 
 namespace App\Http\Controllers\Api\V2;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\ApiController;
+use App\Services\Academic\AcademicContextResolver;
+use App\Services\IdempotencyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
-class QuizQuestionController extends Controller
+class QuizQuestionController extends ApiController
 {
+    public function index(Request $request, string $quiz): JsonResponse
+    {
+        $quizRow = $this->ownedQuiz($request, $quiz);
+        if ($quizRow instanceof JsonResponse) {
+            return $quizRow;
+        }
+
+        $questions = DB::table('quiz_questions')
+            ->where('quiz_id', $quiz)
+            ->orderBy('nomor')
+            ->orderBy('id')
+            ->get()
+            ->map(function ($question) {
+                $question->options = DB::table('quiz_options')
+                    ->where('question_id', $question->id)
+                    ->orderBy('label')
+                    ->get();
+
+                return $question;
+            });
+
+        return response()->json(['data' => $questions]);
+    }
+
     public function store(Request $request): JsonResponse
     {
-        $role = $request->user()?->profile?->role;
-        if (!in_array($role, ['admin', 'guru'])) {
-            abort(403, 'Unauthorized');
+        $role = $this->role($request);
+        if (! in_array($role, ['admin', 'guru'], true)) {
+            return $this->deny('Quiz hanya dapat dikelola guru atau admin.', 403);
         }
 
-        $tenantId = $request->attributes->get('tenant_id');
-
-        $request->validate([
-            'quiz_id' => 'required|string',
-            'soal' => 'required|string',
-            'nomor' => 'required|integer',
-            'poin' => 'required|integer',
-            'options' => 'required|array',
-            'options.*.label' => 'required|string',
-            'options.*.text' => 'required|string',
-            'options.*.is_correct' => 'required|boolean',
+        $validated = $request->validate([
+            'quiz_id' => ['required', 'string', 'max:120'],
+            'soal' => ['required', 'string', 'max:10000'],
+            'nomor' => ['required', 'integer', 'min:1', 'max:1000'],
+            'poin' => ['required', 'integer', 'min:0', 'max:1000'],
+            'question_type' => ['nullable', 'string', 'in:mcq,essay'],
+            'image_path' => ['nullable', 'string', 'max:1000'],
+            'options' => ['nullable', 'array', 'max:20'],
+            'options.*.label' => ['required_with:options', 'string', 'max:10'],
+            'options.*.text' => ['required_with:options', 'string', 'max:5000'],
+            'options.*.image_path' => ['nullable', 'string', 'max:1000'],
+            'options.*.is_correct' => ['required_with:options', 'boolean'],
         ]);
 
-        $quizId = $request->input('quiz_id');
-
-        $quiz = DB::table('quizzes')->where('tenant_id', $tenantId)->where('id', $quizId)->first();
-        if (!$quiz || ($role === 'guru' && $quiz->created_by !== $request->user()->id)) {
-            abort(403, 'Unauthorized or Quiz not found');
+        $quiz = $this->ownedQuiz($request, $validated['quiz_id']);
+        if ($quiz instanceof JsonResponse) {
+            return $quiz;
+        }
+        $periodGuard = $this->quizMutationContext($request, $quiz);
+        if ($periodGuard instanceof JsonResponse) {
+            return $periodGuard;
         }
 
-        return DB::transaction(function () use ($request, $quizId) {
-            $questionId = (string) Str::uuid();
+        return app(IdempotencyService::class)->handle(
+            $request,
+            $request->header('Idempotency-Key'),
+            fn () => $this->writeQuestion($validated)
+        );
+    }
 
-            DB::table('quiz_questions')->insert([
+    public function update(Request $request, string $question): JsonResponse
+    {
+        $validated = $request->validate([
+            'soal' => ['sometimes', 'string', 'max:10000'],
+            'nomor' => ['sometimes', 'integer', 'min:1', 'max:1000'],
+            'poin' => ['sometimes', 'integer', 'min:0', 'max:1000'],
+            'question_type' => ['sometimes', 'nullable', 'string', 'in:mcq,essay'],
+            'image_path' => ['sometimes', 'nullable', 'string', 'max:1000'],
+            'options' => ['sometimes', 'nullable', 'array', 'max:20'],
+            'options.*.label' => ['required_with:options', 'string', 'max:10'],
+            'options.*.text' => ['required_with:options', 'string', 'max:5000'],
+            'options.*.image_path' => ['nullable', 'string', 'max:1000'],
+            'options.*.is_correct' => ['required_with:options', 'boolean'],
+        ]);
+
+        $questionRow = DB::table('quiz_questions')->where('id', $question)->first();
+        if (! $questionRow) {
+            return response()->json(['message' => 'Soal tidak ditemukan'], 404);
+        }
+        $quiz = $this->ownedQuiz($request, $questionRow->quiz_id);
+        if ($quiz instanceof JsonResponse) {
+            return $quiz;
+        }
+        $periodGuard = $this->quizMutationContext($request, $quiz);
+        if ($periodGuard instanceof JsonResponse) {
+            return $periodGuard;
+        }
+        if (DB::table('quiz_submissions')
+            ->where('quiz_id', $questionRow->quiz_id)
+            ->where('status', 'ongoing')
+            ->exists()) {
+            return response()->json([
+                'message' => 'Soal quiz tidak bisa diubah saat masih ada siswa yang mengerjakan quiz.',
+            ], 409);
+        }
+        if ($validated === []) {
+            return response()->json(['message' => 'Tidak ada perubahan soal'], 422);
+        }
+
+        return app(IdempotencyService::class)->handle(
+            $request,
+            $request->header('Idempotency-Key'),
+            function () use ($question, $validated) {
+                return DB::transaction(function () use ($question, $validated) {
+                    $updates = [];
+                    foreach (['soal', 'nomor', 'poin', 'question_type', 'image_path'] as $column) {
+                        if (array_key_exists($column, $validated) && Schema::hasColumn('quiz_questions', $column)) {
+                            $updates[$column] = $validated[$column];
+                        }
+                    }
+                    if ($updates !== []) {
+                        $updates['updated_at'] = now();
+                        DB::table('quiz_questions')->where('id', $question)->update($updates);
+                    }
+                    if (array_key_exists('options', $validated)) {
+                        $this->replaceOptions($question, $validated['options'] ?? []);
+                    }
+
+                    return response()->json([
+                        'data' => $this->questionPayload($question),
+                    ]);
+                });
+            }
+        );
+    }
+
+    public function destroy(Request $request, string $question): JsonResponse
+    {
+        $questionRow = DB::table('quiz_questions')->where('id', $question)->first();
+        if (! $questionRow) {
+            return response()->json(['message' => 'Soal tidak ditemukan'], 404);
+        }
+        $quiz = $this->ownedQuiz($request, $questionRow->quiz_id);
+        if ($quiz instanceof JsonResponse) {
+            return $quiz;
+        }
+        $periodGuard = $this->quizMutationContext($request, $quiz);
+        if ($periodGuard instanceof JsonResponse) {
+            return $periodGuard;
+        }
+
+        return app(IdempotencyService::class)->handle(
+            $request,
+            $request->header('Idempotency-Key'),
+            function () use ($question) {
+                DB::table('quiz_questions')->where('id', $question)->delete();
+
+                return response()->json(['data' => ['id' => $question, 'deleted' => true]]);
+            }
+        );
+    }
+
+    private function writeQuestion(array $validated): JsonResponse
+    {
+        return DB::transaction(function () use ($validated) {
+            $questionId = (string) Str::uuid();
+            $payload = [
                 'id' => $questionId,
-                'quiz_id' => $quizId,
-                'nomor' => $request->input('nomor'),
-                'soal' => $request->input('soal'),
-                'poin' => $request->input('poin'),
+                'quiz_id' => $validated['quiz_id'],
+                'nomor' => $validated['nomor'],
+                'soal' => $validated['soal'],
+                'poin' => $validated['poin'],
                 'created_at' => now(),
                 'updated_at' => now(),
-            ]);
-
-            $options = $request->input('options');
-            $optionsData = [];
-            foreach ($options as $opt) {
-                $optionsData[] = [
-                    'id' => (string) Str::uuid(),
-                    'question_id' => $questionId,
-                    'label' => $opt['label'],
-                    'text' => $opt['text'],
-                    'is_correct' => $opt['is_correct'],
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ];
+            ];
+            foreach (['question_type', 'image_path'] as $column) {
+                if (Schema::hasColumn('quiz_questions', $column) && array_key_exists($column, $validated)) {
+                    $payload[$column] = $validated[$column];
+                }
             }
+            DB::table('quiz_questions')->insert($payload);
+            $this->replaceOptions($questionId, $validated['options'] ?? []);
 
-            DB::table('quiz_options')->insert($optionsData);
-
-            $question = DB::table('quiz_questions')->where('id', $questionId)->first();
-            $question->options = DB::table('quiz_options')->where('question_id', $questionId)->get();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Soal berhasil ditambahkan.',
-                'data' => $question,
-            ], 201);
+            return response()->json(['data' => $this->questionPayload($questionId)], 201);
         });
     }
 
-    public function update(Request $request, string $id): JsonResponse
+    private function replaceOptions(string $questionId, array $options): void
     {
-        $role = $request->user()?->profile?->role;
-        if (!in_array($role, ['admin', 'guru'])) {
-            abort(403, 'Unauthorized');
+        DB::table('quiz_options')->where('question_id', $questionId)->delete();
+        if ($options === []) {
+            return;
         }
 
-        $tenantId = $request->attributes->get('tenant_id');
-
-        $question = DB::table('quiz_questions')->where('id', $id)->first();
-        if (!$question) {
-            return response()->json(['success' => false, 'message' => 'Not found'], 404);
-        }
-
-        $quiz = DB::table('quizzes')->where('tenant_id', $tenantId)->where('id', $question->quiz_id)->first();
-        if (!$quiz || ($role === 'guru' && $quiz->created_by !== $request->user()->id)) {
-            abort(403, 'Unauthorized');
-        }
-
-        $request->validate([
-            'soal' => 'required|string',
-            'nomor' => 'required|integer',
-            'poin' => 'required|integer',
-            'options' => 'required|array',
-        ]);
-
-        return DB::transaction(function () use ($request, $id, $question) {
-            DB::table('quiz_questions')->where('id', $id)->update([
-                'nomor' => $request->input('nomor'),
-                'soal' => $request->input('soal'),
-                'poin' => $request->input('poin'),
+        $rows = [];
+        foreach ($options as $option) {
+            $row = [
+                'id' => (string) Str::uuid(),
+                'question_id' => $questionId,
+                'label' => $option['label'],
+                'text' => $option['text'],
+                'is_correct' => (bool) $option['is_correct'],
+                'created_at' => now(),
                 'updated_at' => now(),
-            ]);
-
-            // Simple update strategy: delete old options and insert new ones
-            DB::table('quiz_options')->where('question_id', $id)->delete();
-
-            $options = $request->input('options');
-            $optionsData = [];
-            foreach ($options as $opt) {
-                $optionsData[] = [
-                    'id' => (string) Str::uuid(),
-                    'question_id' => $id,
-                    'label' => $opt['label'],
-                    'text' => $opt['text'],
-                    'is_correct' => $opt['is_correct'],
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ];
+            ];
+            if (Schema::hasColumn('quiz_options', 'image_path') && array_key_exists('image_path', $option)) {
+                $row['image_path'] = $option['image_path'];
             }
-
-            DB::table('quiz_options')->insert($optionsData);
-
-            $updatedQuestion = DB::table('quiz_questions')->where('id', $id)->first();
-            $updatedQuestion->options = DB::table('quiz_options')->where('question_id', $id)->get();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Soal berhasil diperbarui.',
-                'data' => $updatedQuestion,
-            ]);
-        });
+            $rows[] = $row;
+        }
+        DB::table('quiz_options')->insert($rows);
     }
 
-    public function destroy(Request $request, string $id): JsonResponse
+    private function questionPayload(string $questionId): object
     {
-        $role = $request->user()?->profile?->role;
-        if (!in_array($role, ['admin', 'guru'])) {
-            abort(403, 'Unauthorized');
+        $question = DB::table('quiz_questions')->where('id', $questionId)->first();
+        $question->options = DB::table('quiz_options')->where('question_id', $questionId)->orderBy('label')->get();
+
+        return $question;
+    }
+
+    private function ownedQuiz(Request $request, string $quizId): object
+    {
+        $tenantId = (string) $request->attributes->get('tenant_id');
+        $quiz = DB::table('quizzes')->where('tenant_id', $tenantId)->where('id', $quizId)->first();
+        if (! $quiz) {
+            return response()->json(['message' => 'Quiz tidak ditemukan'], 404);
         }
 
-        $tenantId = $request->attributes->get('tenant_id');
-
-        $question = DB::table('quiz_questions')->where('id', $id)->first();
-        if (!$question) {
-            return response()->json(['success' => false, 'message' => 'Not found'], 404);
+        $role = $this->role($request);
+        if (! in_array($role, ['admin', 'guru'], true)) {
+            return $this->deny('Quiz hanya dapat dikelola guru atau admin.', 403);
+        }
+        if ($role === 'guru' && (string) $quiz->guru_id !== (string) $request->user()?->id) {
+            return $this->deny('Quiz tidak diizinkan.', 403);
         }
 
-        $quiz = DB::table('quizzes')->where('tenant_id', $tenantId)->where('id', $question->quiz_id)->first();
-        if (!$quiz || ($role === 'guru' && $quiz->created_by !== $request->user()->id)) {
-            abort(403, 'Unauthorized');
+        return $quiz;
+    }
+
+    protected function role(Request $request): ?string
+    {
+        return strtolower((string) ($request->user()?->profile?->role ?? ''));
+    }
+
+    private function quizMutationContext(Request $request, object $quiz): array|JsonResponse
+    {
+        $tenantId = (string) $request->attributes->get('tenant_id');
+        try {
+            $context = app(AcademicContextResolver::class)->forMutation($request, $tenantId, 'quizzes');
+        } catch (\DomainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+                'code' => 'PERIOD_LOCKED',
+            ], 409);
         }
 
-        DB::table('quiz_questions')->where('id', $id)->delete(); // Options cascade delete
+        foreach (['tahun_ajaran', 'semester', 'academic_year_id', 'academic_term_id'] as $column) {
+            if (! Schema::hasColumn('quizzes', $column)) {
+                continue;
+            }
+            $stored = trim((string) ($quiz->{$column} ?? ''));
+            $requested = trim((string) ($context[$column] ?? ''));
+            if ($stored !== '' && $requested !== '' && $stored !== $requested) {
+                return response()->json([
+                    'message' => 'Quiz berada pada periode akademik lain.',
+                    'code' => 'PERIOD_LOCKED',
+                ], 409);
+            }
+        }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Soal berhasil dihapus.',
-        ]);
+        return $context;
     }
 }

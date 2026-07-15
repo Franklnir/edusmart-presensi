@@ -16,8 +16,9 @@ class StoreUploadRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'purpose' => ['required', Rule::in(['assignment_attachment', 'submission_attachment'])],
+            'purpose' => ['required', Rule::in(['assignment_attachment', 'submission_attachment', 'quiz_media_attachment'])],
             'assignment_id' => ['nullable', 'required_if:purpose,submission_attachment', 'integer', 'min:1'],
+            'quiz_id' => ['nullable', 'required_if:purpose,quiz_media_attachment', 'string', 'max:120'],
             'filename' => ['required', 'string', 'max:255', function ($attribute, $value, $fail) {
                 if (str_contains($value, '/') || str_contains($value, '\\') || pathinfo($value, PATHINFO_EXTENSION) === '') {
                     $fail('Nama file harus berupa nama dasar dengan ekstensi.');

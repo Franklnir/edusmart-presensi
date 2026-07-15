@@ -21,6 +21,7 @@ class UploadSession extends Model
         'provider',
         'bucket',
         'assignment_id',
+        'quiz_id',
         'filename',
         'content_type',
         'size',

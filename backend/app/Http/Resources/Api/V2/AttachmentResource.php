@@ -13,6 +13,7 @@ class AttachmentResource extends JsonResource
             'id' => $this->id,
             'purpose' => $this->purpose,
             'assignment_id' => $this->assignment_id,
+            'quiz_id' => $this->quiz_id,
             'filename' => $this->filename,
             'content_type' => $this->content_type,
             'size' => $this->actual_size ?? $this->size,

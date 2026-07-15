@@ -6,6 +6,7 @@ use App\Models\Attachment;
 use App\Models\Tugas;
 use App\Models\TugasJawaban;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 class AttachmentPolicy
 {
@@ -23,6 +24,7 @@ class AttachmentPolicy
         return match ($attachment->claimed_by_type) {
             'assignment' => $this->canViewAssignment($user, $attachment),
             'submission' => $this->canViewSubmission($user, $attachment),
+            'quiz' => $this->canViewQuiz($user, $attachment),
             default => false,
         };
     }
@@ -41,6 +43,7 @@ class AttachmentPolicy
         return match ($attachment->claimed_by_type) {
             'assignment' => $this->canUpdateAssignment($user, $attachment),
             'submission' => $this->canUpdateSubmission($user, $attachment),
+            'quiz' => $this->canUpdateQuiz($user, $attachment),
             default => false,
         };
     }
@@ -78,5 +81,44 @@ class AttachmentPolicy
 
         return $submission !== null
             && ($user->profile?->role === 'admin' || $user->can('update', $submission));
+    }
+
+    private function canViewQuiz(User $user, Attachment $attachment): bool
+    {
+        $quiz = DB::table('quizzes')
+            ->where('tenant_id', $attachment->tenant_id)
+            ->where('id', $attachment->claimed_by_id)
+            ->first();
+        if (! $quiz) {
+            return false;
+        }
+        if ($user->profile?->role === 'admin' || (string) $quiz->guru_id === (string) $user->id) {
+            return true;
+        }
+
+        if ($user->profile?->role !== 'siswa') {
+            return false;
+        }
+
+        if ((string) ($user->profile?->kelas ?? '') === (string) $quiz->kelas_id) {
+            return true;
+        }
+
+        return DB::table('quiz_submissions')
+            ->where('tenant_id', $attachment->tenant_id)
+            ->where('quiz_id', $quiz->id)
+            ->where('siswa_id', $user->id)
+            ->exists();
+    }
+
+    private function canUpdateQuiz(User $user, Attachment $attachment): bool
+    {
+        $quiz = DB::table('quizzes')
+            ->where('tenant_id', $attachment->tenant_id)
+            ->where('id', $attachment->claimed_by_id)
+            ->first();
+
+        return $quiz !== null
+            && ($user->profile?->role === 'admin' || (string) $quiz->guru_id === (string) $user->id);
     }
 }

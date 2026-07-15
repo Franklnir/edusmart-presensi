@@ -116,6 +116,7 @@ class CompleteUploadSession
                     'provider' => $locked->provider,
                     'bucket' => $locked->bucket,
                     'assignment_id' => $locked->assignment_id,
+                    'quiz_id' => $locked->quiz_id,
                     'object_key' => $locked->object_key,
                     'filename' => $locked->filename,
                     'content_type' => $locked->content_type,
@@ -123,6 +124,9 @@ class CompleteUploadSession
                     'actual_size' => $actualSize,
                     'checksum_sha256' => $actualChecksum ?: $locked->checksum_sha256,
                     'status' => 'active',
+                    'claimed_by_type' => $locked->purpose === 'quiz_media_attachment' ? 'quiz' : null,
+                    'claimed_by_id' => $locked->purpose === 'quiz_media_attachment' ? $locked->quiz_id : null,
+                    'claimed_at' => $locked->purpose === 'quiz_media_attachment' ? now() : null,
                 ]
             );
 

@@ -22,8 +22,12 @@ class CreateUploadSession
         $baseName = Str::slug(pathinfo($data['filename'], PATHINFO_FILENAME)) ?: 'file';
         $finalFilename = $baseName.'-'.Str::lower(Str::random(12)).'.'.$extension;
         $assignmentSegment = $assignment?->id ?: 'pending';
-        $ownerSegment = $data['purpose'] === 'submission_attachment' ? '/submissions/'.$actor->id : '';
-        $objectKey = "tenants/{$tenantId}/assignments/{$assignmentSegment}{$ownerSegment}/{$sessionId}/{$finalFilename}";
+        if ($data['purpose'] === 'quiz_media_attachment') {
+            $objectKey = "tenants/{$tenantId}/quizzes/{$data['quiz_id']}/{$sessionId}/{$finalFilename}";
+        } else {
+            $ownerSegment = $data['purpose'] === 'submission_attachment' ? '/submissions/'.$actor->id : '';
+            $objectKey = "tenants/{$tenantId}/assignments/{$assignmentSegment}{$ownerSegment}/{$sessionId}/{$finalFilename}";
+        }
         $expiresAt = now()->addMinutes((int) config('api_v2.uploads.session_ttl_minutes', 15));
 
         $session = UploadSession::create([
@@ -34,6 +38,7 @@ class CreateUploadSession
             'provider' => $this->provider->name(),
             'bucket' => $this->provider->bucket(),
             'assignment_id' => $assignment?->id,
+            'quiz_id' => $data['quiz_id'] ?? null,
             'filename' => $data['filename'],
             'content_type' => $data['content_type'],
             'size' => $data['size'],
