@@ -70,11 +70,12 @@ export const sendUploadInstruction = (instruction, file, { signal, onProgress } 
 )
 
 export const uploadService = {
-  async createSession(file, { purpose, assignmentId, signal } = {}) {
+  async createSession(file, { purpose, assignmentId, quizId, signal } = {}) {
     const checksum = await sha256(file)
     const payload = {
       purpose,
       assignment_id: assignmentId || undefined,
+      quiz_id: quizId || undefined,
       filename: file.name,
       content_type: file.type,
       size: file.size,

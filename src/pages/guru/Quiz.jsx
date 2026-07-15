@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { QUIZ_MEDIA_BUCKET, supabase } from '../../lib/supabase'
+import { ClassesApi } from '../../lib/api/v2/classes'
 import { startTransition } from 'react'
 import { useLocalCache } from '../../hooks/useLocalCache'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -13,9 +13,10 @@ import { filterSchedulesForSemester } from '../../utils/schedulePeriodScope'
 import { getAcademicAssessmentLabels } from '../../utils/academicAssessment'
 import {
   scheduleErrorMessage,
-  scheduleService,
-  USE_SCHEDULES_API_V2
+  scheduleService
 } from '../../services/scheduleService'
+import { quizService } from '../../services/quizService'
+import { uploadService } from '../../services/uploadService'
 
 import {
   POINT_OPTIONS,
@@ -26,7 +27,6 @@ import {
   makeId,
   normalizeMapel,
   toBoolean,
-  getFileExtension,
   isSupportedQuizImage,
   formatBytesLabel,
   safeDate,
@@ -77,9 +77,6 @@ const getAccessDeviceLabel = (value) => (
   ACCESS_DEVICE_OPTIONS.find((option) => option.value === normalizeAccessDevice(value))?.label || 'Web'
 )
 
-const KELAS_COLUMNS = 'id,nama,grade,suffix,tingkat,jurusan,angkatan'
-const JADWAL_GURU_COLUMNS = 'id,kelas_id,mapel,guru_id,guru_nama,hari,jam_mulai,jam_selesai,tahun_ajaran,semester,periode_berlaku'
-
 export default function GuruQuiz() {
   const { user } = useAuthStore()
   const { pushToast, setLoading } = useUIStore()
@@ -93,7 +90,6 @@ export default function GuruQuiz() {
     setAcademicYear,
     setSemester,
     resetToActivePeriod,
-    applyAcademicYearFilter,
     academicYearCacheKey,
     academicSemesterCacheKey,
     activeAcademicPeriodPayload,
@@ -413,9 +409,16 @@ export default function GuruQuiz() {
   }, [])
 
   const getQuizImageUrl = useCallback((value) => {
+    const raw = String(value || '').trim()
+    if (raw.startsWith('attachment:')) {
+      const attachmentId = raw.slice('attachment:'.length).trim()
+      return attachmentId
+        ? `/api/v2/attachments/${encodeURIComponent(attachmentId)}/download?redirect=1`
+        : ''
+    }
     const objectPath = normalizeQuizMediaPath(value)
     if (!objectPath) return ''
-    return supabase.storage.from(QUIZ_MEDIA_BUCKET).getPublicUrl(objectPath)?.data?.publicUrl || ''
+    return /^https?:\/\//i.test(objectPath) ? objectPath : ''
   }, [normalizeQuizMediaPath])
 
   const setImageSizeValue = useCallback((pathValue, bytesValue) => {
@@ -457,23 +460,22 @@ export default function GuruQuiz() {
     if (imageSizeByPathRef.current[key]) return
     if (imageSizeLoadingRef.current.has(key)) return
 
-    const imageUrl = getQuizImageUrl(key)
-    if (!imageUrl) return
-
     imageSizeLoadingRef.current.add(key)
     setImageSizeLoading(key, true)
     try {
-      const response = await fetch(imageUrl, { credentials: 'same-origin' })
-      if (!response.ok) return
-      const blob = await response.blob()
-      setImageSizeValue(key, Number(blob.size || 0))
+      const raw = String(key || '')
+      if (!raw.startsWith('attachment:')) return
+      const attachmentId = raw.slice('attachment:'.length).trim()
+      if (!attachmentId) return
+      const attachment = await uploadService.getAttachment(attachmentId)
+      setImageSizeValue(key, Number(attachment?.size || 0))
     } catch {
       // Abaikan error baca ukuran agar UI tetap responsif.
     } finally {
       imageSizeLoadingRef.current.delete(key)
       setImageSizeLoading(key, false)
     }
-  }, [getQuizImageUrl, setImageSizeLoading, setImageSizeValue])
+  }, [setImageSizeLoading, setImageSizeValue])
 
   const getQuizImageSizeLabel = useCallback((pathValue) => {
     const key = String(pathValue || '').trim()
@@ -489,14 +491,15 @@ export default function GuruQuiz() {
   }, [imageSizeByPath, imageSizeLoadingByPath])
 
   const removeQuizImageIfExists = useCallback(async (value) => {
-    const objectPath = normalizeQuizMediaPath(value)
-    if (!objectPath) return
+    const raw = String(value || '').trim()
+    const attachmentId = raw.startsWith('attachment:') ? raw.slice('attachment:'.length).trim() : ''
+    if (!attachmentId) return
     try {
-      await supabase.storage.from(QUIZ_MEDIA_BUCKET).remove([objectPath])
+      await uploadService.deleteAttachment(attachmentId)
     } catch {
       // Abaikan error hapus file agar flow form tidak terganggu.
     }
-  }, [normalizeQuizMediaPath])
+  }, [])
 
   const collectQuestionFormImagePaths = useCallback((formValue = questionForm) => {
     const paths = new Set()
@@ -542,7 +545,7 @@ export default function GuruQuiz() {
     setOptionImageUploading({})
   }, [cleanupUnsavedQuestionImages, questionMediaUploading])
 
-  const uploadQuizImage = useCallback(async (file, scope = 'question') => {
+  const uploadQuizImage = useCallback(async (file) => {
     if (!user?.id || !selectedQuizId) {
       throw new Error('Quiz belum dipilih')
     }
@@ -553,24 +556,14 @@ export default function GuruQuiz() {
       throw new Error('Format gambar wajib JPG/PNG')
     }
 
-    const extRaw = getFileExtension(file.name || '') || 'jpg'
-    const ext = extRaw === 'jpeg' ? 'jpg' : extRaw
-    const objectPath = `quiz-media/${user.id}/${selectedQuizId}/${scope}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}.${ext}`
-    const { data, error } = await supabase.storage
-      .from(QUIZ_MEDIA_BUCKET)
-      .upload(objectPath, file, {
-        upsert: true,
-        skipDrive: true,
-        preferServerRelayForSmallFiles: true
-      })
-
-    if (error) {
-      throw new Error(error?.message || 'Gagal upload gambar')
-    }
-
-    const path = data?.path || objectPath
-    const uploadedSizeBytes = Number(data?.uploadedSizeBytes || file?.size || 0)
-    const uploadedSizeLabel = data?.uploadedSizeLabel || formatBytesLabel(uploadedSizeBytes)
+    const attachment = await uploadService.uploadFile(file, {
+      purpose: 'quiz_media_attachment',
+      quizId: selectedQuizId
+    })
+    if (!attachment?.id) throw new Error('Attachment gambar tidak dikembalikan server')
+    const path = `attachment:${attachment.id}`
+    const uploadedSizeBytes = Number(attachment?.size || file?.size || 0)
+    const uploadedSizeLabel = formatBytesLabel(uploadedSizeBytes)
     return {
       path,
       uploadedSizeBytes,
@@ -748,44 +741,13 @@ export default function GuruQuiz() {
     const loadInitialTeachingData = async () => {
       if (!user?.id) return
       try {
-        if (USE_SCHEDULES_API_V2) {
-          const [schedulePayload, kelasRes] = await Promise.all([
-            scheduleService.listTeacherSchedules({ tahun_ajaran: periodFilter.tahunAjaran }),
-            supabase.from('kelas').select(KELAS_COLUMNS).order('grade').order('suffix')
-          ])
-          if (kelasRes.error) throw kelasRes.error
-
-          const filteredJadwal = filterSchedulesForSemester(schedulePayload.data || [], periodFilter.semester)
-          const kelasIds = new Set(filteredJadwal.map((j) => j.kelas_id).filter(Boolean))
-          const visibleKelas = (kelasRes.data || []).filter((kelas) => kelasIds.has(kelas.id))
-
-          setJadwal(filteredJadwal)
-          setKelasList(visibleKelas)
-          setSelectedKelas((prev) => {
-            if (prev && visibleKelas.some((kelas) => kelas.id === prev)) return prev
-            return visibleKelas[0]?.id || ''
-          })
-          return
-        }
-
-        let jadwalQuery = supabase.from('jadwal').select(JADWAL_GURU_COLUMNS).eq('guru_id', user.id)
-        jadwalQuery = applyAcademicYearFilter(jadwalQuery)
-
-        const { data, error } = await supabase.batch([
-          { key: 'jadwal', query: jadwalQuery },
-          {
-            key: 'kelas',
-            query: supabase.from('kelas').select(KELAS_COLUMNS).order('grade').order('suffix')
-          }
+        const [schedulePayload, kelasRes] = await Promise.all([
+          scheduleService.listTeacherSchedules({ tahun_ajaran: periodFilter.tahunAjaran }),
+          ClassesApi.getAll({ per_page: 500, sort_by: 'grade', sort_dir: 'asc' }).catch((err) => ({ error: err, data: [] }))
         ])
-        if (error && !data) throw error
-
-        const jadwalRes = data?.jadwal || {}
-        const kelasRes = data?.kelas || {}
-        if (jadwalRes.error) throw jadwalRes.error
         if (kelasRes.error) throw kelasRes.error
 
-        const filteredJadwal = filterSchedulesForSemester(jadwalRes.data || [], periodFilter.semester)
+        const filteredJadwal = filterSchedulesForSemester(schedulePayload.data || [], periodFilter.semester)
         const kelasIds = new Set(filteredJadwal.map((j) => j.kelas_id).filter(Boolean))
         const visibleKelas = (kelasRes.data || []).filter((kelas) => kelasIds.has(kelas.id))
 
@@ -801,7 +763,7 @@ export default function GuruQuiz() {
       }
     }
     loadInitialTeachingData()
-  }, [applyAcademicYearFilter, periodFilter.semester, periodFilter.tahunAjaran, user?.id, pushToast])
+  }, [periodFilter.semester, periodFilter.tahunAjaran, user?.id, pushToast])
 
   useEffect(() => {
     // Guru doesn't need per-second countdown — 15s is enough for status badges
@@ -846,7 +808,7 @@ export default function GuruQuiz() {
       setSelectedQuizId('')
       return
     }
-    const { data, error } = await supabase.quiz.dashboard({
+    const { data, error } = await quizService.dashboard({
       page: 1,
       per_page: 100,
       kelas: selectedKelas,
@@ -919,212 +881,77 @@ export default function GuruQuiz() {
     }
 
     try {
-      // --- Phase 1: Fetch quiz detail + side data in PARALLEL ---
-      const quizIsActive = selectedQuiz && (toBoolean(selectedQuiz.is_active) || toBoolean(selectedQuiz.is_live))
-      const shouldUseHistoryRoster = Boolean(isViewingArchivePeriod && termPeriod.tahunAjaran && selectedKelas)
-      const siswaQuery = shouldUseHistoryRoster
-        ? supabase
-          .from('profiles')
-          .select('id, nama, nis, photo_path, photo_url')
-          .eq('role', 'siswa')
-          .eq('id', '__history_lookup__')
-          .limit(0)
-        : supabase
-          .from('profiles')
-          .select('id, nama, nis, photo_path, photo_url')
-          .eq('kelas', selectedKelas)
-          .eq('role', 'siswa')
-          .order('nama')
-      const detailPromise = supabase.quiz.detail(selectedQuizId, {
-        tahun_ajaran: termPeriod.tahunAjaran,
-        semester: termPeriod.semester
-      })
-      const sidePromise = Promise.all([
-        supabase.batch([
-          {
-            key: 'siswa',
-            query: siswaQuery
-          },
-          {
-            key: 'warnings',
-            query: supabase
-              .from('quiz_violation_logs')
-              .select('id, quiz_id, submission_id, siswa_id, event_type, event_message, event_meta, created_at')
-              .eq('quiz_id', selectedQuizId)
-              .order('created_at', { ascending: false })
-              .limit(300)
-          }
-        ]),
-        supabase.quiz.retakeHistory(selectedQuizId)
+      const [detailResult, participantResult, retakeResult] = await Promise.all([
+        quizService.detail(selectedQuizId, {
+          tahun_ajaran: termPeriod.tahunAjaran,
+          semester: termPeriod.semester
+        }),
+        quizService.participants(selectedQuizId, {
+          tahun_ajaran: termPeriod.tahunAjaran,
+          semester: termPeriod.semester
+        }),
+        quizService.retakeHistory(selectedQuizId)
       ])
-
-      const [detailResult, [{ data: detailBatch }, retakeResult]] = await Promise.all([detailPromise, sidePromise])
       const { data: detailData, error: detailError } = detailResult
       if (detailError?.code === 'REQUEST_ABORTED') return
       if (detailError) throw detailError
+      if (participantResult.error) throw participantResult.error
 
+      const participantData = participantResult.data || {}
       const questionRows = sortQuestionsByExamFlow(normalizeQuestionNumbering(detailData?.questions || []))
       const byQuestion = detailData?.options_by_question || {}
       const submissionRows = detailData?.submissions || []
       const answersBySubmission = detailData?.answers_by_submission || {}
-
-      // --- Phase 1 results already awaited above ---
-      let siswaRows = []
-      let historyRows = []
-      let warningRows = []
-      try {
-        const siswaRes = detailBatch?.siswa || {}
-        const warningsRes = detailBatch?.warnings || {}
-        if (siswaRes.error) throw siswaRes.error
-        siswaRows = siswaRes.data || []
-        warningRows = warningsRes.error ? [] : (warningsRes.data || [])
-        if (!retakeResult?.error) historyRows = retakeResult.data || []
-      } catch (err) {
-        // Fallback untuk skema lama yang belum punya kolom photo_path.
-        if (/photo_path/i.test(String(err?.message || ''))) {
-          const { data } = await supabase
-            .from('profiles')
-            .select('id, nama, nis, photo_url')
-            .eq('kelas', selectedKelas)
-            .eq('role', 'siswa')
-            .order('nama')
-          siswaRows = data || []
-        } else {
-          throw err
-        }
-      }
-
-      if (shouldUseHistoryRoster) {
-        let historyStudentIds = []
-        const { data: histRows, error: histError } = await supabase
-          .from('student_class_histories')
-          .select('student_id')
-          .eq('class_id', selectedKelas)
-          .eq('tahun_ajaran', termPeriod.tahunAjaran)
-          .in('status', ['active', 'nonaktif', 'mutasi'])
-
-        if (histError) {
-          console.warn('Gagal memuat roster historis quiz:', histError)
-        } else {
-          historyStudentIds = (histRows || [])
-            .map((row) => String(row.student_id || '').trim())
-            .filter(Boolean)
-        }
-
-        const submissionStudentIds = (submissionRows || [])
-          .map((row) => String(row.siswa_id || '').trim())
-          .filter(Boolean)
-        const targetStudentIds = Array.from(new Set(historyStudentIds.length ? historyStudentIds : submissionStudentIds))
-
-        if (targetStudentIds.length) {
-          let { data, error } = await supabase
-            .from('profiles')
-            .select('id, nama, nis, photo_path, photo_url')
-            .eq('role', 'siswa')
-            .in('id', targetStudentIds)
-            .order('nama')
-          if (error && /photo_path/i.test(error.message || '')) {
-            ;({ data, error } = await supabase
-              .from('profiles')
-              .select('id, nama, nis, photo_url')
-              .eq('role', 'siswa')
-              .in('id', targetStudentIds)
-              .order('nama'))
-          }
-          if (error) throw error
-          siswaRows = data || []
-        } else {
-          siswaRows = []
-        }
-      }
-
+      const siswaRows = participantData.students || []
+      const warningRows = participantData.warnings || []
+      const historyRows = retakeResult.error ? [] : (retakeResult.data || [])
       const submissionMap = new Map((submissionRows || []).map((s) => [s.siswa_id, s]))
-      const peserta = (siswaRows || []).map((s) => ({
-        ...s,
-        submission: submissionMap.get(s.id) || null
-      }))
-      const siswaIds = (siswaRows || []).map((s) => s.id).filter(Boolean)
-      const essayQuestionIds = (questionRows || [])
+      const peserta = siswaRows.map((s) => ({ ...s, submission: submissionMap.get(s.id) || null }))
+      const siswaIds = siswaRows.map((s) => s.id).filter(Boolean)
+      const essayQuestionIds = questionRows
         .filter((q) => normalizeQuestionType(q?.question_type) === 'essay')
         .map((q) => q.id)
-      const submissionIds = (submissionRows || []).map((s) => s.id).filter(Boolean)
+      const submissionIds = submissionRows.map((s) => s.id).filter(Boolean)
       const essayProgressMap = {}
       submissionIds.forEach((submissionId) => {
-        essayProgressMap[submissionId] = {
-          answeredCount: 0,
-          gradedCount: 0,
-          pendingCount: 0
-        }
+        essayProgressMap[submissionId] = { answeredCount: 0, gradedCount: 0, pendingCount: 0 }
       })
-
       if (essayQuestionIds.length && submissionIds.length) {
         Object.entries(answersBySubmission || {}).forEach(([submissionId, answerRows]) => {
           if (!essayProgressMap[submissionId]) return
           ;(answerRows || []).forEach((row) => {
-            if (!essayQuestionIds.includes(row?.question_id)) return
-            const answerText = String(row?.essay_answer || '').trim()
-            if (!answerText) return
+            if (!essayQuestionIds.includes(row?.question_id) || !String(row?.essay_answer || '').trim()) return
             essayProgressMap[submissionId].answeredCount += 1
-            if (row?.essay_score == null) {
-              essayProgressMap[submissionId].pendingCount += 1
-            } else {
-              essayProgressMap[submissionId].gradedCount += 1
-            }
+            if (row?.essay_score == null) essayProgressMap[submissionId].pendingCount += 1
+            else essayProgressMap[submissionId].gradedCount += 1
           })
         })
       }
 
-      // --- Presence: only fetch when quiz is active/live (skip for archived quizzes) ---
-      let presenceMap = {}
-      try {
-        if (quizIsActive && siswaIds.length) {
-          const { data: presenceRows, error: presenceError } = await supabase
-            .from('user_presence')
-            .select('user_id, device_id, last_seen_at, activity_count')
-            .in('user_id', siswaIds)
-            .order('last_seen_at', { ascending: false })
-            .limit(500)
-          if (!presenceError) {
-            const cutoffMs = Date.now() - ONLINE_ACTIVE_SECONDS * 1000
-            ;(presenceRows || []).forEach((row) => {
-              const userId = row?.user_id
-              if (!userId) return
-              if (!presenceMap[userId]) {
-                presenceMap[userId] = {
-                  online: false,
-                  active_devices: 0,
-                  activity_count: 0,
-                  last_seen_at: null,
-                  active_device_ids: new Set()
-                }
-              }
-              const current = presenceMap[userId]
-              const seenAt = safeDate(row?.last_seen_at)
-              if (seenAt) {
-                const seenIso = seenAt.toISOString()
-                if (!current.last_seen_at || seenIso > current.last_seen_at) {
-                  current.last_seen_at = seenIso
-                }
-                if (seenAt.getTime() >= cutoffMs) {
-                  current.online = true
-                  const deviceKey = String(row?.device_id || `unknown-${userId}`).trim()
-                  current.active_device_ids.add(deviceKey)
-                  current.active_devices = current.active_device_ids.size
-                  current.activity_count += Number(row?.activity_count || 0)
-                }
-              }
-            })
-            Object.values(presenceMap || {}).forEach((presence) => {
-              delete presence.active_device_ids
-            })
-          }
+      const presenceMap = {}
+      const cutoffMs = Date.now() - ONLINE_ACTIVE_SECONDS * 1000
+      ;(participantData.presence || []).forEach((row) => {
+        const userId = row?.user_id
+        if (!userId || (siswaIds.length && !siswaIds.includes(userId))) return
+        if (!presenceMap[userId]) {
+          presenceMap[userId] = { online: false, active_devices: 0, activity_count: 0, last_seen_at: null, activeDeviceIds: new Set() }
         }
-      } catch {
-        presenceMap = {}
-      }
+        const current = presenceMap[userId]
+        const seenAt = safeDate(row?.last_seen_at)
+        if (!seenAt) return
+        const seenIso = seenAt.toISOString()
+        if (!current.last_seen_at || seenIso > current.last_seen_at) current.last_seen_at = seenIso
+        if (seenAt.getTime() >= cutoffMs) {
+          current.online = true
+          current.activeDeviceIds.add(String(row?.device_id || `unknown-${userId}`))
+          current.active_devices = current.activeDeviceIds.size
+          current.activity_count += Number(row?.activity_count || 0)
+        }
+      })
+      Object.values(presenceMap).forEach((presence) => { delete presence.activeDeviceIds })
 
       startTransition(() => {
-        setQuestions(questionRows || [])
+        setQuestions(questionRows)
         setOptionsByQuestion(byQuestion)
         setParticipants(peserta)
         setRetakeLogs(historyRows)
@@ -1159,127 +986,12 @@ export default function GuruQuiz() {
 
   useEffect(() => {
     if (!user?.id || !selectedKelas) return undefined
-
-    const channel = supabase
-      .channel(`guru-quiz-live-${user.id}-${selectedKelas}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quizzes',
-          filter: `kelas_id=eq.${selectedKelas}`
-        },
-        (payload) => {
-          const row = payload.new || payload.old
-          if (!row) return
-          queueQuizReload(80)
-          if (row.id && row.id === selectedQuizIdRef.current) {
-            queueDetailReload(80)
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quiz_submissions'
-        },
-        (payload) => {
-          const row = payload.new || payload.old
-          const quizId = row?.quiz_id
-          if (!quizId) return
-          if (!trackedQuizIdsRef.current.has(quizId)) return
-          queueQuizReload(100)
-          if (quizId === selectedQuizIdRef.current) {
-            queueDetailReload(100)
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quiz_questions'
-        },
-        (payload) => {
-          const row = payload.new || payload.old
-          const quizId = row?.quiz_id
-          if (!quizId) return
-          if (!trackedQuizIdsRef.current.has(quizId)) return
-          if (quizId === selectedQuizIdRef.current) {
-            queueDetailReload(80)
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quiz_options'
-        },
-        (payload) => {
-          const row = payload.new || payload.old
-          const questionId = row?.question_id
-          if (!questionId) return
-          if (!trackedQuestionIdsRef.current.has(questionId)) return
-          queueDetailReload(80)
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quiz_answers'
-        },
-        (payload) => {
-          const row = payload.new || payload.old
-          const submissionId = row?.submission_id
-          const questionId = row?.question_id
-          if (!submissionId) return
-          if (!trackedSubmissionIdsRef.current.has(submissionId)) return
-          if (questionId && !trackedQuestionIdsRef.current.has(questionId)) return
-          queueDetailReload(80)
-          queueQuizReload(120)
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quiz_violation_logs'
-        },
-        (payload) => {
-          const row = payload.new || payload.old
-          const quizId = row?.quiz_id
-          if (!quizId || quizId !== selectedQuizIdRef.current) return
-          queueDetailReload(60)
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'user_presence'
-        },
-        (payload) => {
-          const row = payload.new || payload.old
-          const siswaId = row?.user_id
-          if (!siswaId) return
-          if (!trackedStudentIdsRef.current.has(siswaId)) return
-          queueDetailReload(200)
-        }
-      )
-      .subscribe()
-
+    const interval = window.setInterval(() => {
+      queueQuizReload(80)
+      if (selectedQuizIdRef.current) queueDetailReload(100)
+    }, 5000)
     return () => {
-      supabase.removeChannel(channel)
+      window.clearInterval(interval)
     }
   }, [user?.id, selectedKelas, queueQuizReload, queueDetailReload])
 
@@ -1395,7 +1107,7 @@ export default function GuruQuiz() {
     try {
       setCloneSaving(true)
       setLoading(true)
-      const { data, error } = await supabase.quiz.clone({
+      const { data, error } = await quizService.clone({
         source_quiz_id: selectedQuiz.id,
         target_kelas_id: cloneForm.target_kelas_id,
         target_mapel: cloneForm.target_mapel,
@@ -1473,15 +1185,12 @@ export default function GuruQuiz() {
 
       try {
         setLoading(true)
-        const { data, error } = await supabase
-          .from('quizzes')
-          .update(payload)
-          .eq('id', editingQuizId)
-          .select('id, nama, mode, is_live, is_active, starts_at, deadline_at, live_started_at, duration_minutes, access_device, updated_at')
-          .maybeSingle()
+        const updatedQuiz = await quizService.updateQuiz(editingQuizId, payload)
+        const data = updatedQuiz?.quiz || updatedQuiz?.data || updatedQuiz
+        const error = null
         if (error) throw error
-        const updatedQuiz = data || { ...selectedQuiz, ...payload }
-        setQuizList((prev) => prev.map((row) => (row.id === editingQuizId ? { ...row, ...updatedQuiz } : row)))
+        const nextQuiz = data || { ...selectedQuiz, ...payload }
+        setQuizList((prev) => prev.map((row) => (row.id === editingQuizId ? { ...row, ...nextQuiz } : row)))
         pushToast('success', 'Info quiz berhasil diperbarui')
         resetQuizForm()
         setShowQuizForm(false)
@@ -1672,7 +1381,7 @@ export default function GuruQuiz() {
     try {
       setLoading(true)
       await persistQuestionExamFlowOrder()
-      const { data, error } = await supabase.quiz.schedule({
+      const { data, error } = await quizService.schedule({
         quiz_id: selectedQuiz.id,
         starts_at: startsAt.toISOString(),
         deadline_at: deadlineAt.toISOString(),
@@ -1723,7 +1432,7 @@ export default function GuruQuiz() {
 
     try {
       setSecuritySaving(true)
-      const { data, error } = await supabase.quiz.publish(payload)
+      const { data, error } = await quizService.publish(payload)
       if (error) throw error
       const freshQuiz = data?.quiz || null
       if (freshQuiz?.id) {
@@ -1746,7 +1455,7 @@ export default function GuruQuiz() {
 
     try {
       setClosingQuiz(true)
-      const { data, error } = await supabase.quiz.close({ quiz_id: selectedQuiz.id })
+      const { data, error } = await quizService.close({ quiz_id: selectedQuiz.id })
       if (error) throw error
       pushToast('success', `Quiz ditutup. ${data?.finalized_submissions ?? 0} attempt difinalkan.`)
       await loadQuizzes()
@@ -1842,7 +1551,7 @@ export default function GuruQuiz() {
       setQuestionImageUploading(true)
       const oldPath = questionForm.image_path || ''
       const originalPaths = collectEditingQuestionImagePaths()
-      const uploaded = await uploadQuizImage(file, 'question')
+      const uploaded = await uploadQuizImage(file)
       const uploadedPath = uploaded?.path || ''
       setQuestionForm((prev) => ({ ...prev, image_path: uploadedPath }))
       if (uploadedPath) {
@@ -1874,7 +1583,7 @@ export default function GuruQuiz() {
       setOptionImageUploading((prev) => ({ ...prev, [label]: true }))
       const oldPath = questionForm.option_images?.[label] || ''
       const originalPaths = collectEditingQuestionImagePaths()
-      const uploaded = await uploadQuizImage(file, `option-${label.toLowerCase()}`)
+      const uploaded = await uploadQuizImage(file)
       const uploadedPath = uploaded?.path || ''
       setQuestionForm((prev) => ({
         ...prev,
@@ -2071,14 +1780,11 @@ export default function GuruQuiz() {
       setDetailError('')
       setDetailLoading(true)
 
-      const { data, error } = await supabase
-        .from('quiz_answers')
-        .select('*')
-        .eq('submission_id', sub.id)
+      const { data, error } = await quizService.attemptAnswers(selectedQuizId, sub.id)
 
       if (error) throw error
 
-      const answerByQuestionId = new Map((data || []).map((row) => [row.question_id, row]))
+      const answerByQuestionId = new Map((data?.answers || []).map((row) => [row.question_id, row]))
       const rows = (questions || []).map((question, index) => {
         const answer = answerByQuestionId.get(question.id) || null
         const questionType = normalizeQuestionType(question?.question_type)
@@ -2156,7 +1862,7 @@ export default function GuruQuiz() {
     const run = async () => {
       try {
         setDetailFinishingReview(true)
-        const { data, error } = await supabase.quiz.completeEssayReview({
+        const { data, error } = await quizService.completeEssayReview({
           quiz_id: selectedQuiz.id,
           submission_id: detailSubmission.id,
           siswa_id: detailStudent.id
@@ -2239,7 +1945,7 @@ export default function GuruQuiz() {
 
     try {
       setEssaySavingQuestionId(row.questionId)
-      const { data, error } = await supabase.quiz.gradeEssay({
+      const { data, error } = await quizService.gradeEssay({
         quiz_id: selectedQuiz.id,
         submission_id: detailSubmission.id,
         siswa_id: detailStudent.id,
@@ -2300,11 +2006,8 @@ export default function GuruQuiz() {
     try {
       setLoading(true)
       await quizService.deleteQuestion(questionId)
-      const { data } = await supabase
-        .from('quiz_questions')
-        .select('id,quiz_id,nomor,soal,image_path,poin,question_type,updated_at')
-        .eq('quiz_id', selectedQuizId)
-        .order('nomor', { ascending: true })
+      const { data, error } = await quizService.questions(selectedQuizId)
+      if (error) throw error
       await persistQuestionExamFlowOrder(data || [])
       await loadQuizDetails()
       pushToast('success', 'Soal dihapus')
@@ -2331,7 +2034,7 @@ export default function GuruQuiz() {
 
     try {
       setLoading(true)
-      const { data, error } = await supabase.quiz.retake({
+      const { data, error } = await quizService.retake({
         quiz_id: selectedQuiz.id,
         siswa_id: student.id,
         confirmed: true
@@ -2368,7 +2071,7 @@ export default function GuruQuiz() {
 
     try {
       setRetakeRestoreStudentId(student.id)
-      const { data, error } = await supabase.quiz.restoreRetakeScore({
+      const { data, error } = await quizService.restoreRetakeScore({
         quiz_id: selectedQuiz.id,
         siswa_id: student.id
       })

@@ -14,7 +14,6 @@ import {
   Send,
   ShieldCheck
 } from 'lucide-react'
-import { QUIZ_MEDIA_BUCKET, supabase } from '../../lib/supabase'
 import { useLocalCache } from '../../hooks/useLocalCache'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -30,9 +29,10 @@ import {
 } from '../../utils/academicAssessment'
 import {
   scheduleErrorMessage,
-  scheduleService,
-  USE_SCHEDULES_API_V2
+  scheduleService
 } from '../../services/scheduleService'
+import { quizService } from '../../services/quizService'
+import { quizAttemptService } from '../../services/quizAttemptService'
 
 const QuizEssayTextarea = memo(function QuizEssayTextarea({ value, onChange, onBlur, disabled, placeholder, className }) {
   return (
@@ -520,7 +520,6 @@ export default function SiswaQuiz() {
     setAcademicYear,
     setSemester,
     resetToActivePeriod,
-    applyAcademicYearFilter,
     academicSemesterCacheKey,
     isViewingArchivePeriod
   } = useActiveAcademicPeriod({
@@ -978,9 +977,16 @@ export default function SiswaQuiz() {
   }, [])
 
   const getQuizImageUrl = useCallback((value) => {
+    const raw = String(value || '').trim()
+    if (raw.startsWith('attachment:')) {
+      const attachmentId = raw.slice('attachment:'.length).trim()
+      return attachmentId
+        ? `/api/v2/attachments/${encodeURIComponent(attachmentId)}/download?redirect=1`
+        : ''
+    }
     const objectPath = normalizeQuizMediaPath(value)
     if (!objectPath) return ''
-    return supabase.storage.from(QUIZ_MEDIA_BUCKET).getPublicUrl(objectPath)?.data?.publicUrl || ''
+    return /^https?:\/\//i.test(objectPath) ? objectPath : ''
   }, [normalizeQuizMediaPath])
 
   const getQuizItemImagePath = useCallback((item) => (
@@ -1039,7 +1045,7 @@ export default function SiswaQuiz() {
     violationLogRef.current = { key: dedupeKey, at: nowMs }
 
     try {
-      const { data: logResult } = await supabase.quiz.logViolation({
+      const { data: logResult } = await quizAttemptService.violation({
         quiz_id: quizId,
         submission_id: submissionId,
         event_type: normalizedType,
@@ -1255,7 +1261,7 @@ export default function SiswaQuiz() {
     let stopped = false
     const pingQuizPresence = async () => {
       try {
-        await supabase.presence.ping({ deviceId, activity: true })
+        await quizAttemptService.pingPresence({ device_id: deviceId, activity: true })
       } catch {
         // Presence is best-effort; polling will retry on the next interval.
       }
@@ -1282,42 +1288,22 @@ export default function SiswaQuiz() {
     if (!kelasId) return []
 
     try {
-	      if (USE_SCHEDULES_API_V2) {
-	        const payload = await scheduleService.listStudentSchedules({
-	          kelas_id: kelasId,
-	          tahun_ajaran: periodFilter.tahunAjaran
-	        })
+      const payload = await scheduleService.listStudentSchedules({
+        kelas_id: kelasId,
+        tahun_ajaran: periodFilter.tahunAjaran
+      })
 
-	        return [...new Set(
-	          filterSchedulesForSemester(payload.data || [], periodFilter.semester)
-	            .map((row) => String(row?.mapel || '').trim())
-	            .filter(Boolean)
-	        )].sort((a, b) => a.localeCompare(b, 'id'))
-	      }
-
-	      let query = supabase
-	        .from('jadwal')
-	        .select('mapel,periode_berlaku')
-	        .eq('kelas_id', kelasId)
-	        .order('mapel', { ascending: true })
-      query = applyAcademicYearFilter(query)
-
-      const { data, error } = await query
-      if (error) throw error
-
-	      return [...new Set(
-	        filterSchedulesForSemester(data || [], periodFilter.semester)
-	          .map((row) => String(row?.mapel || '').trim())
-	          .filter(Boolean)
-	      )].sort((a, b) => a.localeCompare(b, 'id'))
+      return [...new Set(
+        filterSchedulesForSemester(payload.data || [], periodFilter.semester)
+          .map((row) => String(row?.mapel || '').trim())
+          .filter(Boolean)
+      )].sort((a, b) => a.localeCompare(b, 'id'))
     } catch (err) {
       console.warn('Gagal memuat mapel jadwal quiz siswa:', err)
-      if (USE_SCHEDULES_API_V2) {
-        pushToast('error', scheduleErrorMessage(err, 'Gagal memuat jadwal mata pelajaran'))
-      }
+      pushToast('error', scheduleErrorMessage(err, 'Gagal memuat jadwal mata pelajaran'))
       return []
     }
-	  }, [applyAcademicYearFilter, kelasId, periodFilter.semester, periodFilter.tahunAjaran, pushToast])
+  }, [kelasId, periodFilter.semester, periodFilter.tahunAjaran, pushToast])
 
   const rememberEssayDraft = (questionId, value) => {
     const key = String(questionId || '')
@@ -1374,7 +1360,7 @@ export default function SiswaQuiz() {
       setQuizLoadDone(false)
       setLoading(true)
       const [dashboardResult, scheduleMapels] = await Promise.all([
-        supabase.quiz.dashboard({
+        quizService.dashboard({
           page: 1,
           per_page: 100,
           kelas: kelasId,
@@ -1421,106 +1407,13 @@ export default function SiswaQuiz() {
   }, [user?.id, kelasId, quizRealtimeTick, termPeriod.tahunAjaran, termPeriod.semester])
 
   useEffect(() => {
-    if (isSessionPage) return undefined
-    if (!user?.id || !kelasId) return undefined
-
-    const channel = supabase
-      .channel(`siswa-quiz-live-${user.id}-${kelasId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quizzes',
-          filter: `kelas_id=eq.${kelasId}`
-        },
-        (payload) => {
-          const row = payload.new || payload.old
-          if (!row) return
-          queueQuizReload(80)
-          if (row.id && row.id === selectedQuizIdRef.current) {
-            queueQuizDetailReload(100)
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quiz_submissions',
-          filter: `siswa_id=eq.${user.id}`
-        },
-        (payload) => {
-          const row = payload.new || payload.old
-          const quizId = row?.quiz_id
-          if (!quizId) return
-          queueQuizReload(90)
-          if (quizId === selectedQuizIdRef.current) {
-            queueQuizDetailReload(80)
-          }
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    if (isSessionPage || !user?.id || !kelasId) return undefined
+    const interval = window.setInterval(() => {
+      queueQuizReload(80)
+      if (selectedQuizIdRef.current) queueQuizDetailReload(100)
+    }, 5000)
+    return () => window.clearInterval(interval)
   }, [isSessionPage, user?.id, kelasId, queueQuizReload, queueQuizDetailReload])
-
-  useEffect(() => {
-    if (isSessionPage) return undefined
-    if (!selectedQuizId || !user?.id) return undefined
-
-    const channel = supabase
-      .channel(`siswa-quiz-detail-live-${user.id}-${selectedQuizId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quiz_questions',
-          filter: `quiz_id=eq.${selectedQuizId}`
-        },
-        () => {
-          queueQuizDetailReload(70)
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quiz_options'
-        },
-        (payload) => {
-          const row = payload.new || payload.old
-          const questionId = row?.question_id
-          if (!questionId) return
-          if (!trackedQuestionIdsRef.current.has(questionId)) return
-          queueQuizDetailReload(70)
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'quiz_violation_logs',
-          filter: `quiz_id=eq.${selectedQuizId}`
-        },
-        (payload) => {
-          const row = payload.new || payload.old
-          if (row?.siswa_id && row.siswa_id !== user.id) return
-          queueQuizDetailReload(100)
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [isSessionPage, selectedQuizId, user?.id, queueQuizDetailReload])
 
   const loadQuizDetails = async () => {
     const targetQuizId = selectedQuiz?.id || (isSessionPage ? sessionQuizIdParam : '')
@@ -1544,7 +1437,7 @@ export default function SiswaQuiz() {
       setQuizDetailsLoadedForId('')
       setQuizDetailsError('')
       setLoading(true)
-      const { data, error } = await supabase.quiz.detail(targetQuizId, {
+      const { data, error } = await quizService.detail(targetQuizId, {
         tahun_ajaran: termPeriod.tahunAjaran,
         semester: termPeriod.semester,
         client: 'web',
@@ -1705,7 +1598,7 @@ export default function SiswaQuiz() {
     }
     if (sub?.status === 'finished') return sub
 
-    const { data, error } = await supabase.quiz.start({
+    const { data, error } = await quizAttemptService.start({
       quiz_id: selectedQuiz.id,
       access_code: accessCodeInput.trim() || undefined,
       client_meta: buildQuizClientMeta({
@@ -1779,7 +1672,7 @@ export default function SiswaQuiz() {
 
     batchFlushInFlightRef.current = true
     try {
-      const { data, error } = await supabase.quiz.saveAnswersBatch({
+      const { data, error } = await quizAttemptService.batch({
         quiz_id: quizId,
         submission_id: submissionId,
         answers: rowsToSend.map((row) => ({
@@ -1961,7 +1854,7 @@ export default function SiswaQuiz() {
     const quizId = selectedQuiz.id
     const timer = setInterval(async () => {
       try {
-        const { data } = await supabase.quiz.detail(quizId)
+        const { data } = await quizService.detail(quizId)
         const serverDeadline = data?.quiz?.deadline_at
         if (serverDeadline && typeof serverDeadline === 'string' && serverDeadline.trim()) {
           setQuizList((prev) => prev.map((q) => {
@@ -2015,7 +1908,7 @@ export default function SiswaQuiz() {
       Object.values(essaySaveTimersRef.current || {}).forEach((timerId) => clearTimeout(timerId))
       essaySaveTimersRef.current = {}
       await flushPendingAnswers({ silent: true })
-      const { data, error } = await supabase.quiz.submit({
+      const { data, error } = await quizAttemptService.submit({
         quiz_id: selectedQuiz.id,
         submission_id: sub.id,
         answers: buildSubmitAnswersPayload(),
