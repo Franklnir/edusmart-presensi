@@ -8,19 +8,24 @@ use App\Http\Controllers\Api\V2\AttachmentController;
 use App\Http\Controllers\Api\V2\AttendanceController;
 use App\Http\Controllers\Api\V2\AttendanceRequestController;
 use App\Http\Controllers\Api\V2\AttendanceScannerController;
+use App\Http\Controllers\Api\V2\CertificateController;
+use App\Http\Controllers\Api\V2\CertificateTemplateController;
 use App\Http\Controllers\Api\V2\ClassController;
 use App\Http\Controllers\Api\V2\CurrentProfileController;
+use App\Http\Controllers\Api\V2\ExtracurricularController;
 use App\Http\Controllers\Api\V2\FrontendLogController;
 use App\Http\Controllers\Api\V2\GradeController;
+use App\Http\Controllers\Api\V2\JamKosongController;
 use App\Http\Controllers\Api\V2\OrganizationContextController;
-use App\Http\Controllers\Api\V2\ReportCardController;
 use App\Http\Controllers\Api\V2\QuizAttemptController;
 use App\Http\Controllers\Api\V2\QuizController;
 use App\Http\Controllers\Api\V2\QuizPresenceController;
 use App\Http\Controllers\Api\V2\QuizQuestionController;
 use App\Http\Controllers\Api\V2\QuizSubmissionController;
+use App\Http\Controllers\Api\V2\ReportCardController;
 use App\Http\Controllers\Api\V2\ScheduleController;
 use App\Http\Controllers\Api\V2\StudentController;
+use App\Http\Controllers\Api\V2\SubjectController;
 use App\Http\Controllers\Api\V2\SubmissionController;
 use App\Http\Controllers\Api\V2\TeacherController;
 use App\Http\Controllers\Api\V2\TeacherDashboardController;
@@ -96,32 +101,32 @@ Route::middleware('throttle:api')->group(function () {
     Route::get('report-cards/{student}/print', [ReportCardController::class, 'print'])->name('report-cards.print');
 
     // Extracurriculars
-    Route::get('extracurriculars', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'index'])->name('extracurriculars.index');
-    Route::post('extracurriculars', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'store'])->name('extracurriculars.store');
-    Route::get('extracurriculars/{extracurricular}', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'show'])->name('extracurriculars.show');
-    Route::put('extracurriculars/{extracurricular}', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'update'])->name('extracurriculars.update');
-    Route::delete('extracurriculars/{extracurricular}', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'destroy'])->name('extracurriculars.destroy');
-    Route::get('extracurriculars/{extracurricular}/members', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'members'])->name('extracurriculars.members');
-    Route::post('extracurriculars/{extracurricular}/join', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'join'])->name('extracurriculars.join');
-    Route::delete('extracurriculars/{extracurricular}/leave', [\App\Http\Controllers\Api\V2\ExtracurricularController::class, 'leave'])->name('extracurriculars.leave');
+    Route::get('extracurriculars', [ExtracurricularController::class, 'index'])->name('extracurriculars.index');
+    Route::post('extracurriculars', [ExtracurricularController::class, 'store'])->name('extracurriculars.store');
+    Route::get('extracurriculars/{extracurricular}', [ExtracurricularController::class, 'show'])->name('extracurriculars.show');
+    Route::put('extracurriculars/{extracurricular}', [ExtracurricularController::class, 'update'])->name('extracurriculars.update');
+    Route::delete('extracurriculars/{extracurricular}', [ExtracurricularController::class, 'destroy'])->name('extracurriculars.destroy');
+    Route::get('extracurriculars/{extracurricular}/members', [ExtracurricularController::class, 'members'])->name('extracurriculars.members');
+    Route::post('extracurriculars/{extracurricular}/join', [ExtracurricularController::class, 'join'])->name('extracurriculars.join');
+    Route::delete('extracurriculars/{extracurricular}/leave', [ExtracurricularController::class, 'leave'])->name('extracurriculars.leave');
 
     // Certificates
-    Route::get('certificates', [\App\Http\Controllers\Api\V2\CertificateController::class, 'index'])->name('certificates.index');
-    Route::post('certificates', [\App\Http\Controllers\Api\V2\CertificateController::class, 'store'])->name('certificates.store');
-    Route::get('certificates/{certificate}', [\App\Http\Controllers\Api\V2\CertificateController::class, 'show'])->name('certificates.show');
-    Route::put('certificates/{certificate}', [\App\Http\Controllers\Api\V2\CertificateController::class, 'update'])->name('certificates.update');
-    Route::delete('certificates/{certificate}', [\App\Http\Controllers\Api\V2\CertificateController::class, 'destroy'])->name('certificates.destroy');
+    Route::get('certificates', [CertificateController::class, 'index'])->name('certificates.index');
+    Route::post('certificates', [CertificateController::class, 'store'])->name('certificates.store');
+    Route::get('certificates/{certificate}', [CertificateController::class, 'show'])->name('certificates.show');
+    Route::put('certificates/{certificate}', [CertificateController::class, 'update'])->name('certificates.update');
+    Route::delete('certificates/{certificate}', [CertificateController::class, 'destroy'])->name('certificates.destroy');
 
     // Certificate Templates
-    Route::get('certificate-templates', [\App\Http\Controllers\Api\V2\CertificateTemplateController::class, 'index'])->name('certificate-templates.index');
-    Route::post('certificate-templates', [\App\Http\Controllers\Api\V2\CertificateTemplateController::class, 'store'])->name('certificate-templates.store');
-    Route::get('certificate-templates/{template}', [\App\Http\Controllers\Api\V2\CertificateTemplateController::class, 'show'])->name('certificate-templates.show');
-    Route::put('certificate-templates/{template}', [\App\Http\Controllers\Api\V2\CertificateTemplateController::class, 'update'])->name('certificate-templates.update');
-    Route::delete('certificate-templates/{template}', [\App\Http\Controllers\Api\V2\CertificateTemplateController::class, 'destroy'])->name('certificate-templates.destroy');
+    Route::get('certificate-templates', [CertificateTemplateController::class, 'index'])->name('certificate-templates.index');
+    Route::post('certificate-templates', [CertificateTemplateController::class, 'store'])->name('certificate-templates.store');
+    Route::get('certificate-templates/{template}', [CertificateTemplateController::class, 'show'])->name('certificate-templates.show');
+    Route::put('certificate-templates/{template}', [CertificateTemplateController::class, 'update'])->name('certificate-templates.update');
+    Route::delete('certificate-templates/{template}', [CertificateTemplateController::class, 'destroy'])->name('certificate-templates.destroy');
 
     // Subjects & Jam Kosong
-    Route::apiResource('subjects', \App\Http\Controllers\Api\V2\SubjectController::class)->except(['create', 'edit']);
-    Route::apiResource('jam-kosong', \App\Http\Controllers\Api\V2\JamKosongController::class)->except(['create', 'edit', 'update', 'show']);
+    Route::apiResource('subjects', SubjectController::class)->except(['create', 'edit']);
+    Route::apiResource('jam-kosong', JamKosongController::class)->except(['create', 'edit', 'update', 'show']);
 
     Route::get('quizzes', [QuizController::class, 'index'])->name('quizzes.index');
     Route::post('quizzes', [QuizController::class, 'store'])->name('quizzes.store');
