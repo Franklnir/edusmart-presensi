@@ -95,6 +95,158 @@ class ReportCardControllerTest extends TestCase
             ->assertJsonPath('code', 'CLASS_ACCESS_DENIED');
     }
 
+    public function test_teacher_can_upsert_report_card_item_for_assigned_subject(): void
+    {
+        $teacher = $this->createUser('guru');
+        $student = $this->createUser('siswa');
+        $student->profile->update(['kelas' => 'Kelas 10']);
+
+        DB::table('kelas')->insertOrIgnore([
+            'id' => 'Kelas 10',
+            'tenant_id' => $this->tenantId,
+            'nama' => 'Kelas 10',
+        ]);
+        DB::table('jadwal')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $this->tenantId,
+            'guru_id' => $teacher->id,
+            'kelas_id' => 'Kelas 10',
+            'mapel' => 'Fisika',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => 'Ganjil',
+            'hari' => 'Senin',
+            'jam_mulai' => '07:00:00',
+            'jam_selesai' => '08:30:00',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Sanctum::actingAs($teacher);
+
+        $this->withHeaders($this->tenantHeaders(['Idempotency-Key' => 'report-item-1']))
+            ->putJson("/api/v2/report-cards/{$student->id}/items?tahun_ajaran=2026/2027&semester=Ganjil", [
+                'kelas_id' => 'Kelas 10',
+                'jenis' => 'uts',
+                'mapel' => 'Fisika',
+                'kkm' => 75,
+                'nilai' => 88,
+                'predikat' => 'B',
+                'keterangan' => 'Baik',
+                'tenant_id' => 'tenant-yang-tidak-boleh-dipercaya',
+                'sent_by' => 'aktor-yang-tidak-boleh-dipercaya',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.siswa_id', $student->id)
+            ->assertJsonPath('data.mapel', 'Fisika')
+            ->assertJsonPath('data.jenis', 'uts');
+
+        $report = DB::table('rapot_siswa')
+            ->where('tenant_id', $this->tenantId)
+            ->where('siswa_id', $student->id)
+            ->first();
+        $this->assertNotNull($report);
+        $this->assertSame('2026/2027', $report->tahun_pelajaran);
+        $this->assertSame('Ganjil', $report->semester);
+        $this->assertDatabaseHas('rapot_siswa_items', [
+            'tenant_id' => $this->tenantId,
+            'rapot_id' => $report->id,
+            'mapel' => 'Fisika',
+            'nilai' => 88,
+            'sent_by' => $teacher->id,
+        ]);
+    }
+
+    public function test_teacher_cannot_upsert_report_card_item_for_unassigned_subject(): void
+    {
+        $teacher = $this->createUser('guru');
+        $student = $this->createUser('siswa');
+        $student->profile->update(['kelas' => 'Kelas 10']);
+
+        DB::table('kelas')->insertOrIgnore([
+            'id' => 'Kelas 10',
+            'tenant_id' => $this->tenantId,
+            'nama' => 'Kelas 10',
+        ]);
+        Sanctum::actingAs($teacher);
+
+        $this->withHeaders($this->tenantHeaders(['Idempotency-Key' => 'report-item-2']))
+            ->putJson("/api/v2/report-cards/{$student->id}/items?tahun_ajaran=2026/2027&semester=Ganjil", [
+                'kelas_id' => 'Kelas 10',
+                'jenis' => 'uas',
+                'mapel' => 'Kimia',
+                'nilai' => 80,
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('code', 'CLASS_ACCESS_DENIED');
+    }
+
+    public function test_report_card_list_is_tenant_scoped(): void
+    {
+        DB::table('tenants')->insertOrIgnore([
+            'id' => 'tenant-report-other',
+            'slug' => 'tenant-report-other',
+            'name' => 'Tenant Report Other',
+        ]);
+        $teacher = $this->createUser('guru');
+        $student = $this->createUser('siswa');
+        $student->profile->update(['kelas' => 'Kelas 10']);
+        $otherStudent = User::factory()->create(['id' => (string) Str::uuid()]);
+        Profile::create([
+            'id' => $otherStudent->id,
+            'tenant_id' => 'tenant-report-other',
+            'role' => 'siswa',
+            'email' => $otherStudent->email,
+            'nama' => 'Other Student',
+            'kelas' => 'Kelas 10',
+            'status' => 'active',
+        ]);
+
+        DB::table('kelas')->insertOrIgnore([
+            'id' => 'Kelas 10',
+            'tenant_id' => $this->tenantId,
+            'nama' => 'Kelas 10',
+        ]);
+
+        DB::table('kelas_struktur')->insert([
+            'id' => (string) Str::uuid(),
+            'kelas_id' => 'Kelas 10',
+            'wali_guru_id' => $teacher->id,
+            'tahun_ajaran' => '2026/2027',
+            'tenant_id' => $this->tenantId,
+        ]);
+        DB::table('rapot_siswa')->insert([
+            [
+                'id' => (string) Str::uuid(),
+                'tenant_id' => $this->tenantId,
+                'siswa_id' => $student->id,
+                'kelas_id' => 'Kelas 10',
+                'jenis' => 'uts',
+                'tahun_pelajaran' => '2026/2027',
+                'semester' => 'Ganjil',
+                'status' => 'draft',
+            ],
+            [
+                'id' => (string) Str::uuid(),
+                'tenant_id' => 'tenant-report-other',
+                'siswa_id' => $otherStudent->id,
+                'kelas_id' => 'Kelas 10',
+                'jenis' => 'uts',
+                'tahun_pelajaran' => '2026/2027',
+                'semester' => 'Ganjil',
+                'status' => 'draft',
+            ],
+        ]);
+
+        Sanctum::actingAs($teacher);
+        $response = $this->withHeaders($this->tenantHeaders())
+            ->getJson('/api/v2/report-cards?kelas_id=Kelas 10&tahun_ajaran=2026/2027&semester=Ganjil')
+            ->assertOk();
+
+        $ids = collect($response->json('data'))->pluck('siswa_id')->all();
+        $this->assertContains($student->id, $ids);
+        $this->assertNotContains($otherStudent->id, $ids);
+    }
+
     public function test_homeroom_teacher_can_update_metadata(): void
     {
         $teacher = $this->createUser('guru');

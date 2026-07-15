@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class AcademicPeriodConsistencyTest extends TestCase
@@ -69,44 +70,72 @@ class AcademicPeriodConsistencyTest extends TestCase
     {
         $tenantId = $this->defaultTenantId();
         $this->seedSettings($tenantId, '2026/2027', AcademicPeriod::SEMESTER_GANJIL);
-        $admin = $this->createUserWithProfile($tenantId, 'admin', 'admin-report-term@example.com', '');
+        $teacher = $this->createUserWithProfile($tenantId, 'guru', 'teacher-report-term@example.com', '');
         $student = $this->createUserWithProfile($tenantId, 'siswa', 'student-report-term@example.com', 'X-A');
         $this->seedClass($tenantId, 'X-A');
 
-        $payload = [
-            'table' => 'rapot_siswa',
-            'action' => 'upsert',
-            'onConflict' => 'tenant_id,siswa_id,kelas_id,tahun_pelajaran,semester,jenis',
-            'payload' => [
-                'id' => (string) Str::uuid(),
-                'siswa_id' => $student->id,
+        DB::table('jadwal')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'kelas_id' => 'X-A',
+            'hari' => 'Senin',
+            'mapel' => 'Matematika',
+            'guru_id' => $teacher->id,
+            'guru_nama' => 'Guru Rapor Periode',
+            'jam_mulai' => '07:00:00',
+            'jam_selesai' => '08:00:00',
+            'tahun_ajaran' => '2026/2027',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            'periode_berlaku' => 'tahunan',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('rapot_siswa')->insert([
+            'id' => (string) Str::uuid(),
+            'tenant_id' => $tenantId,
+            'siswa_id' => $student->id,
+            'kelas_id' => 'X-A',
+            'jenis' => 'uts',
+            'tahun_pelajaran' => '2026/2027',
+            'semester' => AcademicPeriod::SEMESTER_GANJIL,
+            'status' => 'draft',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Sanctum::actingAs($teacher);
+        $this->withHeaders(['X-Tenant' => 'default'])
+            ->getJson('/api/v2/report-cards?kelas_id=X-A&tahun_ajaran=2026%2F2027&semester=Ganjil')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.siswa_id', $student->id)
+            ->assertJsonPath('data.0.semester', AcademicPeriod::SEMESTER_GANJIL);
+
+        $this->withHeaders(['X-Tenant' => 'default', 'Idempotency-Key' => 'report-term-locked'])
+            ->putJson('/api/v2/report-cards/'.$student->id.'/items?tahun_ajaran=2026%2F2027&semester=Genap', [
                 'kelas_id' => 'X-A',
                 'jenis' => 'uts',
-                'semester' => AcademicPeriod::SEMESTER_GANJIL,
-                'tahun_pelajaran' => '2026/2027',
-                'jumlah' => 800,
-                'rata_rata' => 80,
-            ],
-        ];
-
-        $this->actingAs($admin)->postJson('/api/db', $payload)->assertOk();
-
-        $archiveAttempt = $payload;
-        $archiveAttempt['payload']['id'] = (string) Str::uuid();
-        $archiveAttempt['payload']['semester'] = AcademicPeriod::SEMESTER_GENAP;
-        $this->actingAs($admin)
-            ->postJson('/api/db', $archiveAttempt)
+                'mapel' => 'Matematika',
+                'kkm' => 75,
+                'nilai' => 80,
+            ])
             ->assertStatus(409)
-            ->assertJsonPath('code', 'ACADEMIC_PERIOD_LOCKED');
+            ->assertJsonPath('code', 'academic_period_locked');
 
         DB::table('settings')
             ->where('tenant_id', $tenantId)
             ->update(['semester_aktif' => AcademicPeriod::SEMESTER_GENAP, 'updated_at' => now()]);
 
-        $genapPayload = $payload;
-        $genapPayload['payload']['id'] = (string) Str::uuid();
-        $genapPayload['payload']['semester'] = AcademicPeriod::SEMESTER_GENAP;
-        $this->actingAs($admin)->postJson('/api/db', $genapPayload)->assertOk();
+        $this->withHeaders(['X-Tenant' => 'default', 'Idempotency-Key' => 'report-term-genap'])
+            ->putJson('/api/v2/report-cards/'.$student->id.'/items?tahun_ajaran=2026%2F2027&semester=Genap', [
+                'kelas_id' => 'X-A',
+                'jenis' => 'uts',
+                'mapel' => 'Matematika',
+                'kkm' => 75,
+                'nilai' => 82,
+            ])
+            ->assertOk();
 
         $rows = DB::table('rapot_siswa')
             ->where('tenant_id', $tenantId)
