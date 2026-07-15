@@ -1,4 +1,5 @@
 import { apiClient } from '../lib/api/client';
+import { generateRequestId } from '../lib/api/requestId'
 
 const getAPIClient = () => {
   return {
@@ -12,6 +13,31 @@ const getAPIClient = () => {
 export const USE_REPORT_CARDS_API_V2 = import.meta.env.VITE_USE_REPORT_CARDS_API_V2 === 'true'
 
 export const reportCardService = {
+  listReportCards: async (params = {}) => {
+    const api = getAPIClient()
+    const { data } = await api.get('/report-cards', { params })
+    return data
+  },
+
+  getReportCard: async (studentId, params = {}) => {
+    const api = getAPIClient()
+    const { data } = await api.get(`/report-cards/${studentId}`, { params })
+    return data
+  },
+
+  upsertItem: async (studentId, payload = {}, idempotencyKey = null) => {
+    const api = getAPIClient()
+    const key = idempotencyKey || generateRequestId()
+    const { data } = await api.put(`/report-cards/${studentId}/items`, payload, {
+      headers: { 'Idempotency-Key': key },
+      params: {
+        tahun_ajaran: payload.tahun_ajaran,
+        semester: payload.semester
+      }
+    })
+    return data
+  },
+
   /**
    * Preview draft rapor (read-only, dinamis tanpa simpan DB)
    */

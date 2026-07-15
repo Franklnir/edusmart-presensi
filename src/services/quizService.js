@@ -1,6 +1,22 @@
 import { apiClient } from '../lib/api/client'
+import { generateRequestId } from '../lib/api/requestId'
 
 class QuizService {
+  async listQuizzes(params = {}) {
+    const res = await apiClient('/api/v2/quizzes', { method: 'GET', params })
+    return res.data
+  }
+
+  async gradeByUser(data = {}) {
+    const idempotencyKey = data.idempotency_key || generateRequestId()
+    const res = await apiClient('/api/v2/quizzes/grade-by-user', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: { ...data, idempotency_key: idempotencyKey }
+    })
+    return res.data
+  }
+
   async createQuiz(data) {
     const res = await apiClient('/api/v2/quizzes', {
       method: 'POST',
