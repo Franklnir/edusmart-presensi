@@ -45,7 +45,8 @@ in this release candidate.
 | V2 routes in selected checkpoint | 138 observed |
 | Composer validate/audit | BLOCKED; Composer command unavailable |
 | `optimize:clear` | BLOCKED; local PHP lacks `pdo_pgsql` |
-| Pint | FAIL; existing style debt in 28 tracked files plus temporary files |
+| Full Pint | FAIL; remaining failures are baseline/unrelated files |
+| Targeted Pint for release PHP diff | PASS after formatting `routes/api_v2.php` and `SubjectControllerTest.php` |
 | Docker/image build | BLOCKED; Docker command unavailable |
 | Browser smoke | BLOCKED; runtime and role fixtures unavailable |
 | Worktree | CLEAN on `release/hybrid-rc1`; source worktree remains intentionally dirty |
