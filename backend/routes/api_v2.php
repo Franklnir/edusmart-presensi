@@ -60,15 +60,31 @@ Route::middleware('throttle:api')->group(function () {
     Route::put('/grades/weights', [GradeController::class, 'upsertWeights'])->name('grades.weights.upsert');
     Route::get('/grades/manual-scores', [GradeController::class, 'manualScores'])->name('grades.manual-scores.index');
     Route::put('/grades/manual-scores', [GradeController::class, 'upsertManualScore'])->name('grades.manual-scores.upsert');
+
+    Route::get('academic-periods', [AcademicPeriodController::class, 'index'])->name('academic-periods.index');
+    Route::post('academic-periods/preview', [AcademicPeriodController::class, 'preview'])->name('academic-periods.preview');
+    Route::post('academic-periods/apply', [AcademicPeriodController::class, 'apply'])->name('academic-periods.apply');
+    Route::post('academic-periods/restore-roster', [AcademicPeriodController::class, 'restoreRoster'])->name('academic-periods.restore-roster');
+    Route::post('academic-periods/copy-structure', [AcademicPeriodController::class, 'copyStructure'])->name('academic-periods.copy-structure');
+    Route::get('academic-periods/schedule-decision', [AcademicPeriodController::class, 'scheduleDecisionStatus'])->name('academic-periods.schedule-decision.status');
+    Route::post('academic-periods/schedule-decision', [AcademicPeriodController::class, 'resolveScheduleDecision'])->name('academic-periods.schedule-decision.resolve');
+    Route::get('academic-rollover-exceptions', [AcademicPeriodController::class, 'rolloverExceptions'])->name('academic-rollover-exceptions.index');
+    Route::put('academic-rollover-exceptions', [AcademicPeriodController::class, 'replaceRolloverExceptions'])->name('academic-rollover-exceptions.replace');
+    Route::post('academic-periods/correction-sessions', [AcademicPeriodController::class, 'createCorrectionSession'])->name('academic-periods.correction-sessions.store');
+    Route::delete('academic-periods/correction-sessions/{session}', [AcademicPeriodController::class, 'closeCorrectionSession'])->name('academic-periods.correction-sessions.destroy');
     Route::apiResource('announcements', AnnouncementController::class)->except(['show', 'create', 'edit']);
 
+    Route::get('classes/organisasi-bootstrap', [ClassController::class, 'organisasiBootstrap'])->name('classes.organisasi-bootstrap');
+    Route::get('classes/struktur-bootstrap', [ClassController::class, 'strukturBootstrap'])->name('classes.struktur-bootstrap');
     Route::apiResource('classes', ClassController::class);
     Route::get('classes/{class}/structure', [ClassController::class, 'getStructure'])->name('classes.structure.show');
     Route::put('classes/{class}/structure', [ClassController::class, 'updateStructure'])->name('classes.structure.update');
+    Route::get('students/options', [StudentController::class, 'options'])->name('students.options');
     Route::apiResource('students', StudentController::class)->except(['destroy']);
     Route::patch('students/{student}/deactivate', [StudentController::class, 'deactivate'])->name('students.deactivate');
     Route::patch('students/{student}/activate', [StudentController::class, 'activate'])->name('students.activate');
     Route::apiResource('teachers', TeacherController::class);
+    Route::get('teachers/options', [TeacherController::class, 'options'])->name('teachers.options');
     Route::apiResource('schedules', ScheduleController::class);
     Route::post('attendance/scanner/bulk', [AttendanceScannerController::class, 'bulkStore'])->name('attendance.scanner.bulk');
     Route::post('attendance/scanner/temp', [AttendanceScannerController::class, 'storeTemp'])->name('attendance.scanner.temp');
