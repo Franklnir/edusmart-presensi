@@ -184,6 +184,7 @@ class AttachmentController extends Controller
 
         try {
             $url = $this->provider->signedUrl($objectKey, $expiresIn, $bucket);
+
             return response()->json([
                 'success' => true,
                 'data' => ['signed_url' => $url, 'expires_in' => $expiresIn],

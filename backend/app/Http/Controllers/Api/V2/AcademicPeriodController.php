@@ -13,7 +13,6 @@ use App\Support\AcademicPeriod;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -35,6 +34,7 @@ class AcademicPeriodController extends Controller
     private function isAdmin(Request $request): bool
     {
         $profile = $request->user()?->profile;
+
         return $profile && in_array($profile->role, ['admin', 'super_admin', 'superadmin'], true);
     }
 
@@ -50,15 +50,20 @@ class AcademicPeriodController extends Controller
     private function tenantId(Request $request): ?string
     {
         $tenantId = $request->attributes->get('tenant_id');
+
         return $tenantId ? (string) $tenantId : null;
     }
 
     public function index(Request $request): JsonResponse
     {
-        if (! $this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) return $this->deny('Tenant tidak valid', 400);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
         $data = $this->academicPeriodLifecycle->listForTenant($tenantId);
         $data['active_correction_sessions'] = $this->academicCorrectionService->activeForActor(
@@ -76,14 +81,19 @@ class AcademicPeriodController extends Controller
 
     public function preview(ApplyAcademicPeriodRequest $request): JsonResponse
     {
-        if (! $this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) return $this->deny('Tenant tidak valid', 400);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
         $preview = $this->academicPeriodLifecycle->impactPreview($tenantId, $request->all());
         if (! ($preview['valid'] ?? false)) {
             $error = $preview['error'] ?? [];
+
             return response()->json([
                 'success' => false,
                 'message' => $error['message'] ?? 'Periode akademik belum valid.',
@@ -109,10 +119,14 @@ class AcademicPeriodController extends Controller
 
     public function apply(ApplyAcademicPeriodRequest $request): JsonResponse
     {
-        if (! $this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) return $this->deny('Tenant tidak valid', 400);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
         $payload = $request->all();
         $tahunAjaran = AcademicPeriod::normalizeAcademicYear($payload['tahun_ajaran'] ?? null);
@@ -140,6 +154,7 @@ class AcademicPeriodController extends Controller
 
         if (! empty($result['error'])) {
             $err = $result['error'];
+
             return response()->json([
                 'success' => false,
                 'message' => $err['message'] ?? 'Gagal menerapkan periode.',
@@ -158,10 +173,14 @@ class AcademicPeriodController extends Controller
 
     public function restoreRoster(Request $request): JsonResponse
     {
-        if (! $this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) return $this->deny('Tenant tidak valid', 400);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
         $apply = filter_var($request->input('apply', false), FILTER_VALIDATE_BOOLEAN);
         $result = $this->academicPeriodLifecycle->restoreAcademicPeriodRoster($tenantId, $apply);
@@ -175,10 +194,14 @@ class AcademicPeriodController extends Controller
 
     public function copyStructure(Request $request): JsonResponse
     {
-        if (! $this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) return $this->deny('Tenant tidak valid', 400);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
         $validated = Validator::make($request->all(), [
             'source_tahun_ajaran' => ['required', 'string', 'max:32'],
@@ -192,8 +215,12 @@ class AcademicPeriodController extends Controller
         $targetYear = AcademicPeriod::normalizeAcademicYear($validated['target_tahun_ajaran'] ?? null)
             ?: ($activePeriod['tahun_ajaran'] ?? null);
 
-        if (! $sourceYear || ! $targetYear) return $this->deny('Periode sumber atau target tidak valid.', 422);
-        if ($sourceYear === $targetYear) return $this->deny('Periode sumber dan target harus berbeda.', 422);
+        if (! $sourceYear || ! $targetYear) {
+            return $this->deny('Periode sumber atau target tidak valid.', 422);
+        }
+        if ($sourceYear === $targetYear) {
+            return $this->deny('Periode sumber dan target harus berbeda.', 422);
+        }
 
         $targetSemester = (string) ($activePeriod['semester'] ?? AcademicPeriod::current()['semester']);
         $replace = filter_var($validated['replace'] ?? false, FILTER_VALIDATE_BOOLEAN);
@@ -232,10 +259,14 @@ class AcademicPeriodController extends Controller
 
     public function scheduleDecisionStatus(Request $request): JsonResponse
     {
-        if (! $this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) return $this->deny('Tenant tidak valid', 400);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
         $status = $this->buildScheduleDecisionStatus($tenantId, $request->query());
 
@@ -248,10 +279,14 @@ class AcademicPeriodController extends Controller
 
     public function resolveScheduleDecision(Request $request): JsonResponse
     {
-        if (! $this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) return $this->deny('Tenant tidak valid', 400);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
         $validated = Validator::make($request->all(), [
             'target_tahun_ajaran' => ['nullable', 'string', 'max:32'],
@@ -266,9 +301,15 @@ class AcademicPeriodController extends Controller
         $targetSemester = AcademicPeriod::normalizeSemester($activePeriod['semester'] ?? null)
             ?: AcademicPeriod::SEMESTER_GANJIL;
 
-        if (! $targetYear || ! $activeYear) return $this->deny('Periode aktif belum valid.', 422);
-        if ($targetYear !== $activeYear) return $this->deny('Keputusan jadwal hanya bisa untuk periode aktif.', 422);
-        if (! Schema::hasTable('academic_schedule_period_decisions')) return $this->deny('Tabel belum tersedia.', 422);
+        if (! $targetYear || ! $activeYear) {
+            return $this->deny('Periode aktif belum valid.', 422);
+        }
+        if ($targetYear !== $activeYear) {
+            return $this->deny('Keputusan jadwal hanya bisa untuk periode aktif.', 422);
+        }
+        if (! Schema::hasTable('academic_schedule_period_decisions')) {
+            return $this->deny('Tabel belum tersedia.', 422);
+        }
 
         DB::table('academic_schedule_period_decisions')->updateOrInsert(
             ['tenant_id' => $tenantId, 'tahun_ajaran' => $targetYear, 'semester' => $targetSemester],
@@ -294,10 +335,14 @@ class AcademicPeriodController extends Controller
 
     public function rolloverExceptions(Request $request): JsonResponse
     {
-        if (! $this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) return $this->deny('Tenant tidak valid', 400);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
         $tahunAjaran = AcademicPeriod::normalizeAcademicYear($request->query('tahun_ajaran', '')) ?: '';
 
@@ -321,10 +366,14 @@ class AcademicPeriodController extends Controller
 
     public function replaceRolloverExceptions(Request $request): JsonResponse
     {
-        if (! $this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) return $this->deny('Tenant tidak valid', 400);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
         $validated = Validator::make($request->all(), [
             'tahun_ajaran' => ['required', 'string', 'max:32'],
@@ -365,10 +414,14 @@ class AcademicPeriodController extends Controller
 
     public function createCorrectionSession(CreateCorrectionSessionRequest $request): JsonResponse
     {
-        if (! $this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) return $this->deny('Tenant tidak valid', 400);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
         $validated = $request->validated();
 
@@ -407,10 +460,14 @@ class AcademicPeriodController extends Controller
 
     public function closeCorrectionSession(Request $request, string $sessionId): JsonResponse
     {
-        if (! $this->isAdmin($request)) return $this->deny();
+        if (! $this->isAdmin($request)) {
+            return $this->deny();
+        }
 
         $tenantId = $this->tenantId($request);
-        if (! $tenantId) return $this->deny('Tenant tidak valid', 400);
+        if (! $tenantId) {
+            return $this->deny('Tenant tidak valid', 400);
+        }
 
         $closed = $this->academicCorrectionService->close(
             $tenantId,
@@ -443,7 +500,9 @@ class AcademicPeriodController extends Controller
             $query = DB::table('academic_schedule_period_decisions')
                 ->where('tenant_id', $tenantId)
                 ->where('tahun_ajaran', $tahunAjaran);
-            if ($semester) $query->where('semester', $semester);
+            if ($semester) {
+                $query->where('semester', $semester);
+            }
             $row = $query->first();
             $decision = $row ? (array) $row : null;
         }
@@ -457,14 +516,18 @@ class AcademicPeriodController extends Controller
 
     private function copySchoolStructureRows(string $tenantId, string $sourceYear, string $targetYear, string $targetSemester, bool $replace): int
     {
-        if (! Schema::hasTable('struktur_sekolah')) return 0;
+        if (! Schema::hasTable('struktur_sekolah')) {
+            return 0;
+        }
 
         $sourceRows = DB::table('struktur_sekolah')
             ->where('tenant_id', $tenantId)
             ->where('tahun_ajaran', $sourceYear)
             ->get();
 
-        if ($sourceRows->isEmpty()) return 0;
+        if ($sourceRows->isEmpty()) {
+            return 0;
+        }
 
         if ($replace) {
             DB::table('struktur_sekolah')
@@ -492,7 +555,9 @@ class AcademicPeriodController extends Controller
 
     private function copyClassStructureRows(string $tenantId, string $sourceYear, string $targetYear, string $targetSemester, bool $replace): int
     {
-        if (! Schema::hasTable('kelas_struktur')) return 0;
+        if (! Schema::hasTable('kelas_struktur')) {
+            return 0;
+        }
 
         $sourceRows = DB::table('kelas_struktur')
             ->where('tahun_ajaran', $sourceYear)
@@ -501,7 +566,9 @@ class AcademicPeriodController extends Controller
             })
             ->get();
 
-        if ($sourceRows->isEmpty()) return 0;
+        if ($sourceRows->isEmpty()) {
+            return 0;
+        }
 
         if ($replace) {
             $targetIds = $sourceRows->pluck('kelas_id')->unique()->all();
@@ -533,14 +600,18 @@ class AcademicPeriodController extends Controller
     {
         $result = ['organisasi' => 0, 'organisasi_anggota' => 0];
 
-        if (! Schema::hasTable('organisasi')) return $result;
+        if (! Schema::hasTable('organisasi')) {
+            return $result;
+        }
 
         $sourceOrgs = DB::table('organisasi')
             ->where('tenant_id', $tenantId)
             ->where('tahun_ajaran', $sourceYear)
             ->get();
 
-        if ($sourceOrgs->isEmpty()) return $result;
+        if ($sourceOrgs->isEmpty()) {
+            return $result;
+        }
 
         if ($replace) {
             DB::table('organisasi')
@@ -575,7 +646,9 @@ class AcademicPeriodController extends Controller
                 ->get();
 
             foreach ($sourceMembers as $member) {
-                if (! isset($orgIdMap[$member->organisasi_id])) continue;
+                if (! isset($orgIdMap[$member->organisasi_id])) {
+                    continue;
+                }
                 DB::table('organisasi_anggota')->insert([
                     'organisasi_id' => $orgIdMap[$member->organisasi_id],
                     'siswa_id' => $member->siswa_id ?? '',

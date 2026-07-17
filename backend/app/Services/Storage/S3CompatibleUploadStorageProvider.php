@@ -96,6 +96,7 @@ class S3CompatibleUploadStorageProvider implements UploadStorageProvider
         $ttlSeconds = max(60, min(86400, $ttlSeconds));
         $bucket = $logicalBucket !== '' ? $logicalBucket : $this->logicalBucket();
         $instruction = $this->signer->presignGet($objectKey, $ttlSeconds, $bucket);
+
         return $instruction['url'] ?? '';
     }
 }

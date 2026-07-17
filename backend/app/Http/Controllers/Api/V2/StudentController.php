@@ -351,12 +351,18 @@ class StudentController extends Controller
         $perPage = min(max(1, (int) $request->query('per_page', 50)), 200);
 
         $query = Profile::where('tenant_id', $tenantId)->where('role', 'siswa');
-        if ($status) $query->where('status', $status);
-        if ($kelas) $query->where('kelas', $kelas);
-        if ($search) $query->where(function ($q) use ($search) {
-            $q->where('nama', 'ilike', "%{$search}%")
-              ->orWhere('nis', 'ilike', "%{$search}%");
-        });
+        if ($status) {
+            $query->where('status', $status);
+        }
+        if ($kelas) {
+            $query->where('kelas', $kelas);
+        }
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('nama', 'ilike', "%{$search}%")
+                    ->orWhere('nis', 'ilike', "%{$search}%");
+            });
+        }
 
         $rows = $query->select(['id', 'nama', 'nis', 'kelas', 'status', 'jk'])
             ->orderBy('nama')
