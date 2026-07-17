@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import GoogleCredentialButton from '../../components/GoogleCredentialButton';
-import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase';
+import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../services/storageService'
 import { getRoleHome, isValidRole } from '../../utils/role';
 import { shouldForceAccountSetup } from '../../utils/accountSetup';
 import { sanitizeExternalUrl, sanitizeMediaUrl } from '../../utils/sanitize';

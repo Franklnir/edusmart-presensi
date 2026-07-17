@@ -1,14 +1,24 @@
 import { apiClient } from '../lib/api/client'
-import { buildQueryString } from '../lib/supabase'
 
 export const teacherService = {
   async getTeachers(params = {}) {
-    const res = await apiClient(`/api/v2/teachers${buildQueryString(params)}`, {
+    const res = await apiClient('/api/v2/teachers', {
       method: 'GET',
+      params,
       cacheTtlMs: 5000,
       dedupe: true
     })
     return res
+  },
+
+  async getTeacherOptions(params = {}) {
+    const res = await apiClient('/api/v2/teachers/options', {
+      method: 'GET',
+      params,
+      cacheTtlMs: 10 * 1000,
+      dedupe: true
+    })
+    return res.payload?.data ?? res.data
   },
 
   async listAllTeacherOptions(params = {}) {

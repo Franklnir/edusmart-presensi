@@ -1,6 +1,5 @@
 import { apiClient } from '../../../lib/api/client'
 import { generateRequestId } from '../../../lib/api/requestId'
-import { buildQueryString } from '../../../lib/supabase'
 
 const idempotencyKey = () => generateRequestId()
 
@@ -15,8 +14,9 @@ const mutationOptions = (method, body) => {
 
 export const studentService = {
   async getStudents(params = {}) {
-    const result = await apiClient(`/api/v2/students${buildQueryString(params)}`, {
+    const result = await apiClient('/api/v2/students', {
       method: 'GET',
+      params,
       cacheTtlMs: 5000,
       dedupe: true
     })

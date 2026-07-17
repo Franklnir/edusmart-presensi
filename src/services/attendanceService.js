@@ -53,5 +53,26 @@ export const attendanceService = {
 
   async storeScanTemp(data) {
     return responsePayload(await apiClient('/api/v2/attendance/scanner/temp', mutationOptions('POST', data)))
+  },
+
+  async getStudentTodayStatus(userId, tanggal) {
+    return responsePayload(await apiClient('/api/v2/attendance', {
+      method: 'GET',
+      params: { uid: userId, tanggal }
+    }))
+  },
+
+  async getByKelasTanggal(kelas, tanggal) {
+    return responsePayload(await apiClient('/api/v2/attendance', {
+      method: 'GET',
+      params: { kelas, tanggal }
+    }))
+  },
+
+  async getSettings(kelas, tanggal) {
+    return responsePayload(await apiClient('/api/v2/attendance', {
+      method: 'GET',
+      params: { kelas, tanggal }
+    }))
   }
 }

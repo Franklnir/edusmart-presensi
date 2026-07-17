@@ -1,6 +1,7 @@
 // src/pages/siswa/EditProfile.jsx
 import React, { useState, useEffect, useRef } from 'react'
-import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
+import { storage, PROFILE_BUCKET, getSignedUrlForValue } from '../../services/storageService'
+import { getProviderState, updateUser, unlinkGoogleAccount, sendPasswordChangeCode } from '../../services/authService'
 import { ClassesApi } from '../../lib/api/v2/classes'
 import { currentProfileService } from '../../services/currentProfileService'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -224,7 +225,7 @@ export default function EditProfile() {
   const [accountVerifyOpen, setAccountVerifyOpen] = useState(false)
   const [pendingAccountAction, setPendingAccountAction] = useState(null)
 
-  const providerState = supabase.auth.getProviderState?.(user || {}) || { googleLinked: false, emailVerified: false }
+  const providerState = getProviderState(user || {})
   const googleLinked = Boolean(user?.google_linked || providerState.googleLinked)
   const email = user?.email || profile?.email || ''
   const emailVerified = Boolean(user?.email_confirmed_at || user?.emailVerified || providerState.emailVerified)
@@ -493,7 +494,7 @@ export default function EditProfile() {
       // Upload dengan objectKey yang fixed: anti IDOR + gampang RLS
       const objectKey = makeAvatarObjectKey(user.id)
 
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const { data: uploadData, error: uploadError } = await storage
         .from(PROFILE_BUCKET)
         .upload(objectKey, compressed, {
           upsert: true,
@@ -543,7 +544,7 @@ export default function EditProfile() {
       const stored = photoPath || ''
       // kalau stored itu path, kita hapus dari storage
       if (stored && !isProbablyUrl(stored)) {
-        await supabase.storage.from(PROFILE_BUCKET).remove([stored])
+        await storage.from(PROFILE_BUCKET).remove([stored])
       }
 
       await updateProfilePhotoPathInDb(user.id, null)
@@ -723,7 +724,7 @@ export default function EditProfile() {
   const submitAccountChange = async (plan, verificationCode = '') => {
     setAccountSaving(true)
     try {
-      const { error } = await supabase.auth.updateUser({
+      const { error } = await updateUser({
         email: plan.nextEmail,
         password: plan.password,
         verificationCode
@@ -829,7 +830,7 @@ export default function EditProfile() {
 
     setUnlinkingGoogle(true)
     try {
-      const { data, error } = await supabase.auth.unlinkGoogleAccount()
+      const { data, error } = await unlinkGoogleAccount()
       if (error) throw error
       if (data?.user) {
         useAuthStore.setState((state) => ({ ...state, user: data.user }))
@@ -1476,7 +1477,7 @@ export default function EditProfile() {
           successSubtitle={pendingAccountAction?.successMessage || 'Perubahan akun berhasil disimpan.'}
           onSendCode={async () => {
             const plan = pendingAccountAction || buildAccountChangePlan()
-            const { error } = await supabase.auth.sendPasswordChangeCode(plan.targetEmail)
+            const { error } = await sendPasswordChangeCode(plan.targetEmail)
             if (error) throw error
           }}
           onVerifyCode={async (code) => {

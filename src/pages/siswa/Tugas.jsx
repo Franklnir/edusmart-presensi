@@ -7,7 +7,7 @@ import {
   ASSIGNMENT_BUCKET,
   extractObjectPath,
   getSignedUrlForValue
-} from '../../lib/supabase'
+} from '../../services/storageService'
 import { useLocalCache } from '../../hooks/useLocalCache'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'

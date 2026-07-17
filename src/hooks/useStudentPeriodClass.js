@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabase'
-
-const ACTIVE_HISTORY_STATUSES = ['active', 'nonaktif', 'mutasi']
+import { fetchStudentClassHistory } from '../services/studentClassHistoryService'
 
 const getFallbackClass = (profile) => (
   String(profile?.kelas || profile?.kelas_id || '').trim()
@@ -20,37 +18,22 @@ export async function fetchStudentPeriodClass({
 
   if (!studentId || !year) return fallbackClass
 
-  let query = supabase
-    .from('student_class_histories')
-    .select('class_id')
-    .eq('student_id', studentId)
-    .eq('tahun_ajaran', year)
-    .in('status', ACTIVE_HISTORY_STATUSES)
-    .order('valid_from', { ascending: false })
-    .limit(1)
-  if (semester) query = query.eq('semester', semester)
-  let { data, error } = await query
+  try {
+    const resolvedClass = await fetchStudentClassHistory({
+      studentId,
+      tahunAjaran: year,
+      semester
+    })
 
-  if (error && /status|valid_from/i.test(error.message || '')) {
-    let fallbackQuery = supabase
-      .from('student_class_histories')
-      .select('class_id')
-      .eq('student_id', studentId)
-      .eq('tahun_ajaran', year)
-      .limit(1)
-    if (semester) fallbackQuery = fallbackQuery.eq('semester', semester)
-    ;({ data, error } = await fallbackQuery)
-  }
+    if (resolvedClass) return resolvedClass
 
-  if (error) {
-    console.warn('Gagal memuat kelas siswa sesuai periode:', error)
+    return year === String(activeTahunAjaran || '').trim() ? fallbackClass : ''
+  } catch (error) {
+    if (error?.name !== 'AbortError') {
+      console.warn('Gagal memuat kelas siswa sesuai periode:', error)
+    }
     return year === String(activeTahunAjaran || '').trim() ? fallbackClass : ''
   }
-
-  const resolved = String(data?.[0]?.class_id || '').trim()
-  if (resolved) return resolved
-
-  return year === String(activeTahunAjaran || '').trim() ? fallbackClass : ''
 }
 
 export default function useStudentPeriodClass({

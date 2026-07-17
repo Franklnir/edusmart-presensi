@@ -165,4 +165,32 @@ class AttachmentController extends Controller
             'request_id' => $this->requestId($request),
         ], $status);
     }
+
+    public function signedUrl(Request $request): JsonResponse
+    {
+        if ($response = $this->unavailable($request)) {
+            return $response;
+        }
+
+        $validated = $request->validate([
+            'bucket' => 'required|string|max:100',
+            'object_path' => 'required|string|max:500',
+            'expires_in' => 'integer|min:60|max:86400',
+        ]);
+
+        $objectKey = $validated['object_path'];
+        $expiresIn = (int) ($validated['expires_in'] ?? 900);
+        $bucket = $validated['bucket'];
+
+        try {
+            $url = $this->provider->signedUrl($objectKey, $expiresIn, $bucket);
+            return response()->json([
+                'success' => true,
+                'data' => ['signed_url' => $url, 'expires_in' => $expiresIn],
+                'request_id' => $this->requestId($request),
+            ]);
+        } catch (\Exception $e) {
+            return $this->error($request, 'SIGNED_URL_FAILED', $e->getMessage(), 500);
+        }
+    }
 }

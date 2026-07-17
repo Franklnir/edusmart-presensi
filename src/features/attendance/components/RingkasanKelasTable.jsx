@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import ProfileAvatar from '../../../components/ProfileAvatar'
-import { supabase } from '../../../lib/supabase'
+import { supabase } from '../../../services/storageService'
 import { compareStudentsByAttendanceOrder } from '../../../utils/studentOrdering'
 
 export default function RingkasanKelasTable({

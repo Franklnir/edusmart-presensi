@@ -1,6 +1,7 @@
 // src/pages/guru/JadwalGuru.jsx
 import React, { useState, useEffect } from 'react'
-import { apiFetch, supabase } from '../../lib/supabase'
+import { supabase } from '../../services/storageService'
+import echo from '../../lib/echo'
 import { useLocalCache } from '../../hooks/useLocalCache'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { apiFetch } from '../../lib/supabase'
+import { apiClient } from '../../lib/api/client'
 import { useAuthStore } from '../../store/useAuthStore'
 
 const FLUSH_DELAY_MS = 3200
@@ -158,7 +158,7 @@ export default function WebVitalsReporter() {
     sendingRef.current = true
 
     try {
-      await apiFetch('/api/observability/web-vitals', {
+      await apiClient('/api/observability/web-vitals', {
         method: 'POST',
         body: {
           route_path: routePath,
@@ -177,9 +177,7 @@ export default function WebVitalsReporter() {
             language: navigator.language || '',
             visibility_state: document.visibilityState || 'visible'
           }
-        },
-        cacheTtlMs: 0,
-        invalidateCache: false
+        }
       })
     } catch {
       // Web Vitals telemetry must never disturb the active page.

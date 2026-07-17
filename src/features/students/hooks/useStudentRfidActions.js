@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiFetch, supabase } from '../../../lib/supabase'
+import { supabase, apiFetch } from '../../../services/storageService'
 
 export function useStudentRfidActions({
   canManageRfid,

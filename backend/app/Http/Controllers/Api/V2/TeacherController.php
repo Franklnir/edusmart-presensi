@@ -309,4 +309,33 @@ class TeacherController extends Controller
             ], 500);
         }
     }
+
+    public function options(Request $request): JsonResponse
+    {
+        Gate::authorize('viewAny', Profile::class);
+        $tenantId = $request->attributes->get('tenant_id');
+        $reqId = $this->getRequestId($request);
+
+        $scope = $request->query('scope', '');
+        $limit = min(max(1, (int) $request->query('per_page', 50)), 200);
+
+        $query = Profile::where('tenant_id', $tenantId)->where('role', 'guru');
+
+        $rows = $query->select(['id', 'nama', 'email', 'jabatan', 'status'])
+            ->orderBy('nama')
+            ->paginate($limit)
+            ->appends($request->query());
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Opsi guru berhasil dimuat.',
+            'data' => $rows->items(),
+            'meta' => [
+                'current_page' => $rows->currentPage(),
+                'last_page' => $rows->lastPage(),
+                'total' => $rows->total(),
+            ],
+            'request_id' => $reqId,
+        ]);
+    }
 }

@@ -1,6 +1,7 @@
 // src/pages/guru/profile.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
+import { supabase, getSignedUrlForValue } from '../../services/storageService'
+import echo from '../../lib/echo'
 import { currentProfileService } from '../../services/currentProfileService'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -250,25 +251,9 @@ export default function ProfileGuru() {
   useEffect(() => {
     if (!user?.id) return undefined
 
-    const channel = supabase
-      .channel(`guru-profile-sync-${user.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'profiles',
-          filter: `id=eq.${user.id}`
-        },
-        () => {
-          refreshProfile()
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    const key = `profile.${user.id}`
+    echo.channel(key).listen('.profile.updated', () => { refreshProfile() })
+    return () => { echo.leaveChannel(key) }
   }, [user?.id, refreshProfile])
 
   useEffect(() => {

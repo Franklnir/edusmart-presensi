@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { supabase } from '../../../lib/supabase'
+import { supabase } from '../../../services/storageService'
 import { extractQrToken } from '../utils/qrToken'
 import { getToday, toMinutes } from '../utils/attendanceDate'
 import { attendanceService } from '../../../services/attendanceService'

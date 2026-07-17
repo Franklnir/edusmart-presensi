@@ -1,7 +1,7 @@
 // src/components/AdminLockGate.jsx
 import React, { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { signInWithPassword, getUser } from '../services/authService'
 import { useAuthStore } from '../store/useAuthStore'
 import { useUIStore } from '../store/useUIStore'
 import PasswordInput from './PasswordInput'
@@ -111,16 +111,13 @@ export default function AdminLockGate() {
   const handleConfirm = async (password) => {
     setLoading(true)
     try {
-      const { data: { user }, error: userErr } = await supabase.auth.getUser()
-      if (userErr) throw userErr
+      const { user } = await getUser()
       if (!user?.email) throw new Error('User tidak ditemukan')
 
-      const { error } = await supabase.auth.signInWithPassword({
+      await signInWithPassword({
         email: user.email,
         password
       })
-
-      if (error) throw new Error('Password salah')
 
       try {
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ unlockedAt: Date.now() }))

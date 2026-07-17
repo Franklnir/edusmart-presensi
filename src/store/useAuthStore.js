@@ -3,8 +3,9 @@ import { create } from 'zustand'
 import {
   clearAuthSessionHint,
   setAuthSessionHint,
-  supabase
-} from '../lib/supabase'
+} from '../services/appEventService'
+import { supabase } from '../services/storageService'
+import { apiClient } from '../lib/api/client'
 import { useUIStore } from './useUIStore'
 import { logError } from '../utils/logger'
 import { isValidRole } from '../utils/role'
@@ -932,24 +933,28 @@ export const useAuthStore = create((set, get) => ({
       const user = data?.user
       if (!user) throw new Error('User tidak ditemukan setelah registrasi')
 
-      // 2) Insert ke tabel profiles
-      const { error: errProfile } = await apiFetch('/api/v2/profile/provision', {
-        method: 'POST',
-        body: {
-          role,
-          nama: profileData.nama,
-          status: 'active',
-          jk: profileData.jk || null,
-          telp: profileData.telp || null,
-          alamat: profileData.alamat || null,
-          kelas: profileData.kelas || null,
-          usia: profileData.usia || null,
-          nis: profileData.nis || null,
-          agama: profileData.agama || null,
-          jabatan: profileData.jabatan || null,
-          created_via: 'manual_registration'
-        }
-      })
+      let errProfile
+      try {
+        await apiClient('/api/v2/profile/provision', {
+          method: 'POST',
+          body: {
+            role,
+            nama: profileData.nama,
+            status: 'active',
+            jk: profileData.jk || null,
+            telp: profileData.telp || null,
+            alamat: profileData.alamat || null,
+            kelas: profileData.kelas || null,
+            usia: profileData.usia || null,
+            nis: profileData.nis || null,
+            agama: profileData.agama || null,
+            jabatan: profileData.jabatan || null,
+            created_via: 'manual_registration'
+          }
+        })
+      } catch (err) {
+        errProfile = err
+      }
 
       if (errProfile) {
         logError('Profile insert error:', errProfile)

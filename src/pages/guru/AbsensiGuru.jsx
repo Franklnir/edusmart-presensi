@@ -1,7 +1,7 @@
 // src/pages/guru/AbsensiGuru.jsx
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Maximize2, QrCode, RefreshCw, ShieldCheck, UserCheck, X } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../services/storageService'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { attendanceService } from '../../services/attendanceService'

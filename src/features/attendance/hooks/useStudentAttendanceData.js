@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { supabase } from '../../../lib/supabase'
+import { supabase } from '../../../services/storageService'
 import { fetchAbsensiSettings } from '../../../utils/absensiSettings'
 import { filterSchedulesForSemester } from '../../../utils/schedulePeriodScope'
 import { getDayName, getToday, toMinutes } from '../utils/attendanceDate'

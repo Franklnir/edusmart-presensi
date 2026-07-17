@@ -1,4 +1,4 @@
-import { supabase, CERT_BUCKET, extractObjectPath } from '../lib/supabase'
+import { supabase, CERT_BUCKET, extractObjectPath } from '../services/storageService'
 
 const LEGACY_CERT_BUCKET = 'sertifikat-files'
 const CERT_BUCKET_CANDIDATES = Array.from(new Set([CERT_BUCKET, LEGACY_CERT_BUCKET]))

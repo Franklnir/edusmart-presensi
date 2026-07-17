@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Archive, Clock3, LockKeyhole, X } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { academicPeriodService } from '../services/academicPeriodService'
 import { useAcademicContext } from '../context/AcademicContext'
 import { useUIStore } from '../store/useUIStore'
 
@@ -37,13 +37,10 @@ export default function AcademicLifecyclePanel() {
 
   const loadCatalog = async () => {
     setLoading(true)
-    const { data, error } = await supabase.admin.academicPeriods()
-    if (error) pushToast('error', error.message || 'Gagal memuat lifecycle periode.')
-    else {
-      setCatalog(data || null)
-      const serverSession = data?.active_correction_sessions?.[0] || null
-      if (!correctionSession && serverSession) setCorrectionSession(serverSession)
-    }
+    const data = await academicPeriodService.list()
+    setCatalog(data || null)
+    const serverSession = data?.active_correction_sessions?.[0] || null
+    if (!correctionSession && serverSession) setCorrectionSession(serverSession)
     setLoading(false)
   }
 
@@ -73,36 +70,38 @@ export default function AcademicLifecyclePanel() {
   const createSession = async () => {
     if (!selectedTerm?.id || reason.trim().length < 10 || selectedScopes.length === 0) return
     setSaving(true)
-    const { data, error } = await supabase.admin.createAcademicCorrectionSession({
-      academic_term_id: selectedTerm.id,
-      reason: reason.trim(),
-      allowed_scopes: selectedScopes,
-      duration_minutes: durationMinutes
-    })
-    setSaving(false)
-    if (error) {
-      pushToast('error', error.message || 'Sesi koreksi gagal dibuat.')
-      return
-    }
+    try {
+      const data = await academicPeriodService.createCorrectionSession({
+        academic_term_id: selectedTerm.id,
+        reason: reason.trim(),
+        allowed_scopes: selectedScopes,
+        duration_minutes: durationMinutes
+      })
+      setSaving(false)
 
-    setCorrectionSession(data)
-    setModalOpen(false)
-    await loadCatalog()
-    pushToast('success', `Sesi koreksi ${data.tahun_ajaran} ${data.semester} aktif sampai batas waktu yang ditentukan.`)
+      setCorrectionSession(data)
+      setModalOpen(false)
+      await loadCatalog()
+      pushToast('success', `Sesi koreksi ${data.tahun_ajaran} ${data.semester} aktif sampai batas waktu yang ditentukan.`)
+    } catch (error) {
+      setSaving(false)
+      pushToast('error', error.message || 'Sesi koreksi gagal dibuat.')
+    }
   }
 
   const closeSession = async () => {
     if (!correctionSession?.id) return
     setSaving(true)
-    const { error } = await supabase.admin.closeAcademicCorrectionSession(correctionSession.id)
-    setSaving(false)
-    if (error) {
+    try {
+      await academicPeriodService.closeCorrectionSession(correctionSession.id)
+      setSaving(false)
+      clearCorrectionSession()
+      await loadCatalog()
+      pushToast('success', 'Sesi koreksi ditutup.')
+    } catch (error) {
+      setSaving(false)
       pushToast('error', error.message || 'Sesi koreksi gagal ditutup.')
-      return
     }
-    clearCorrectionSession()
-    await loadCatalog()
-    pushToast('success', 'Sesi koreksi ditutup.')
   }
 
   return (

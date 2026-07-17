@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { supabase } from '../../../lib/supabase'
+import { supabase } from '../../../services/storageService'
 import { getToday, toMinutes } from '../utils/attendanceDate'
 
 export function useStudentRfidAttendanceListener({

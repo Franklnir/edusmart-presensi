@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { PROFILE_BUCKET, getSignedUrlForValue, supabase } from '../../lib/supabase'
+import { PROFILE_BUCKET, getSignedUrlForValue } from '../../services/storageService'
+import monitoringService from '../../services/monitoringService'
 import { buildNavigationMenu } from '../../navigation/menu.utils'
 import { organizationService } from '../../services/organizationService'
 
@@ -203,8 +204,7 @@ export const useMonitoring = (effectiveRole) => {
     setMonitorError('')
 
     try {
-      const { data, error } = await supabase.admin.monitoring()
-      if (error) throw error
+      const data = await monitoringService.adminMonitoring()
       setMonitorData(data || { students: [], teachers: [], generated_at: null })
     } catch (error) {
       setMonitorError(error?.message || 'Gagal memuat monitoring')

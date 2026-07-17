@@ -17,7 +17,9 @@ import {
   Users,
   X
 } from 'lucide-react'
-import { supabase } from '../../../lib/supabase'
+import { supabase } from '../../../services/storageService'
+import { classService } from '../../../services/classService'
+import { academicPeriodService } from '../../../services/academicPeriodService'
 import { queryClient, queryKeys } from '../../../lib/queryClient'
 import { useLocalCache } from '../../../hooks/useLocalCache'
 
@@ -290,8 +292,7 @@ export default function StrukturSekolahTab({
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.structureBootstrap(params),
         queryFn: async () => {
-          const { data: summaryData, error } = await supabase.admin.strukturBootstrap(params)
-          if (error) throw error
+          const summaryData = await classService.strukturBootstrap(params)
           return summaryData || {}
         },
         staleTime: force ? 0 : 60 * 1000
@@ -577,7 +578,7 @@ export default function StrukturSekolahTab({
 
     try {
       setCopyingStructure(true)
-      const { data, error } = await supabase.admin.copyAcademicStructure({
+      const { data, error } = await academicPeriodService.copyStructure({
         source_tahun_ajaran: copySourceYear,
         target_tahun_ajaran: targetYear,
         include_organizations: true,

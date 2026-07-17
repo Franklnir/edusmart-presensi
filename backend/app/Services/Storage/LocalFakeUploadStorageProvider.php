@@ -83,4 +83,9 @@ class LocalFakeUploadStorageProvider implements UploadStorageProvider
             'expires_at' => now()->addSeconds($ttlSeconds)->toIso8601String(),
         ];
     }
+
+    public function signedUrl(string $objectKey, int $ttlSeconds, string $logicalBucket = ''): string
+    {
+        return 'https://storage.test/signed/'.rawurlencode($objectKey).'?expires='.max(60, $ttlSeconds);
+    }
 }

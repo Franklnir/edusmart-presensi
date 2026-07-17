@@ -1,7 +1,7 @@
 // src/pages/auth/ResetPassword.jsx
 import React, { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { supabase } from '../../lib/supabase'
+import { resetPassword } from '../../services/authService'
 import PasswordInput from '../../components/PasswordInput'
 import { validatePassword } from '../../utils/passwordPolicy'
 
@@ -74,7 +74,7 @@ const ResetPassword = () => {
     setSuccess('')
 
     try {
-      const { data, error } = await supabase.auth.resetPassword({
+      const { data, error } = await resetPassword({
         email,
         token,
         password

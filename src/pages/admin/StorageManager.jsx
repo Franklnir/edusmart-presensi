@@ -15,7 +15,8 @@ import {
   X,
   XCircle
 } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../services/storageService'
+import adminService from '../../services/adminService'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'
@@ -367,7 +368,7 @@ function StorageManager() {
   const cleanupReady = cleanupHasProviderBucket
 
   const loadAdminSummary = async (filters = storageFilters) => {
-    const { data, error } = await supabase.admin.storageManager(filters)
+    const { data, error } = await adminService.storageManager(filters)
     if (error) throw error
     setSummary(data || null)
   }
@@ -502,7 +503,7 @@ function StorageManager() {
     try {
       const api = isSuperAdmin
         ? supabase.super.superStorageCleanupPreview(selectedTenantId, cleanupForm)
-        : supabase.admin.storageCleanupPreview(cleanupForm)
+        : adminService.storageCleanupPreview(cleanupForm)
       const { data, error } = await api
       if (error) throw error
       setCleanupPreview(data)
@@ -535,7 +536,7 @@ function StorageManager() {
       const payload = { ...cleanupForm, backup: true }
       const api = isSuperAdmin
         ? supabase.super.superStorageCleanupExecute(selectedTenantId, payload)
-        : supabase.admin.storageCleanupExecute(payload)
+        : adminService.storageCleanupExecute(payload)
       const { data, error } = await api
       if (error) throw error
       pushToast('success', `${data?.files || 0} file Neva S3 dipindahkan ke Trash`)
@@ -560,7 +561,7 @@ function StorageManager() {
         ? syncTenantId
           ? supabase.super.syncTenantObjectStorage(syncTenantId, payload)
           : supabase.super.syncObjectStorage(payload)
-        : supabase.admin.syncObjectStorage(payload)
+        : adminService.syncObjectStorage(payload)
       const { data, error } = await api
       if (error) throw error
 
@@ -617,7 +618,7 @@ function StorageManager() {
     try {
       const api = isSuperAdmin
         ? supabase.super.restoreStorageTrash(selectedTenantId, fileId)
-        : supabase.admin.restoreStorageTrash(fileId)
+        : adminService.restoreStorageTrash(fileId)
       const { error } = await api
       if (error) throw error
       pushToast('success', 'File berhasil dipulihkan dari Trash')

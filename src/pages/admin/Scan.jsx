@@ -6,7 +6,7 @@ import React, {
   useCallback,
   useMemo
 } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../services/storageService'
 import { apiClient } from '../../lib/api/client'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'

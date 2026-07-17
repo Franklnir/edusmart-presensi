@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { getSecurityOverview, logoutOtherDevices } from '../services/authService'
 import { useUIStore } from '../store/useUIStore'
 import PasswordInput from './PasswordInput'
 
@@ -43,8 +43,7 @@ export default function AccountSecurityPanel({ className = '', tone = 'blue' }) 
   const loadOverview = useCallback(async () => {
     setLoading(true)
     try {
-      const { data, error } = await supabase.auth.getSecurityOverview()
-      if (error) throw error
+      const data = await getSecurityOverview()
       setOverview(data || null)
     } catch (error) {
       pushToast('error', error?.message || 'Gagal memuat keamanan akun')
@@ -58,8 +57,7 @@ export default function AccountSecurityPanel({ className = '', tone = 'blue' }) 
     ;(async () => {
       setLoading(true)
       try {
-        const { data, error } = await supabase.auth.getSecurityOverview()
-        if (error) throw error
+        const data = await getSecurityOverview()
         if (!cancelled) setOverview(data || null)
       } catch (error) {
         if (!cancelled) pushToast('error', error?.message || 'Gagal memuat keamanan akun')
@@ -86,8 +84,7 @@ export default function AccountSecurityPanel({ className = '', tone = 'blue' }) 
 
     setRevoking(true)
     try {
-      const { data, error } = await supabase.auth.logoutOtherDevices({ password: trimmedPassword })
-      if (error) throw error
+      const data = await logoutOtherDevices({ password: trimmedPassword })
       setPassword('')
       setOverview(data?.security || null)
       const webCount = Number(data?.web_sessions_revoked || 0)

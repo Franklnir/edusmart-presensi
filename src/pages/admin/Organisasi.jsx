@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { supabase } from '../../lib/supabase'
+import { teacherService } from '../../services/teacherService'
 import { queryKeys } from '../../lib/queryClient'
 import { useUIStore } from '../../store/useUIStore'
 import useActiveAcademicPeriod from '../../hooks/useActiveAcademicPeriod'
@@ -27,11 +27,8 @@ export default function OrganisasiPage() {
   } = useQuery({
     queryKey: queryKeys.admin.teacherOptions({ scope: 'organisasi' }),
     queryFn: async () => {
-      const { data, error } = await supabase.admin.teacherOptions({ scope: 'organisasi' })
-
-      if (error) throw error
-
-      return (data?.rows || []).map((guru) => ({
+      const rows = await teacherService.getTeacherOptions({ per_page: 200 })
+      return (rows || []).map((guru) => ({
         ...guru,
         name: guru.nama || guru.email || guru.id
       }))

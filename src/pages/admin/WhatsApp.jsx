@@ -15,7 +15,8 @@ import {
   Smartphone,
   Users
 } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../services/storageService'
+import adminService from '../../services/adminService'
 import { formatDateTime } from '../../lib/time'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
@@ -932,7 +933,7 @@ function LegacyTenantWhatsApp() {
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
-    const { data, error } = await supabase.admin.whatsapp()
+    const { data, error } = await adminService.whatsapp()
     if (error) {
       pushToast('error', error.message || 'Gagal memuat status WhatsApp')
     } else {
@@ -993,7 +994,7 @@ function LegacyTenantWhatsApp() {
     let cancelled = false
     const poll = async () => {
       if (document.hidden) return
-      const { data, error } = await supabase.admin.syncWhatsApp()
+      const { data, error } = await adminService.syncWhatsApp()
       if (cancelled || error) return
       applyPayload(data)
     }
@@ -1033,7 +1034,7 @@ function LegacyTenantWhatsApp() {
 
   const handleConnect = async () => {
     setConnecting(true)
-    const { data, error } = await supabase.admin.connectWhatsApp()
+    const { data, error } = await adminService.connectWhatsApp()
     setConnecting(false)
 
     if (error) {
@@ -1069,7 +1070,7 @@ function LegacyTenantWhatsApp() {
 
   const handleSync = async () => {
     setSyncing(true)
-    const { data, error } = await supabase.admin.syncWhatsApp()
+    const { data, error } = await adminService.syncWhatsApp()
     setSyncing(false)
 
     if (error) {
@@ -1091,7 +1092,7 @@ function LegacyTenantWhatsApp() {
     if (!confirmed) return
 
     setLoggingOut(true)
-    const { data, error } = await supabase.admin.logoutWhatsApp()
+    const { data, error } = await adminService.logoutWhatsApp()
     setLoggingOut(false)
 
     if (error) {
@@ -1105,7 +1106,7 @@ function LegacyTenantWhatsApp() {
 
   const handleSaveSettings = async () => {
     setSaving(true)
-    const { data, error } = await supabase.admin.updateWhatsAppSettings(settingsForm)
+    const { data, error } = await adminService.updateWhatsAppSettings(settingsForm)
     setSaving(false)
 
     if (error) {
@@ -1130,7 +1131,7 @@ function LegacyTenantWhatsApp() {
     }
 
     setSendingTest(true)
-    const { data, error } = await supabase.admin.sendWhatsAppTest(testForm)
+    const { data, error } = await adminService.sendWhatsAppTest(testForm)
     setSendingTest(false)
 
     if (error) {

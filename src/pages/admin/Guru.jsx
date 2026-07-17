@@ -1,5 +1,5 @@
 import React, { startTransition, useEffect, useState, useMemo } from 'react'
-import { supabase } from '../../lib/supabase'
+import { signInWithPassword } from '../../services/authService'
 import { queryClient, queryKeys } from '../../lib/queryClient'
 import { formatDate } from '../../lib/time'
 import { useUIStore } from '../../store/useUIStore'
@@ -120,11 +120,15 @@ const verifyPassword = async (password) => {
       throw new Error('User tidak ditemukan')
     }
 
-    // Try to sign in with the provided password
-    const { error } = await supabase.auth.signInWithPassword({
-      email: user.email,
-      password: password
-    })
+    let error
+    try {
+      await signInWithPassword({
+        email: user.email,
+        password: password
+      })
+    } catch (err) {
+      error = err
+    }
 
     if (error) {
       throw new Error('Password salah')

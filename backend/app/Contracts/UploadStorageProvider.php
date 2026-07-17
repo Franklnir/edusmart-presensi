@@ -30,4 +30,6 @@ interface UploadStorageProvider
 
     /** @return array{method: string, url: string, headers: array<string, string>, fields: array<string, string>, expires_at: string} */
     public function temporaryDownloadUrl(string $objectKey, int $ttlSeconds): array;
+
+    public function signedUrl(string $objectKey, int $ttlSeconds, string $logicalBucket): string;
 }

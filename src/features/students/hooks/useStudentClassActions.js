@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '../../../lib/supabase'
+import { studentService } from '../services/studentService'
+import { supabase } from '../../../services/storageService'
 
 export function useStudentClassActions({
   detailOpen,
@@ -75,12 +76,7 @@ export function useStudentClassActions({
     if (!konfirmasi) return
 
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ kelas: target })
-        .eq('id', user.id)
-
-      if (error) throw error
+      await studentService.updateStudent(user.id, { kelas: target })
 
       const strukturLama = Object.values(strukturKelas || {}).find(
         (struktur) => struktur.ketua_siswa_id === user.id

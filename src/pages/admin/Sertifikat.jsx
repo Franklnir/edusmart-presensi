@@ -6,8 +6,12 @@ import {
   CERT_BUCKET as APP_CERT_BUCKET,
   CERT_TEMPLATE_BUCKET as APP_CERT_TEMPLATE_BUCKET,
   extractObjectPath
-} from '../../lib/supabase'
+} from '../../services/storageService'
 import { certificateService } from '../../services/certificateService'
+import { classService } from '../../services/classService'
+import { extracurricularService } from '../../services/extracurricularService'
+import adminService from '../../services/adminService'
+import { studentService } from '../../features/students/services/studentService'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { resolveAcademicPeriod } from '../../utils/academicPeriod'
@@ -845,19 +849,18 @@ const GeneratorSection = ({ templateVersion }) => {
     let alive = true
     const init = async () => {
       try {
-        const period = await loadCurrentAcademicPeriod()
-        let ekskulQuery = supabase.from('ekskul').select('id, nama, tahun_ajaran, semester').order('nama')
-        ekskulQuery = applyAcademicSemesterFilter(ekskulQuery, period)
-
-        const [tplRes, klsRes, eksRes] = await Promise.all([
+        const [tplRes, kelasList, ekskulList] = await Promise.all([
           supabase
             .from('templat_sertifikat_publik')
             .select('*')
             .eq('is_active', true)
             .order('created_at', { ascending: false }),
-          supabase.from('kelas').select('*').order('nama'),
-          ekskulQuery
+          classService.list({ per_page: 200 }).catch(() => []),
+          extracurricularService.getExtracurriculars().catch(() => [])
         ])
+
+        const klsRes = { data: kelasList, error: null }
+        const eksRes = { data: ekskulList, error: null }
 
         if (!alive) return
 
@@ -998,12 +1001,8 @@ const GeneratorSection = ({ templateVersion }) => {
           __recipientInfo: selectedEskul?.nama ? `Eskul: ${selectedEskul.nama}` : 'Eskul'
         }))
       } else {
-        let q = supabase.from('profiles').select('*').eq('role', role).eq('status', 'active')
-        if (role === 'siswa' && kelasFilter) q = q.eq('kelas', kelasFilter)
-
-        const { data, error } = await q.order('nama', { ascending: true })
-        if (error) throw error
-        rows = data || []
+        const { data } = await studentService.getStudents({ status: 'active', per_page: 500 })
+        rows = (Array.isArray(data) ? data : []).filter(p => role === 'siswa' && kelasFilter ? p.kelas === kelasFilter : true)
       }
 
       setPeserta(rows)
@@ -2131,7 +2130,7 @@ const HistorySection = () => {
   const toast = (type, message) => pushToast?.(type, message)
 
   const load = async (page = meta.page || 1) => {
-    const { data, error } = await supabase.admin.certificates({ page, per_page: 50 })
+    const { data, error } = await adminService.certificates({ page, per_page: 50 })
 
     if (error) throw error
     setData(data?.rows || [])

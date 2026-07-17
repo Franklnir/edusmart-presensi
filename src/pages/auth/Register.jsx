@@ -1,6 +1,6 @@
 // src/pages/auth/Register.jsx
 import React, { useEffect, useMemo, useState } from 'react'
-import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
+import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../services/storageService'
 import { sanitizeExternalUrl, sanitizeInput, sanitizeMediaUrl, sanitizeText } from '../../utils/sanitize'
 import { validatePassword } from '../../utils/passwordPolicy'
 import { Link, useNavigate } from 'react-router-dom'

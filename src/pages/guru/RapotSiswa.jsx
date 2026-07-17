@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { BookOpenCheck } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../services/storageService'
+import { reportService } from '../../services/reportService'
 import { queryClient } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'

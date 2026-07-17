@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase'
+import { supabase } from '../services/storageService'
 
 export const ABSENSI_SETTINGS_BASE_COLUMNS = 'id,kelas,tanggal,mapel,mode,updated_at,tahun_ajaran,semester'
 export const ABSENSI_SETTINGS_COLUMNS = `${ABSENSI_SETTINGS_BASE_COLUMNS},allow_self_absen`

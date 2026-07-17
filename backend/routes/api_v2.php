@@ -87,6 +87,7 @@ Route::middleware('throttle:api')->group(function () {
     Route::post('uploads/{session}/complete', [UploadController::class, 'complete'])->name('uploads.complete');
     Route::delete('uploads/{session}', [UploadController::class, 'destroy'])->name('uploads.destroy');
     Route::get('attachments/{attachment}', [AttachmentController::class, 'show'])->name('attachments.show');
+    Route::post('storage/signed-url', [AttachmentController::class, 'signedUrl'])->name('storage.signed-url');
     Route::get('attachments/{attachment}/download', [AttachmentController::class, 'download'])->name('attachments.download');
     Route::delete('attachments/{attachment}', [AttachmentController::class, 'destroy'])->name('attachments.destroy');
 

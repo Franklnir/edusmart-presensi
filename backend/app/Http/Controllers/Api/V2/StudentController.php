@@ -338,4 +338,41 @@ class StudentController extends Controller
             ], 200);
         });
     }
+
+    public function options(Request $request): JsonResponse
+    {
+        Gate::authorize('viewAny', Profile::class);
+        $tenantId = $request->attributes->get('tenant_id');
+        $reqId = $this->getRequestId($request);
+
+        $search = $request->query('q', '');
+        $kelas = $request->query('kelas', '');
+        $status = $request->query('status', 'active');
+        $perPage = min(max(1, (int) $request->query('per_page', 50)), 200);
+
+        $query = Profile::where('tenant_id', $tenantId)->where('role', 'siswa');
+        if ($status) $query->where('status', $status);
+        if ($kelas) $query->where('kelas', $kelas);
+        if ($search) $query->where(function ($q) use ($search) {
+            $q->where('nama', 'ilike', "%{$search}%")
+              ->orWhere('nis', 'ilike', "%{$search}%");
+        });
+
+        $rows = $query->select(['id', 'nama', 'nis', 'kelas', 'status', 'jk'])
+            ->orderBy('nama')
+            ->paginate($perPage)
+            ->appends($request->query());
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Opsi siswa berhasil dimuat.',
+            'data' => $rows->items(),
+            'meta' => [
+                'current_page' => $rows->currentPage(),
+                'last_page' => $rows->lastPage(),
+                'total' => $rows->total(),
+            ],
+            'request_id' => $reqId,
+        ]);
+    }
 }

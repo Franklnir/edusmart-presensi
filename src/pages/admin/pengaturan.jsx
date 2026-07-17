@@ -24,7 +24,8 @@ import {
   UserCog,
   XCircle
 } from 'lucide-react'
-import { CURRENT_TENANT_SLUG, supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../lib/supabase'
+import { CURRENT_TENANT_SLUG } from '../../services/tenantService'
+import { supabase, PROFILE_BUCKET, getSignedUrlForValue } from '../../services/storageService'
 import { queryClient } from '../../lib/queryClient'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'

@@ -10,7 +10,7 @@ import {
   RefreshCw,
   Server
 } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../services/storageService'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { formatDateTime } from '../../lib/time'

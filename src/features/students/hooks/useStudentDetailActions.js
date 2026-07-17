@@ -1,5 +1,4 @@
 import { useCallback, useState } from 'react'
-import { supabase } from '../../../lib/supabase'
 import { normalizeGender } from '../../../utils/importUtils'
 import {
   buildAdditionalInfoForm,
@@ -90,16 +89,10 @@ export function useStudentDetailActions({
     const normalizedWali = editPhoneForm.no_hp_wali ? normalizePhoneID(editPhoneForm.no_hp_wali) : null
 
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          no_hp_siswa: normalizedSiswa,
-          no_hp_wali: normalizedWali,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', detailUser.id)
-
-      if (error) throw error
+      await studentService.updateStudent(detailUser.id, {
+        no_hp_siswa: normalizedSiswa,
+        no_hp_wali: normalizedWali,
+      })
 
       pushToast('success', 'Nomor HP berhasil diperbarui')
       setDetailUser((prev) => prev ? ({

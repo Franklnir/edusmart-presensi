@@ -1,41 +1,55 @@
-import { apiFetch } from '../lib/supabase'
+import { apiClient } from '../lib/api/client'
 
 export const subjectService = {
   async getSubjects(params = {}) {
-    const searchParams = new URLSearchParams(params)
-    return await apiFetch(`/api/v2/subjects?${searchParams.toString()}`)
+    const res = await apiClient('/api/v2/subjects', {
+      method: 'GET',
+      params,
+      cacheTtlMs: 10 * 1000,
+      dedupe: true
+    })
+    return res
   },
 
   async createSubject(payload) {
-    return await apiFetch('/api/v2/subjects', {
+    const res = await apiClient('/api/v2/subjects', {
       method: 'POST',
-      body: JSON.stringify(payload)
+      body: payload
     })
+    return res
   },
 
   async deleteSubject(id) {
-    return await apiFetch(`/api/v2/subjects/${encodeURIComponent(id)}`, {
+    const res = await apiClient(`/api/v2/subjects/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     })
+    return res
   }
 }
 
 export const jamKosongService = {
   async getJamKosong(params = {}) {
-    const searchParams = new URLSearchParams(params)
-    return await apiFetch(`/api/v2/jam-kosong?${searchParams.toString()}`)
+    const res = await apiClient('/api/v2/jam-kosong', {
+      method: 'GET',
+      params,
+      cacheTtlMs: 10 * 1000,
+      dedupe: true
+    })
+    return res
   },
 
   async createJamKosong(payload) {
-    return await apiFetch('/api/v2/jam-kosong', {
+    const res = await apiClient('/api/v2/jam-kosong', {
       method: 'POST',
-      body: JSON.stringify(payload)
+      body: payload
     })
+    return res
   },
 
   async deleteJamKosong(id) {
-    return await apiFetch(`/api/v2/jam-kosong/${encodeURIComponent(id)}`, {
+    const res = await apiClient(`/api/v2/jam-kosong/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     })
+    return res
   }
 }

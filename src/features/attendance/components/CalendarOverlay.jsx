@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { supabase } from '../../../lib/supabase'
+import { supabase } from '../../../services/storageService'
 import { getDayName, resolveAcademicPeriod, SEMESTER_GENAP } from '../utils/attendanceDate'
 
 export default function CalendarOverlay({

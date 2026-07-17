@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { supabase } from '../../../lib/supabase'
+import { supabase } from '../../../services/storageService'
+import { studentService } from '../../../features/students/services/studentService'
+import { classService } from '../../../services/classService'
 import { queryClient, queryKeys } from '../../../lib/queryClient'
 import { useLocalCache } from '../../../hooks/useLocalCache'
 
@@ -71,7 +73,7 @@ export default function OrganisasiTab({
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.studentOptions(params),
         queryFn: async () => {
-          const { data, error } = await supabase.admin.studentOptions(params)
+          const { data, error } = await studentService.getStudentOptions(params)
           if (error) throw error
           return data
         },
@@ -132,10 +134,9 @@ export default function OrganisasiTab({
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.organizationBootstrap({ tahun_ajaran: academicPeriod?.tahunAjaran || '' }),
         queryFn: async () => {
-          const { data, error } = await supabase.admin.organisasiBootstrap({
+          const data = await classService.organisasiBootstrap({
             tahun_ajaran: academicPeriod?.tahunAjaran || ''
           })
-          if (error) throw error
           return data?.organisasi || []
         },
         staleTime: force ? 0 : 60 * 1000

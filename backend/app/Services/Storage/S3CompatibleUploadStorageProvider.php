@@ -90,4 +90,12 @@ class S3CompatibleUploadStorageProvider implements UploadStorageProvider
     {
         return (string) config('api_v2.uploads.logical_bucket', 'assignments');
     }
+
+    public function signedUrl(string $objectKey, int $ttlSeconds, string $logicalBucket = ''): string
+    {
+        $ttlSeconds = max(60, min(86400, $ttlSeconds));
+        $bucket = $logicalBucket !== '' ? $logicalBucket : $this->logicalBucket();
+        $instruction = $this->signer->presignGet($objectKey, $ttlSeconds, $bucket);
+        return $instruction['url'] ?? '';
+    }
 }

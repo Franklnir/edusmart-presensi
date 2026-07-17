@@ -1,7 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { startTransition } from 'react'
-import { supabase, apiFetch } from '../../lib/supabase'
+import { supabase, apiFetch } from '../../services/storageService'
+import { studentService } from '../../features/students/services/studentService'
+import { academicPeriodService } from '../../services/academicPeriodService'
+import { classService } from '../../services/classService'
 import { queryClient, queryKeys } from '../../lib/queryClient'
 import { useUIStore } from '../../store/useUIStore'
 import { ClassesApi } from '../../lib/api/v2/classes'
@@ -570,9 +573,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.academicSummary(params),
         queryFn: async () => {
-          const { data, error } = await supabase.admin.academicSummary(params)
-          if (error) throw error
-          return data
+          const data = await classService.academicSummary(params)
         },
         staleTime: force ? 0 : 60 * 1000,
       })
@@ -633,7 +634,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
     setScheduleDecisionLoading(true)
     try {
-      const { data, error } = await supabase.admin.schedulePeriodDecisionStatus({
+      const { data, error } = await academicPeriodService.getScheduleDecision({
         target_tahun_ajaran: schedulePeriod.tahunAjaran
       })
       if (error) throw error
@@ -695,7 +696,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
     setScheduleDecisionAction(action)
     try {
-      const { data, error } = await supabase.admin.resolveSchedulePeriodDecision({
+      const { data, error } = await academicPeriodService.resolveScheduleDecision({
         action,
         target_tahun_ajaran: targetYear,
         source_tahun_ajaran: scheduleDecisionStatus.source_tahun_ajaran || undefined
@@ -762,9 +763,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
         const data = await queryClient.fetchQuery({
           queryKey: queryKeys.admin.academicSummary(params),
           queryFn: async () => {
-            const { data, error } = await supabase.admin.academicSummary(params)
-            if (error) throw error
-            return data
+            const data = await classService.academicSummary(params)
           },
           staleTime: 60 * 1000,
         })
@@ -1400,7 +1399,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       updated_at: new Date().toISOString()
     }
 
-    let { data, error, raw } = await supabase.admin.applyAcademicPeriod(payload)
+    let { data, error, raw } = await await academicPeriodService.apply(payload)
     if (error?.code === 'academic_period_calendar_confirmation_required') {
       const serverCalendar = raw?.data?.server_calendar || {}
       const confirmedCalendar = await requestConfirmation({
@@ -1419,7 +1418,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
         throw new Error('Perubahan periode dibatalkan.')
       }
 
-      const retry = await supabase.admin.applyAcademicPeriod({
+      const retry = await await academicPeriodService.apply({
         ...payload,
         calendar_confirmed: true
       })
@@ -1530,7 +1529,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
       const data = await queryClient.fetchQuery({
         queryKey: queryKeys.admin.studentOptions(params),
         queryFn: async () => {
-          const { data, error } = await supabase.admin.studentOptions(params)
+          const { data, error } = await studentService.getStudentOptions(params)
           if (error) throw error
           return data
         },
@@ -1554,7 +1553,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
   async function loadPromotionExceptions() {
     try {
-      const { data, error } = await supabase.admin.academicRolloverExceptions({
+      const { data, error } = await academicPeriodService.getRolloverExceptions({
         source_tahun_ajaran: academicPeriod.tahunAjaran,
         target_tahun_ajaran: nextAcademicPeriod.tahunAjaran
       })
@@ -1636,7 +1635,7 @@ export default function AKelas({ initialTab = 'kelas' }) {
 
       setPromotionLoading(true)
       const reason = String(promotionRetainReason || '').trim() || 'Tidak naik kelas'
-      const { error } = await supabase.admin.replaceAcademicRolloverExceptions({
+      const { error } = await academicPeriodService.replaceRolloverExceptions({
         source_tahun_ajaran: academicPeriod.tahunAjaran,
         target_tahun_ajaran: nextAcademicPeriod.tahunAjaran,
         student_ids: selectedIds,

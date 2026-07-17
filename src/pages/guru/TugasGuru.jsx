@@ -8,7 +8,7 @@ import {
   extractObjectPath,
   getSignedUrlForValue,
   removeStorageObject
-} from '../../lib/supabase'
+} from '../../services/storageService'
 import { useLocalCache } from '../../hooks/useLocalCache'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'

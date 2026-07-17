@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { apiFetch } from '../../lib/supabase'
+import { apiClient } from '../../lib/api/client'
 import '../../styles/GooglePopup.css'
 
 const VALID_MODES = new Set(['login', 'link'])
@@ -97,10 +97,16 @@ export default function GoogleAuthPopup() {
         document.title =
           modeRef.current === 'link' ? 'Tautkan Google — SISMU' : 'Masuk dengan Google — SISMU'
 
-        const popupContext = await apiFetch(
-          `/api/auth/google/popup-context?origin=${encodeURIComponent(requestedOrigin)}&mode=${encodeURIComponent(modeRef.current)}`,
-          { method: 'GET' }
-        )
+        let popupContext
+        try {
+          const result = await apiClient(
+            `/api/auth/google/popup-context?origin=${encodeURIComponent(requestedOrigin)}&mode=${encodeURIComponent(modeRef.current)}`,
+            { method: 'GET' }
+          )
+          popupContext = { raw: result.payload, error: null }
+        } catch (err) {
+          popupContext = { error: { message: err.message } }
+        }
 
         if (popupContext.error) {
           throw new Error(popupContext.error.message || 'Origin tidak diizinkan.')

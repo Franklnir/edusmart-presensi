@@ -11,7 +11,8 @@ import {
   UserPlus,
   X
 } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../services/storageService'
+import adminService from '../../services/adminService'
 import { useUIStore } from '../../store/useUIStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { ADMIN_FEATURES } from '../../constants/adminFeaturePermissions'
@@ -74,7 +75,7 @@ const PermissionAdmin = () => {
   const loadPermissions = async () => {
     setLoading(true)
     try {
-      const { data: result, error } = await supabase.admin.featurePermissions()
+      const { data: result, error } = await adminService.featurePermissions()
       if (error) throw error
       setData({
         rows: Array.isArray(result?.rows) ? result.rows : [],
@@ -139,7 +140,7 @@ const PermissionAdmin = () => {
 
     setSaving(true)
     try {
-      const { data: result, error } = await supabase.admin.createFeaturePermission(form)
+      const { data: result, error } = await adminService.createFeaturePermission(form)
       if (error) throw error
       setData({
         rows: Array.isArray(result?.rows) ? result.rows : [],
@@ -159,7 +160,7 @@ const PermissionAdmin = () => {
   const handleToggleRow = async (feature) => {
     if (!feature?.id) return
     try {
-      const { data: result, error } = await supabase.admin.updateFeaturePermission(feature.id, {
+      const { data: result, error } = await adminService.updateFeaturePermission(feature.id, {
         is_active: !feature.active,
       })
       if (error) throw error
@@ -180,7 +181,7 @@ const PermissionAdmin = () => {
     if (!confirmed) return
 
     try {
-      const { data: result, error } = await supabase.admin.deleteFeaturePermission(feature.id)
+      const { data: result, error } = await adminService.deleteFeaturePermission(feature.id)
       if (error) throw error
       setData((prev) => ({
         ...prev,

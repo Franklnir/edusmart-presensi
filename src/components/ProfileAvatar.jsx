@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { PROFILE_BUCKET, getSignedUrlForValue } from '../lib/supabase'
+import { PROFILE_BUCKET, getSignedUrlForValue } from '../services/storageService'
 
 const SIGNED_TTL_MS = 55 * 60 * 1000
 const signedCache = new Map()

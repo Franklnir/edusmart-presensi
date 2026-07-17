@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../services/storageService'
 import { apiClient } from '../../lib/api/client'
 import { useLocalCache } from '../../hooks/useLocalCache'
 import { useUIStore } from '../../store/useUIStore'

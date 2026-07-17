@@ -1,7 +1,7 @@
 // src/pages/auth/ForgotPassword.jsx
 import React, { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase } from '../../lib/supabase'
+import { resetPasswordForEmail } from '../../services/authService'
 
 const ForgotPassword = () => {
   const adminSubdomain = String(import.meta.env.VITE_ADMIN_SUBDOMAIN || 'admin26')
@@ -59,7 +59,7 @@ const ForgotPassword = () => {
     try {
       const redirectTo = `${window.location.origin}/reset-password`
 
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      const { error } = await resetPasswordForEmail(email, {
         redirectTo
       })
 

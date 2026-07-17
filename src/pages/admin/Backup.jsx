@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Building2, CalendarClock, Cloud, Database, ExternalLink, RefreshCw, ShieldCheck, UploadCloud } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../services/storageService'
+import adminService from '../../services/adminService'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useUIStore } from '../../store/useUIStore'
 import { useAcademicContext } from '../../context/AcademicContext'
@@ -471,7 +472,7 @@ export default function BackupAdmin() {
       
       const { data, error } = isSuperAdmin
         ? await supabase.super.tenantBackup(selectedTenantId, apiPayload)
-        : await supabase.admin.backup(apiPayload)
+        : await adminService.backup(apiPayload)
 
       if (error) throw error
       if (!data || !Array.isArray(data.tables)) {
@@ -496,8 +497,8 @@ export default function BackupAdmin() {
     setDriveLoading(true)
     try {
       const { data, error } = refresh
-        ? (isSuperAdmin ? await supabase.super.syncTenantGoogleDrive(selectedTenantId) : await supabase.admin.syncGoogleDrive())
-        : (isSuperAdmin ? await supabase.super.tenantGoogleDrive(selectedTenantId) : await supabase.admin.googleDrive())
+        ? (isSuperAdmin ? await supabase.super.syncTenantGoogleDrive(selectedTenantId) : await adminService.syncGoogleDrive())
+        : (isSuperAdmin ? await supabase.super.tenantGoogleDrive(selectedTenantId) : await adminService.googleDrive())
       if (error) throw error
       setDriveStatus(data || DRIVE_STATUS_DEFAULT)
       if (refresh && !silent) {
@@ -518,7 +519,7 @@ export default function BackupAdmin() {
     try {
       if (isSuperAdmin) throw new Error('Fitur sambung Google Drive hanya tersedia untuk Admin Sekolah.')
       const returnUrl = `${window.location.origin}/admin/backup?drive=connected`
-      const { data, error } = await supabase.admin.googleDriveConnectUrl({ return_url: returnUrl })
+      const { data, error } = await adminService.googleDriveConnectUrl({ return_url: returnUrl })
       if (error) throw error
       if (!data?.authorization_url) throw new Error('URL sambungkan Google Drive tidak tersedia')
       window.location.href = data.authorization_url
@@ -543,7 +544,7 @@ export default function BackupAdmin() {
 
     setDriveRecovering(true)
     try {
-      const { data, error } = await supabase.admin.recoverGoogleDrive()
+      const { data, error } = await adminService.recoverGoogleDrive()
       if (error) throw error
 
       const statusPayload = data?.status_payload || data
@@ -572,7 +573,7 @@ export default function BackupAdmin() {
     try {
       const { data, error } = isSuperAdmin
         ? await supabase.super.tenantBackupMonthlyStatus(selectedTenantId, { refresh })
-        : await supabase.admin.backupMonthlyStatus({ refresh })
+        : await adminService.backupMonthlyStatus({ refresh })
       if (error) throw error
       setMonthlyStatus(data || null)
       if (data?.drive) {
@@ -606,7 +607,7 @@ export default function BackupAdmin() {
       await new Promise((resolve) => window.setTimeout(resolve, attempt === 0 ? 900 : 2500))
       const { data, error } = isSuperAdmin
         ? await supabase.super.tenantMonthlyBackupJobStatus(selectedTenantId, jobId)
-        : await supabase.admin.backupMonthlyJobStatus(jobId)
+        : await adminService.backupMonthlyJobStatus(jobId)
       if (error) throw error
 
       lastStatus = data || null
@@ -650,7 +651,7 @@ export default function BackupAdmin() {
       }
       const { data, error } = isSuperAdmin
         ? await supabase.super.saveTenantBackupToGoogleDrive(selectedTenantId, requestPayload)
-        : await supabase.admin.saveBackupToGoogleDrive(requestPayload)
+        : await adminService.saveBackupToGoogleDrive(requestPayload)
       if (error) throw error
       setLastDriveBackup(data?.drive_file || null)
       await loadDriveStatus({ refresh: true, silent: true })
@@ -708,7 +709,7 @@ export default function BackupAdmin() {
     try {
       const { data, error } = isSuperAdmin
         ? await supabase.super.saveTenantMonthlyBackupToGoogleDrive(selectedTenantId, { month: monthKey, force, async: true })
-        : await supabase.admin.saveMonthlyBackupToGoogleDrive({ month: monthKey, force, async: true })
+        : await adminService.saveMonthlyBackupToGoogleDrive({ month: monthKey, force, async: true })
       if (error) throw error
 
       if (data?.monthly_status) setMonthlyStatus(data.monthly_status)
@@ -754,7 +755,7 @@ export default function BackupAdmin() {
     try {
       const { data, error } = isSuperAdmin
         ? await supabase.super.autoTenantMonthlyBackupToGoogleDrive(selectedTenantId, { async: true })
-        : await supabase.admin.autoMonthlyBackupToGoogleDrive({ async: true })
+        : await adminService.autoMonthlyBackupToGoogleDrive({ async: true })
       if (error) throw error
 
       if (data?.monthly_status) setMonthlyStatus(data.monthly_status)
@@ -869,7 +870,7 @@ export default function BackupAdmin() {
       }
       const { data, error } = isSuperAdmin
         ? await supabase.super.restoreTenant(selectedTenantId, payload)
-        : await supabase.admin.restoreBackup(payload)
+        : await adminService.restoreBackup(payload)
       if (error) throw error
       const result = data?.result || null
       setRestoreResult(result)
@@ -900,7 +901,7 @@ export default function BackupAdmin() {
       }
       const { data, error } = isSuperAdmin
         ? await supabase.super.restoreTenant(selectedTenantId, payload)
-        : await supabase.admin.restoreBackup(payload)
+        : await adminService.restoreBackup(payload)
       if (error) throw error
       const result = data?.result || null
       setRestoreResult(result)

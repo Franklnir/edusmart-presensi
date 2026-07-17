@@ -1,4 +1,5 @@
-import { supabase } from '../../../lib/supabase'
+import { supabase } from '../../../services/storageService'
+import adminService from '../../../services/adminService'
 import { isEmailFormat } from '../../../utils/accountSetup'
 import { buildDefaultPassword, normalizeIdentifierCode } from '../../../utils/importUtils'
 import { createClientUuid } from '../utils/studentFormatters'
@@ -54,7 +55,7 @@ export async function deleteStudentImportHistoryBatch(historyId) {
 }
 
 export async function runStudentImportBatch(payload = {}) {
-  const { data, error } = await supabase.admin.importStudents(payload)
+  const { data, error } = await adminService.importStudents(payload)
   if (error) throw error
   return data || {}
 }
@@ -193,7 +194,7 @@ export async function upsertImportedStudentRow(row) {
     if (row.no_hp_wali) provisionPayload.no_hp_wali = row.no_hp_wali
     if (payload.status) provisionPayload.status = payload.status
 
-    const { error: provisionError } = await supabase.admin.provisionUser(provisionPayload)
+    const { error: provisionError } = await adminService.provisionUser(provisionPayload)
 
     if (provisionError) throw provisionError
     return {
@@ -202,7 +203,7 @@ export async function upsertImportedStudentRow(row) {
     }
   }
 
-  const { data: provisionData, error: provisionError } = await supabase.admin.provisionUser({
+  const { data: provisionData, error: provisionError } = await adminService.provisionUser({
     nama,
     email: hasEmail ? emailLower : '',
     password,

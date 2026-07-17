@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/useAuthStore'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../services/storageService'
 import { apiClient } from '../../lib/api/client'
 import { useLocalCache } from '../../hooks/useLocalCache'
 
