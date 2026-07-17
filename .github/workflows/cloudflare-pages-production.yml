@@ -1,0 +1,397 @@
+name: Production Cloudflare
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_production:
+        description: "Deploy exact release SHA to Cloudflare Pages production"
+        required: true
+        default: false
+        type: boolean
+  push:
+    branches:
+      - main
+      - backup/vps-ready-20260430
+    paths:
+      - ".github/workflows/cloudflare-pages-production.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.js"
+      - "index.html"
+      - "public/**"
+      - "src/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-pages-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy Frontend Production
+    runs-on: ubuntu-latest
+    environment: production
+    if: >
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/backup/vps-ready-20260430' ||
+        (
+          github.ref == 'refs/heads/release/hybrid-rc1' &&
+          github.event_name == 'workflow_dispatch' &&
+          inputs.deploy_production == true
+        )
+      )
+
+    env:
+      NODE_VERSION: "20.19.0"
+      RELEASE_SHA: ${{ github.sha }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }}
+      CLOUDFLARE_PAGES_BACKEND_ORIGIN: ${{ vars.CLOUDFLARE_PAGES_BACKEND_ORIGIN }}
+      CLOUDFLARE_PAGES_EDGE_PROXY_SECRET: ${{ secrets.CLOUDFLARE_PAGES_EDGE_PROXY_SECRET }}
+      CLOUDFLARE_PAGES_PLATFORM_API_HOST: ${{ vars.CLOUDFLARE_PAGES_PLATFORM_API_HOST }}
+      VITE_API_URL: ${{ vars.VITE_API_URL }}
+      VITE_ROOT_DOMAIN: ${{ vars.VITE_ROOT_DOMAIN }}
+      VITE_ADMIN_SUBDOMAIN: ${{ vars.VITE_ADMIN_SUBDOMAIN || 'admin26' }}
+      VITE_TENANT_SLUG: ${{ vars.VITE_TENANT_SLUG || 'tenant-a' }}
+      VITE_REALTIME_POLL_MS: "4000"
+      VITE_REALTIME_POLL_HIDDEN_MS: "12000"
+      VITE_GOOGLE_AUTH_ENABLED: "false"
+      VITE_GOOGLE_CLIENT_ID: ""
+      VITE_GOOGLE_AUTH_LOGIN_URL: /api/auth/google/redirect
+      VITE_GOOGLE_AUTH_LINK_URL: /api/auth/google/link
+      VITE_APP_RELEASE_SHA: ${{ github.sha }}
+      VITE_USE_ASSIGNMENTS_API_V2: "false"
+      VITE_USE_ASSIGNMENT_UPLOADS_API_V2: "false"
+      VITE_USE_SCHEDULES_API_V2: "false"
+      VITE_USE_CLASSES_API_V2: "false"
+      VITE_USE_ATTENDANCE_API_V2: "false"
+      VITE_USE_ANNOUNCEMENTS_API_V2: "false"
+      VITE_USE_GRADES_API_V2: "true"
+      VITE_USE_REPORT_CARDS_API_V2: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify release identity
+        run: |
+          set -euo pipefail
+          test "$RELEASE_SHA" = "$(git rev-parse HEAD)"
+          echo "RELEASE_SHA=$RELEASE_SHA"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Validate Cloudflare secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_PAGES_EDGE_PROXY_SECRET CLOUDFLARE_PAGES_PROJECT_NAME CLOUDFLARE_PAGES_BACKEND_ORIGIN CLOUDFLARE_PAGES_PLATFORM_API_HOST VITE_API_URL VITE_ROOT_DOMAIN; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing Cloudflare secret::${name} is required"
+              missing=1
+            fi
+          done
+          for value in "$CLOUDFLARE_PAGES_BACKEND_ORIGIN" "$CLOUDFLARE_PAGES_PLATFORM_API_HOST" "$VITE_API_URL"; do
+            case "$value" in
+              https://*) ;;
+              *)
+                echo "::error title=Invalid production origin::Cloudflare production origins must use HTTPS"
+                missing=1
+                ;;
+            esac
+          done
+          case "$CLOUDFLARE_PAGES_PROJECT_NAME" in
+            *staging*|*test*|*preview*)
+              echo "::error title=Unsafe production project::Production Cloudflare cannot target a staging, test, or preview project"
+              missing=1
+              ;;
+          esac
+          exit "$missing"
+
+      - name: Install frontend deps
+        run: npm ci --legacy-peer-deps
+
+      - name: Frontend security audit
+        run: npm run security:audit
+
+      - name: Frontend tests
+        run: npm run test
+
+      - name: Legacy consumer freeze gate
+        run: npm run lint:legacy
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Record frontend release metadata
+        run: |
+          set -euo pipefail
+          test "$VITE_APP_RELEASE_SHA" = "$RELEASE_SHA"
+          {
+            echo "release_sha=$RELEASE_SHA"
+            echo "frontend_release_sha=$VITE_APP_RELEASE_SHA"
+            echo "grades_v2=$VITE_USE_GRADES_API_V2"
+            echo "report_cards_v2=$VITE_USE_REPORT_CARDS_API_V2"
+            echo "schedules_v2=$VITE_USE_SCHEDULES_API_V2"
+            echo "assignments_v2=$VITE_USE_ASSIGNMENTS_API_V2"
+            echo "assignment_uploads_v2=$VITE_USE_ASSIGNMENT_UPLOADS_API_V2"
+            echo "classes_v2=$VITE_USE_CLASSES_API_V2"
+            echo "attendance_v2=$VITE_USE_ATTENDANCE_API_V2"
+            echo "announcements_v2=$VITE_USE_ANNOUNCEMENTS_API_V2"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Add Cloudflare Pages headers, backend proxy, and SPA fallback
+        run: |
+          set -euo pipefail
+          cat > dist/_headers <<'HEADERS'
+          /*
+            Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; worker-src 'self' blob:
+            Cross-Origin-Opener-Policy: same-origin-allow-popups
+            Cross-Origin-Resource-Policy: same-site
+            Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=()
+            Referrer-Policy: strict-origin-when-cross-origin
+            X-Content-Type-Options: nosniff
+            X-Frame-Options: DENY
+          HEADERS
+
+          cat > dist/_redirects <<'REDIRECTS'
+          /* /index.html 200
+          REDIRECTS
+
+          node <<'NODE'
+          const fs = require('fs')
+
+          const worker = String.raw`
+          const BACKEND_ORIGIN = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_BACKEND_ORIGIN || '')}
+          const EDGE_PROXY_SECRET = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_EDGE_PROXY_SECRET || '')}
+          const PLATFORM_API_HOST = ${JSON.stringify(process.env.CLOUDFLARE_PAGES_PLATFORM_API_HOST || '')}
+          const ROOT_DOMAIN = ${JSON.stringify(process.env.VITE_ROOT_DOMAIN || '')}
+          const ORIGIN_TRANSIENT_STATUSES = new Set([502, 503, 504, 520, 521, 522, 523, 524])
+          const SAFE_RETRY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+
+          const BACKEND_PREFIXES = [
+            '/api',
+            '/sanctum',
+            '/storage',
+            '/broadcasting/auth'
+          ]
+
+          const isBackendPath = (pathname) => (
+            BACKEND_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'))
+          )
+
+          const SENSITIVE_FILE_PATTERN = /(?:^|\/)(?:\.env|\.git|backup|backups|dump|database)(?:[./_-]|$)|\.(?:7z|bak|backup|conf|config|env|gz|ini|key|log|old|pem|phar|php|rar|sql|tar|tgz|xz|zip)$/i
+
+          const isSensitiveFileProbe = (pathname) => {
+            let decoded = String(pathname || '')
+            try {
+              decoded = decodeURIComponent(decoded)
+            } catch {
+              return true
+            }
+            decoded = decoded.toLowerCase()
+            if (decoded.startsWith('/assets/')) {
+              return false
+            }
+            return SENSITIVE_FILE_PATTERN.test(decoded)
+          }
+
+          const notFound = () => new Response('Not Found', {
+            status: 404,
+            headers: {
+              'Cache-Control': 'no-store',
+              'Content-Type': 'text/plain; charset=utf-8',
+              'X-Content-Type-Options': 'nosniff',
+              'X-Robots-Tag': 'noindex, nofollow'
+            }
+          })
+
+          const isPlatformUtilityHost = (hostname) => {
+            const host = String(hostname || '').toLowerCase()
+            const root = String(ROOT_DOMAIN || '').toLowerCase()
+            return (
+              host.endsWith('.pages.dev') ||
+              (root && (host === root || host === 'www.' + root || host === 'frontend.' + root))
+            )
+          }
+
+          const normalizeHost = (value) => String(value || '').trim().toLowerCase().replace(/:\d+$/, '')
+
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+          const originUnavailable = (retryAfterSeconds = 8) => new Response(
+            JSON.stringify({
+              message: 'Server sedang disambungkan ulang. Silakan coba lagi beberapa saat.'
+            }),
+            {
+              status: 503,
+              headers: {
+                'Cache-Control': 'no-store',
+                'Content-Type': 'application/json; charset=utf-8',
+                'Retry-After': String(retryAfterSeconds),
+                'X-Content-Type-Options': 'nosniff',
+                'X-Sismu-Origin-Status': 'unavailable'
+              }
+            }
+          )
+
+          const withEdgeTelemetry = (response, startedAt, cacheStatus = 'BYPASS') => {
+            const headers = new Headers(response.headers)
+            const durationMs = Math.max(0, Date.now() - startedAt)
+            const timing = cacheStatus === 'HIT'
+              ? 'edge-cache;dur=' + durationMs
+              : 'edge-origin;dur=' + durationMs
+
+            if (cacheStatus === 'HIT') {
+              headers.set('Server-Timing', timing)
+            } else {
+              const existing = headers.get('Server-Timing')
+              headers.set('Server-Timing', existing ? existing + ', ' + timing : timing)
+            }
+            headers.set('X-Sismu-Edge-Cache', cacheStatus)
+
+            return new Response(response.body, {
+              status: response.status,
+              statusText: response.statusText,
+              headers
+            })
+          }
+
+          const proxyBackendWithCache = async (request, context) => {
+            const startedAt = Date.now()
+            const url = new URL(request.url)
+            const cacheable = request.method === 'GET' && url.pathname === '/api/public/settings'
+
+            if (!cacheable) {
+              return withEdgeTelemetry(await proxyBackend(request), startedAt)
+            }
+
+            const cache = caches.default
+            const cacheKey = new Request(url.toString(), { method: 'GET' })
+            const cached = await cache.match(cacheKey)
+            if (cached) {
+              return withEdgeTelemetry(cached, startedAt, 'HIT')
+            }
+
+            const response = await proxyBackend(request)
+            if (response.ok && !response.headers.has('Set-Cookie')) {
+              const headers = new Headers(response.headers)
+              headers.set('Cache-Control', 'public, max-age=30')
+              const cacheResponse = new Response(response.body, {
+                status: response.status,
+                statusText: response.statusText,
+                headers
+              })
+              context.waitUntil(cache.put(cacheKey, cacheResponse.clone()))
+              return withEdgeTelemetry(cacheResponse, startedAt, 'MISS')
+            }
+
+            return withEdgeTelemetry(response, startedAt)
+          }
+
+          const backendRequestInit = (request, publicUrl, publicHost) => {
+            const headers = new Headers(request.headers)
+            const forwardedHost = normalizeHost(publicHost || publicUrl.host)
+            const forwardedProto = publicUrl.protocol.replace(':', '') || 'https'
+            headers.set('X-Forwarded-Host', forwardedHost)
+            headers.set('X-Forwarded-Proto', forwardedProto)
+            headers.set('X-Forwarded-Port', publicUrl.port || (forwardedProto === 'https' ? '443' : '80'))
+            headers.set('X-Original-Host', forwardedHost)
+            if (forwardedHost && EDGE_PROXY_SECRET) {
+              headers.set('X-Sismu-Forwarded-Host', forwardedHost)
+              headers.set('X-Sismu-Edge-Secret', EDGE_PROXY_SECRET)
+            }
+
+            return {
+              method: request.method,
+              headers,
+              body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
+              redirect: 'manual'
+            }
+          }
+
+          const proxyBackend = async (request) => {
+            const incomingUrl = new URL(request.url)
+            const backendUrl = new URL(request.url)
+            const platformUtilityHost = isPlatformUtilityHost(incomingUrl.hostname)
+            const backendOrigin = new URL(BACKEND_ORIGIN)
+            const publicHost = platformUtilityHost ? PLATFORM_API_HOST : incomingUrl.hostname
+            backendUrl.protocol = backendOrigin.protocol
+            backendUrl.hostname = backendOrigin.hostname
+            backendUrl.port = backendOrigin.port
+
+            const init = backendRequestInit(request, incomingUrl, publicHost)
+
+            const backendRequest = () => new Request(backendUrl.toString(), init)
+            const shouldRetry = SAFE_RETRY_METHODS.has(request.method.toUpperCase())
+            let response
+
+            try {
+              response = await fetch(backendRequest())
+            } catch {
+              if (!shouldRetry) return originUnavailable()
+              await sleep(350)
+              try {
+                response = await fetch(backendRequest())
+              } catch {
+                return originUnavailable()
+              }
+            }
+
+            if (ORIGIN_TRANSIENT_STATUSES.has(response.status)) {
+              if (!shouldRetry) return originUnavailable()
+              await sleep(350)
+              try {
+                const retryResponse = await fetch(backendRequest())
+                if (!ORIGIN_TRANSIENT_STATUSES.has(retryResponse.status)) {
+                  return retryResponse
+                }
+              } catch {
+                return originUnavailable()
+              }
+              return originUnavailable()
+            }
+
+            return response
+          }
+
+          export default {
+            async fetch(request, env, context) {
+              const url = new URL(request.url)
+              if (isBackendPath(url.pathname)) {
+                return proxyBackendWithCache(request, context)
+              }
+
+              if (isSensitiveFileProbe(url.pathname)) {
+                return notFound()
+              }
+
+              return env.ASSETS.fetch(request)
+            }
+          }
+          `
+
+          fs.writeFileSync('dist/_worker.js', worker.trimStart())
+          NODE
+
+      - name: Ensure Cloudflare Pages project exists
+        run: |
+          set -euo pipefail
+          npx --yes wrangler pages project create "$CLOUDFLARE_PAGES_PROJECT_NAME" \
+            --production-branch main \
+            || true
+
+      - name: Deploy to Cloudflare Pages
+        run: |
+          set -euo pipefail
+          npx --yes wrangler pages deploy dist \
+            --project-name "$CLOUDFLARE_PAGES_PROJECT_NAME"
