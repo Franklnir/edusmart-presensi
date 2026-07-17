@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V2\AcademicContextController;
+use App\Http\Controllers\Api\V2\AcademicPeriodController;
 use App\Http\Controllers\Api\V2\AdminDashboardController;
 use App\Http\Controllers\Api\V2\AnnouncementController;
 use App\Http\Controllers\Api\V2\AssignmentController;
