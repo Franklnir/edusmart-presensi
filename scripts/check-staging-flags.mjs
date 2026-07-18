@@ -8,12 +8,12 @@ const productionExample = await readFile('.env.production.example', 'utf8')
 const flags = {
   STAGING_USE_GRADES_API_V2: 'true',
   STAGING_USE_REPORT_CARDS_API_V2: 'true',
-  STAGING_USE_SCHEDULES_API_V2: 'false',
-  STAGING_USE_ASSIGNMENTS_API_V2: 'false',
-  STAGING_USE_ASSIGNMENT_UPLOADS_API_V2: 'false',
-  STAGING_USE_CLASSES_API_V2: 'false',
-  STAGING_USE_ATTENDANCE_API_V2: 'false',
-  STAGING_USE_ANNOUNCEMENTS_API_V2: 'false'
+  STAGING_USE_SCHEDULES_API_V2: 'true',
+  STAGING_USE_ASSIGNMENTS_API_V2: 'true',
+  STAGING_USE_ASSIGNMENT_UPLOADS_API_V2: 'true',
+  STAGING_USE_CLASSES_API_V2: 'true',
+  STAGING_USE_ATTENDANCE_API_V2: 'true',
+  STAGING_USE_ANNOUNCEMENTS_API_V2: 'true'
 }
 
 const failures = []
