@@ -141,6 +141,8 @@ return [
         'webhook_base_url' => env('EVOLUTION_API_WEBHOOK_BASE_URL', env('APP_URL')),
         'timeout' => (int) env('EVOLUTION_API_TIMEOUT_SECONDS', 20),
         'verify_ssl' => filter_var(env('EVOLUTION_API_VERIFY_SSL', true), FILTER_VALIDATE_BOOL),
+        'retries' => (int) env('EVOLUTION_API_RETRIES', 2),
+        'retry_delay_ms' => (int) env('EVOLUTION_API_RETRY_DELAY_MS', 500),
     ],
 
     'whatsapp' => [

@@ -43,34 +43,44 @@ class EvolutionApiClient
             return null;
         }
 
+        $maxRetries = (int) config('services.evolution_api.retries', 2);
+        $retryDelayMs = (int) config('services.evolution_api.retry_delay_ms', 500);
+
         $response = null;
         $lastServerError = null;
         $lastConnectionException = null;
-        foreach ($this->baseUrls() as $baseUrl) {
-            try {
-                $response = $this->request($baseUrl)->get('/instance/fetchInstances', [
-                    'instanceName' => $instanceName,
-                ]);
-            } catch (ConnectionException $e) {
-                $lastConnectionException = $e;
 
-                continue;
-            }
-
-            if ($response->status() === 404) {
-                return null;
-            }
-            if (! $response->successful()) {
-                if ($response->serverError()) {
-                    $lastServerError = $response;
+        for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
+            foreach ($this->baseUrls() as $baseUrl) {
+                try {
+                    $response = $this->request($baseUrl)->get('/instance/fetchInstances', [
+                        'instanceName' => $instanceName,
+                    ]);
+                } catch (ConnectionException $e) {
+                    $lastConnectionException = $e;
 
                     continue;
                 }
 
-                throw new RuntimeException($this->buildErrorMessage($response));
+                if ($response->status() === 404) {
+                    return null;
+                }
+                if (! $response->successful()) {
+                    if ($response->serverError()) {
+                        $lastServerError = $response;
+
+                        continue;
+                    }
+
+                    throw new RuntimeException($this->buildErrorMessage($response));
+                }
+
+                break 2;
             }
 
-            break;
+            if ($attempt < $maxRetries) {
+                usleep($retryDelayMs * 1000 * ($attempt + 1));
+            }
         }
 
         if (! $response instanceof Response) {
@@ -176,33 +186,43 @@ class EvolutionApiClient
             $options['json'] = $payload;
         }
 
+        $maxRetries = (int) config('services.evolution_api.retries', 2);
+        $retryDelayMs = (int) config('services.evolution_api.retry_delay_ms', 500);
+
         $lastServerError = null;
         $lastConnectionException = null;
-        foreach ($this->baseUrls() as $baseUrl) {
-            try {
-                $response = $this->request($baseUrl)->send($method, $uri, $options);
-            } catch (ConnectionException $e) {
-                $lastConnectionException = $e;
 
-                continue;
-            }
-
-            if (! $response->successful()) {
-                if ($response->serverError()) {
-                    $lastServerError = $response;
+        for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
+            foreach ($this->baseUrls() as $baseUrl) {
+                try {
+                    $response = $this->request($baseUrl)->send($method, $uri, $options);
+                } catch (ConnectionException $e) {
+                    $lastConnectionException = $e;
 
                     continue;
                 }
 
-                throw new RuntimeException($this->buildErrorMessage($response));
+                if (! $response->successful()) {
+                    if ($response->serverError()) {
+                        $lastServerError = $response;
+
+                        continue;
+                    }
+
+                    throw new RuntimeException($this->buildErrorMessage($response));
+                }
+
+                $decoded = $response->json();
+                if (is_array($decoded)) {
+                    return $decoded;
+                }
+
+                return [];
             }
 
-            $decoded = $response->json();
-            if (is_array($decoded)) {
-                return $decoded;
+            if ($attempt < $maxRetries) {
+                usleep($retryDelayMs * 1000 * ($attempt + 1));
             }
-
-            return [];
         }
 
         if ($lastServerError instanceof Response) {
