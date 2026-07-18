@@ -1,6 +1,11 @@
 // src/lib/supabase.js
 import { readAcademicCorrectionSession } from '../utils/academicCorrectionSession'
 import { generateRequestId, isValidRequestId, setLastRequestId } from './api/requestId'
+import {
+  isLocalApiHost,
+  isWithinRootDomain,
+  resolveApiBaseUrl
+} from './api/url'
 /* ===================== API BASE ===================== */
 const getRuntimeHostname = () => {
   if (typeof window === 'undefined') return 'localhost'
@@ -45,17 +50,6 @@ const resolveDelegatedAdminFeatureKeyFromPath = (pathname = '', search = '') => 
   return match?.[0] || ''
 }
 
-const isLocalApiHost = (host) => {
-  const normalized = String(host || '').toLowerCase()
-  return (
-    normalized === 'localhost' ||
-    normalized === '127.0.0.1' ||
-    normalized === '127.0.0.1.nip.io' ||
-    normalized.endsWith('.localhost') ||
-    normalized.endsWith('.127.0.0.1.nip.io')
-  )
-}
-
 const deriveApiHost = (host) => {
   const normalized = String(host || '').toLowerCase()
   if (!normalized) return 'localhost'
@@ -85,50 +79,12 @@ const deriveTenantSlug = (host) => {
 
 const RUNTIME_HOST = getRuntimeHostname()
 const DEFAULT_API_HOST = deriveApiHost(RUNTIME_HOST)
-const isWithinRootDomain = (host, rootDomain) => {
-  const normalizedHost = String(host || '').trim().toLowerCase()
-  const normalizedRoot = String(rootDomain || '').trim().toLowerCase()
-  if (!normalizedHost || !normalizedRoot) return false
-  return normalizedHost === normalizedRoot || normalizedHost.endsWith(`.${normalizedRoot}`)
-}
-
-const normalizeApiUrl = (rawApiUrl, runtimeHost) => {
-  const runtime = String(runtimeHost || '').toLowerCase()
-  const runtimeIsLocal = isLocalApiHost(runtime)
-  const runtimeProtocol =
-    typeof window !== 'undefined' && window.location?.protocol
-      ? window.location.protocol
-      : 'http:'
-  const fallback = runtimeIsLocal
-    ? `http://${DEFAULT_API_HOST}:8000`
-    : `${runtimeProtocol}//${DEFAULT_API_HOST}`
-  const input = String(rawApiUrl || '').trim()
-  if (!input) return fallback
-
-  try {
-    const url = new URL(input)
-    const apiHost = String(url.hostname || '').toLowerCase()
-
-    const apiIsLocal = isLocalApiHost(apiHost)
-
-    // Keep frontend and API on the same local host to avoid CSRF cookie mismatch.
-    if (runtimeIsLocal && apiIsLocal && runtime && runtime !== apiHost) {
-      url.hostname = runtime
-    }
-
-    const runtimeInRoot = isWithinRootDomain(runtime, ROOT_DOMAIN)
-    const apiInRoot = isWithinRootDomain(apiHost, ROOT_DOMAIN)
-    if (!runtimeIsLocal && runtimeInRoot && apiInRoot && runtime !== apiHost) {
-      url.hostname = runtime
-    }
-
-    return url.toString().replace(/\/$/, '')
-  } catch {
-    return input.replace(/\/$/, '')
-  }
-}
-
-const API_URL = normalizeApiUrl(import.meta.env.VITE_API_URL, RUNTIME_HOST)
+const API_URL = resolveApiBaseUrl({
+  rawApiUrl: import.meta.env.VITE_API_URL,
+  rootDomain: ROOT_DOMAIN,
+  runtimeHost: RUNTIME_HOST,
+  defaultApiHost: DEFAULT_API_HOST
+})
 const TENANT_SLUG = import.meta.env.VITE_TENANT_SLUG || deriveTenantSlug(RUNTIME_HOST)
 export const CURRENT_TENANT_SLUG = TENANT_SLUG
 export const buildApiUrl = (path = '') => {

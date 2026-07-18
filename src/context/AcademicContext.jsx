@@ -18,7 +18,9 @@ const ACADEMIC_CONTEXT_REFRESH_MS = 60 * 1000
 export function AcademicContextProvider({ children }) {
   const settings = useAuthStore((state) => state.settings)
   const profile = useAuthStore((state) => state.profile)
+  const authState = useAuthStore((state) => state.authState)
   const tenantId = String(profile?.tenant_id || '')
+  const canLoadAcademicContext = authState === 'authenticated' && Boolean(profile?.id && tenantId)
   const fallback = useMemo(
     () => resolveAcademicPeriod(settings || {}),
     [settings]
@@ -33,6 +35,11 @@ export function AcademicContextProvider({ children }) {
   }, [tenantId])
 
   useEffect(() => {
+    if (!canLoadAcademicContext) {
+      setActiveAcademicPeriod(fallback)
+      return undefined
+    }
+
     let cancelled = false
     const load = async () => {
       try {
@@ -65,7 +72,7 @@ export function AcademicContextProvider({ children }) {
       window.clearInterval(interval)
       window.removeEventListener('sismu:academic-context-updated', refresh)
     }
-  }, [fallback, tenantId])
+  }, [canLoadAcademicContext, fallback, tenantId])
 
   const setCorrectionSession = useCallback((session) => {
     const scopedSession = session ? { ...session, tenant_id: session.tenant_id || tenantId } : null

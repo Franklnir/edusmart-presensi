@@ -4,14 +4,14 @@ import { API_UNAUTHORIZED_EVENT, makeError } from './errors'
 import { executeWithRetry } from './retry'
 import { useAuthStore } from '../../store/useAuthStore'
 import { sanitizeObservabilityContext } from './sanitizer'
+import { buildApiUrl } from './url'
 
 export const DEFAULT_TIMEOUT_MS = 15000
 
 export const logFrontendError = (level, message, context = {}) => {
   if (context?.url && context.url.includes('/frontend-logs')) return
   try {
-    const API_URL = import.meta.env.VITE_API_URL || ''
-    const url = new URL('/api/v2/frontend-logs', API_URL).toString()
+    const url = buildApiUrl('/api/v2/frontend-logs')
     
     // The reporter call is its own HTTP request. Keep the failed request ID
     // inside sanitized context, but never reuse it as the transport ID.
@@ -92,11 +92,9 @@ export const apiClient = async (path, options = {}) => {
     // If we use same-site cookies, credentials must be 'include'
   }
 
-  // Assuming API URL from Vite env
-  const API_URL = import.meta.env.VITE_API_URL || ''
   let urlObj = null
   try {
-    urlObj = new URL(path, API_URL)
+    urlObj = new URL(buildApiUrl(path))
   } catch {
     urlObj = new URL(path, window.location.origin)
   }

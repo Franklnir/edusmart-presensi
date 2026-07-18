@@ -17,6 +17,7 @@ import {
   writeUserThemeLocal
 } from '../theme/userThemes'
 import { currentProfileService } from '../services/currentProfileService'
+import { isSuperAdminRuntimeHost } from '../lib/api/url'
 
 // Helper kecil biar konsisten
 const normalizeEmail = (email) => email.trim().toLowerCase()
@@ -1069,6 +1070,15 @@ export const useAuthStore = create((set, get) => ({
 
     const profile = profileOverride || get().profile
     if (profile?.role && profile.role !== 'admin') {
+      set({ isSuperAdmin: false, superAdminChecked: true })
+      return false
+    }
+
+    // /api/super/me is deliberately restricted to the dedicated platform
+    // admin host. A tenant admin is already authoritatively marked as
+    // non-super-admin by /api/auth/me, so probing this endpoint on every
+    // tenant refresh only creates a misleading 403 in DevTools and logs.
+    if (!isSuperAdminRuntimeHost()) {
       set({ isSuperAdmin: false, superAdminChecked: true })
       return false
     }
