@@ -394,4 +394,5 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes wrangler pages deploy dist \
-            --project-name "$CLOUDFLARE_PAGES_PROJECT_NAME"
+            --project-name "$CLOUDFLARE_PAGES_PROJECT_NAME" \
+            --branch main
