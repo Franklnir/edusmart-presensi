@@ -129,6 +129,7 @@ return [
                 )
             )
         ))),
+        'inventory_retries' => (int) env('APP_OBJECT_STORAGE_INVENTORY_RETRIES', 1),
     ],
 
     'evolution_api' => [

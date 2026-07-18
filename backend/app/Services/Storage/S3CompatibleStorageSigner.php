@@ -224,11 +224,29 @@ class S3CompatibleStorageSigner
             $query['continuation-token'] = $continuationToken;
         }
 
-        $signed = $this->signedRequest('GET', '', $query, [], $logicalBucket);
-        $response = Http::withHeaders($signed['headers'])
-            ->timeout(30)
-            ->connectTimeout(10)
-            ->get($signed['url']);
+        $maxRetries = (int) config('services.object_storage.inventory_retries', 1);
+        $lastException = null;
+
+        for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
+            try {
+                $signed = $this->signedRequest('GET', '', $query, [], $logicalBucket);
+                $response = Http::withHeaders($signed['headers'])
+                    ->timeout(15)
+                    ->connectTimeout(10)
+                    ->get($signed['url']);
+                $lastException = null;
+                break;
+            } catch (\Throwable $e) {
+                $lastException = $e;
+                if ($attempt < $maxRetries) {
+                    usleep(500 * 1000 * ($attempt + 1));
+                }
+            }
+        }
+
+        if ($lastException instanceof \Throwable) {
+            throw $lastException;
+        }
 
         if (! $response->successful()) {
             throw new \RuntimeException('Gagal membaca inventaris object storage (HTTP '.$response->status().').');

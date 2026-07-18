@@ -16,6 +16,7 @@ class CleanupUploadArtifactsCommand extends Command
     public function handle(CleanupUploadArtifacts $cleanup, UploadStorageProvider $provider): int
     {
         $startedAt = hrtime(true);
+
         if (! $provider->ready()) {
             Log::warning('api_v2_upload_cleanup', [
                 'provider' => $provider->name(),
@@ -28,7 +29,22 @@ class CleanupUploadArtifactsCommand extends Command
             return self::FAILURE;
         }
 
-        $counts = $cleanup->execute();
+        try {
+            $counts = $cleanup->execute();
+        } catch (\PDOException $e) {
+            if (str_contains($e->getMessage(), 'does not exist')) {
+                Log::warning('api_v2_upload_cleanup', [
+                    'provider' => $provider->name(),
+                    'outcome' => 'skipped',
+                    'failure_code' => 'UPLOAD_TABLE_MISSING',
+                    'duration_ms' => round(max(0, hrtime(true) - $startedAt) / 1_000_000, 2),
+                ]);
+                $this->warn('Tabel upload belum ada (migration race); cleanup dilewati.');
+
+                return self::SUCCESS;
+            }
+            throw $e;
+        }
         Log::log($counts['failed'] === 0 ? 'info' : 'warning', 'api_v2_upload_cleanup', [
             'provider' => $provider->name(),
             'outcome' => $counts['failed'] === 0 ? 'succeeded' : 'failed',
