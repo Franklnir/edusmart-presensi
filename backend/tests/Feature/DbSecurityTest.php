@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Contracts\UploadStorageProvider;
 use App\Models\User;
 use App\Support\AcademicPeriod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -132,10 +133,18 @@ class DbSecurityTest extends TestCase
     public function test_public_settings_endpoint_is_sanitized(): void
     {
         $tenantId = $this->defaultTenantId();
+        $storage = \Mockery::mock(UploadStorageProvider::class);
+        $storage->shouldReceive('signedUrl')
+            ->once()
+            ->with('logo_sekolah.png', 3600, 'profile-photos')
+            ->andReturn('https://objects.example.test/profile-photos/logo_sekolah.png?signature=test');
+        $this->app->instance(UploadStorageProvider::class, $storage);
 
         DB::table('settings')->insert([
             'tenant_id' => $tenantId,
             'nama_sekolah' => 'Sekolah Aman',
+            'logo_url' => 'logo_sekolah.png',
+            'logo_path' => 'legacy-logo.png',
             'email' => 'sekolah@example.com',
             'telepon' => '+628123456789',
             'alamat' => 'Jalan Rahasia',
@@ -155,6 +164,11 @@ class DbSecurityTest extends TestCase
 
         $this->assertIsArray($row);
         $this->assertSame('Sekolah Aman', $row['nama_sekolah'] ?? null);
+        $this->assertSame(
+            'https://objects.example.test/profile-photos/logo_sekolah.png?signature=test',
+            $row['logo_url'] ?? null
+        );
+        $this->assertNull($row['logo_path'] ?? null);
         $this->assertArrayNotHasKey('id', $row);
         $this->assertArrayNotHasKey('email', $row);
         $this->assertArrayNotHasKey('telepon', $row);
