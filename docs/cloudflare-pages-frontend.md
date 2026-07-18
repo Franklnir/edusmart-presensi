@@ -61,6 +61,8 @@ Secrets:
 Variables:
 
 - `CLOUDFLARE_PAGES_PROJECT_NAME`
+- `CLOUDFLARE_PAGES_PRODUCTION_BRANCH` (opsional, default `main`)
+- `CLOUDFLARE_PAGES_LEGACY_LIVE_PROJECT` (set `true` hanya selama apex masih terikat ke project legacy)
 - `CLOUDFLARE_PAGES_BACKEND_ORIGIN` (contoh `https://origin.sismu.biz.id`)
 - `CLOUDFLARE_PAGES_PLATFORM_API_HOST` (contoh `sismu.biz.id`)
 - `VITE_API_URL`

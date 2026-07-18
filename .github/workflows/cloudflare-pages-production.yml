@@ -51,6 +51,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }}
+      CLOUDFLARE_PAGES_PRODUCTION_BRANCH: ${{ vars.CLOUDFLARE_PAGES_PRODUCTION_BRANCH || 'main' }}
+      CLOUDFLARE_PAGES_LEGACY_LIVE_PROJECT: ${{ vars.CLOUDFLARE_PAGES_LEGACY_LIVE_PROJECT || 'false' }}
       CLOUDFLARE_PAGES_BACKEND_ORIGIN: ${{ vars.CLOUDFLARE_PAGES_BACKEND_ORIGIN }}
       CLOUDFLARE_PAGES_EDGE_PROXY_SECRET: ${{ secrets.CLOUDFLARE_PAGES_EDGE_PROXY_SECRET }}
       CLOUDFLARE_PAGES_PLATFORM_API_HOST: ${{ vars.CLOUDFLARE_PAGES_PLATFORM_API_HOST }}
@@ -94,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_PAGES_EDGE_PROXY_SECRET CLOUDFLARE_PAGES_PROJECT_NAME CLOUDFLARE_PAGES_BACKEND_ORIGIN CLOUDFLARE_PAGES_PLATFORM_API_HOST VITE_API_URL VITE_ROOT_DOMAIN; do
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_PAGES_EDGE_PROXY_SECRET CLOUDFLARE_PAGES_PROJECT_NAME CLOUDFLARE_PAGES_PRODUCTION_BRANCH CLOUDFLARE_PAGES_BACKEND_ORIGIN CLOUDFLARE_PAGES_PLATFORM_API_HOST VITE_API_URL VITE_ROOT_DOMAIN; do
             if [ -z "${!name:-}" ]; then
               echo "::error title=Missing Cloudflare secret::${name} is required"
               missing=1
@@ -110,9 +112,17 @@ jobs:
             esac
           done
           case "$CLOUDFLARE_PAGES_PROJECT_NAME" in
-            *staging*|*test*|*preview*)
-              echo "::error title=Unsafe production project::Production Cloudflare cannot target a staging, test, or preview project"
+            *test*|*preview*)
+              echo "::error title=Unsafe production project::Production Cloudflare cannot target a test or preview project"
               missing=1
+              ;;
+            *staging*)
+              if [ "$CLOUDFLARE_PAGES_LEGACY_LIVE_PROJECT" != "true" ] || \
+                 [ "$CLOUDFLARE_PAGES_PROJECT_NAME" != "sismu-frontend-staging" ] || \
+                 [ "$CLOUDFLARE_PAGES_PRODUCTION_BRANCH" != "staging-cloudflare" ]; then
+                echo "::error title=Unsafe legacy live project::The legacy Pages target must be explicitly acknowledged with its exact production branch"
+                missing=1
+              fi
               ;;
           esac
           exit "$missing"
@@ -387,7 +397,7 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes wrangler pages project create "$CLOUDFLARE_PAGES_PROJECT_NAME" \
-            --production-branch main \
+            --production-branch "$CLOUDFLARE_PAGES_PRODUCTION_BRANCH" \
             || true
 
       - name: Deploy to Cloudflare Pages
@@ -395,4 +405,4 @@ jobs:
           set -euo pipefail
           npx --yes wrangler pages deploy dist \
             --project-name "$CLOUDFLARE_PAGES_PROJECT_NAME" \
-            --branch main
+            --branch "$CLOUDFLARE_PAGES_PRODUCTION_BRANCH"
