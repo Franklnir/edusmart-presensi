@@ -73,6 +73,7 @@ jobs:
       VITE_USE_CLASSES_API_V2: "true"
       VITE_USE_ATTENDANCE_API_V2: "true"
       VITE_USE_ANNOUNCEMENTS_API_V2: "true"
+      VITE_USE_EXTRACURRICULAR_API_V2: "true"
       VITE_USE_GRADES_API_V2: "true"
       VITE_USE_REPORT_CARDS_API_V2: "true"
 
@@ -157,6 +158,7 @@ jobs:
             echo "classes_v2=$VITE_USE_CLASSES_API_V2"
             echo "attendance_v2=$VITE_USE_ATTENDANCE_API_V2"
             echo "announcements_v2=$VITE_USE_ANNOUNCEMENTS_API_V2"
+            echo "extracurricular_v2=$VITE_USE_EXTRACURRICULAR_API_V2"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Add Cloudflare Pages headers, backend proxy, and SPA fallback
