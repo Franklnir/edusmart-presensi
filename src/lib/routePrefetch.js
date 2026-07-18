@@ -41,6 +41,7 @@ const routeLoaders = {
   '/admin/storage': () => import('../pages/admin/StorageManager'),
   '/admin/permission-admin': () => import('../pages/admin/PermissionAdmin'),
   '/admin/pengaturan': () => import('../pages/admin/pengaturan'),
+  '/admin/monitor-log': () => import('../pages/admin/MonitorLog'),
   '/admin/monitoring': () => import('../pages/admin/SuperMonitoring'),
   '/admin/background-job': () => import('../pages/admin/SuperBackgroundJobs'),
   '/admin/monitoring-server': () => import('../pages/admin/SuperServerMonitoring'),

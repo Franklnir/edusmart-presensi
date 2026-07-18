@@ -13,17 +13,7 @@
     />
     <meta name="theme-color" content="#2563eb" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <script>
-      window.addEventListener('vite:preloadError', (event) => {
-        if (!sessionStorage.getItem('vite-reload-fallback')) {
-          sessionStorage.setItem('vite-reload-fallback', 'true');
-          window.location.reload();
-        }
-      });
-      window.addEventListener('load', () => {
-        sessionStorage.removeItem('vite-reload-fallback');
-      });
-    </script>
+    <script src="/preload-recovery.js"></script>
   </head>
   <body class="bg-gray-50">
     <div id="root"></div>
