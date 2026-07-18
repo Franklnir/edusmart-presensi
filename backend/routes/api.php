@@ -53,6 +53,9 @@ Route::get('/internal/tls/authorize', [InfrastructureController::class, 'authori
 Route::get('/public/settings', [PublicSettingsController::class, 'show'])
     ->middleware('throttle:api')
     ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
+Route::get('/public/logo', [PublicSettingsController::class, 'logo'])
+    ->middleware('throttle:api')
+    ->withoutMiddleware([EnsureTenantMatchesProfile::class]);
 
 Route::post('/observability/web-vitals', [WebVitalsController::class, 'store'])
     ->middleware('throttle:api')

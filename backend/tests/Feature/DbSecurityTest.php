@@ -10,6 +10,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -164,10 +165,7 @@ class DbSecurityTest extends TestCase
 
         $this->assertIsArray($row);
         $this->assertSame('Sekolah Aman', $row['nama_sekolah'] ?? null);
-        $this->assertSame(
-            'https://objects.example.test/profile-photos/logo_sekolah.png?signature=test',
-            $row['logo_url'] ?? null
-        );
+        $this->assertSame('http://localhost/api/public/logo', $row['logo_url'] ?? null);
         $this->assertNull($row['logo_path'] ?? null);
         $this->assertArrayNotHasKey('id', $row);
         $this->assertArrayNotHasKey('email', $row);
@@ -178,6 +176,47 @@ class DbSecurityTest extends TestCase
         $this->assertArrayNotHasKey('manual_jam_masuk_selesai', $row);
         $this->assertArrayNotHasKey('admin_lock_enabled', $row);
         $this->assertArrayNotHasKey('registrasi_admin_aktif', $row);
+
+        Http::fake([
+            'https://objects.example.test/*' => Http::response('tenant-logo-bytes', 200, [
+                'Content-Type' => 'image/png',
+            ]),
+        ]);
+
+        $this->get('/api/public/logo')
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png')
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->assertContent('tenant-logo-bytes');
+    }
+
+    public function test_public_logo_falls_back_when_configured_object_is_missing(): void
+    {
+        $tenantId = $this->defaultTenantId();
+        $storage = \Mockery::mock(UploadStorageProvider::class);
+        $storage->shouldReceive('signedUrl')
+            ->once()
+            ->with('missing-logo.png', 3600, 'profile-photos')
+            ->andReturn('https://objects.example.test/profile-photos/missing-logo.png?signature=test');
+        $this->app->instance(UploadStorageProvider::class, $storage);
+
+        DB::table('settings')->insert([
+            'tenant_id' => $tenantId,
+            'nama_sekolah' => 'Sekolah Aman',
+            'logo_url' => 'missing-logo.png',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://objects.example.test/*' => Http::response('', 404),
+        ]);
+
+        $this->get('/api/public/logo')
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png')
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->assertContent(file_get_contents(public_path('logo-sismu.png')));
     }
 
     public function test_authenticated_non_admin_settings_select_is_sanitized(): void
