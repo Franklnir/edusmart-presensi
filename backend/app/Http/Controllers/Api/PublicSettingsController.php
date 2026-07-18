@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Contracts\UploadStorageProvider;
+use App\Support\Tenancy\TenantDomainService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -32,7 +33,8 @@ class PublicSettingsController extends ApiController
     ];
 
     public function __construct(
-        private readonly UploadStorageProvider $storage
+        private readonly UploadStorageProvider $storage,
+        private readonly TenantDomainService $tenantDomainService
     ) {}
 
     public function show(Request $request)
@@ -130,7 +132,12 @@ class PublicSettingsController extends ApiController
             return null;
         }
 
-        return rtrim($request->getSchemeAndHttpHost(), '/').'/api/public/logo';
+        $publicHost = $this->tenantDomainService->trustedRequestHost($request);
+        if ($publicHost === '') {
+            return null;
+        }
+
+        return $this->tenantDomainService->publicScheme().'://'.$publicHost.'/api/public/logo';
     }
 
     private function tenantLogoValue(Request $request): ?string

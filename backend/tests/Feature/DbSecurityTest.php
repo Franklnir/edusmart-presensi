@@ -165,7 +165,7 @@ class DbSecurityTest extends TestCase
 
         $this->assertIsArray($row);
         $this->assertSame('Sekolah Aman', $row['nama_sekolah'] ?? null);
-        $this->assertSame('http://localhost/api/public/logo', $row['logo_url'] ?? null);
+        $this->assertSame('https://localhost/api/public/logo', $row['logo_url'] ?? null);
         $this->assertNull($row['logo_path'] ?? null);
         $this->assertArrayNotHasKey('id', $row);
         $this->assertArrayNotHasKey('email', $row);
